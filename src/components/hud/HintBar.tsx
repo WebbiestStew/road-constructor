@@ -17,9 +17,9 @@ export default function HintBar() {
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
-      <div className="hud-panel flex items-center gap-2 rounded-full px-4 py-2 text-[11px] text-zinc-300">
+      <div className="hud-panel flex items-center gap-2 rounded-full px-4 py-2 text-[11px] text-zinc-700">
         <span>{text}</span>
-        <span className="text-zinc-600">&middot;</span>
+        <span className="text-zinc-400">&middot;</span>
         <span className="whitespace-nowrap text-zinc-500">right-drag orbit &middot; middle-drag pan &middot; scroll zoom</span>
       </div>
     </div>

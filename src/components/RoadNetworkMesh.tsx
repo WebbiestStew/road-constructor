@@ -2,27 +2,30 @@
 
 import { useMemo } from "react";
 import * as THREE from "three";
+import { Html } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { ContractStatus, Edge3D } from "@/sim/types";
+import { badgeColorForIndex } from "./hud/badgeColors";
 import {
   buildAsphaltRibbon,
   buildDashedStripe,
   buildJerseyBarrier,
+  buildLaneArrows,
   buildSolidStripe,
   computePierDescriptors,
   type PierDescriptor,
 } from "./roadGeometry";
 
-const ASPHALT_COLOR = "#2a2a2e";
-const ASPHALT_SELECTED_COLOR = "#3a4a5e";
-const ROUNDABOUT_COLOR = "#33383f";
-const ROUNDABOUT_SELECTED_COLOR = "#3d4a5e";
+const ASPHALT_COLOR = "#3a4155";
+const ASPHALT_SELECTED_COLOR = "#4a6a8f";
+const ROUNDABOUT_COLOR = "#434b60";
+const ROUNDABOUT_SELECTED_COLOR = "#4e6f92";
 const WHITE_COLOR = "#f4f4f5";
 const YELLOW_COLOR = "#eab308";
-const BARRIER_COLOR = "#8d8d93";
-const PIER_COLOR = "#6b6b70";
+const BARRIER_COLOR = "#9a9aa0";
+const PIER_COLOR = "#75757c";
 const SHOULDER_FT = 4;
 
 interface StripeSpec {
@@ -57,6 +60,12 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
     stripes.push({ geometry: buildSolidStripe(edge, -(pavedHalfWidth + 1.7), 0.4), color: YELLOW_COLOR });
   }
 
+  if (edge.length > 90) {
+    for (let lane = 0; lane < edge.lanes; lane++) {
+      stripes.push({ geometry: buildLaneArrows(edge, lane), color: WHITE_COLOR });
+    }
+  }
+
   const barriers: THREE.BufferGeometry[] = [];
   if (edge.isFreeway) {
     const barrierOffset = pavedHalfWidth + SHOULDER_FT - 0.5;
@@ -71,37 +80,66 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
   return { ribbon, stripes, barriers, piers, startPoint, endPoint };
 }
 
-function ZoneMarker({ edge }: { edge: Edge3D; contract?: ContractStatus }) {
+function ZoneBadge({
+  edge,
+  badgeIndex,
+  typeIndex,
+  contract,
+}: {
+  edge: Edge3D;
+  badgeIndex: number;
+  typeIndex: number;
+  contract?: ContractStatus;
+}) {
   if (!edge.zone) return null;
+  const isEntry = edge.zone.type === "entry";
+  const p = edge.spline.getPointAt(isEntry ? 0 : 1);
+  const color = badgeColorForIndex(badgeIndex);
+  const label = isEntry ? `Entry ${typeIndex + 1}` : `Dest ${typeIndex + 1}`;
 
-  if (edge.zone.type === "entry") {
-    const p = edge.spline.getPointAt(0);
-    return (
-      <mesh position={[p.x, p.y + 14, p.z]} rotation={[Math.PI, 0, 0]}>
-        <coneGeometry args={[5, 12, 6]} />
-        <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.4} />
-      </mesh>
-    );
+  let statusColor: string | null = null;
+  if (!isEntry) {
+    statusColor = !contract || contract.sampleCount === 0 ? "#9ca3af" : contract.meetsThreshold ? "#22c55e" : "#ef4444";
   }
 
-  return null;
-}
-
-function DestinationMarker({ edge, contract }: { edge: Edge3D; contract?: ContractStatus }) {
-  if (edge.zone?.type !== "destination") return null;
-  const p = edge.spline.getPointAt(1);
-  const color = !contract || contract.sampleCount === 0 ? "#9ca3af" : contract.meetsThreshold ? "#22c55e" : "#ef4444";
   return (
-    <group position={[p.x, p.y, p.z]}>
-      <mesh position={[0, 8, 0]}>
-        <cylinderGeometry args={[0.6, 0.6, 16, 8]} />
-        <meshStandardMaterial color="#3f3f46" />
-      </mesh>
-      <mesh position={[0, 18, 0]}>
-        <coneGeometry args={[5, 10, 6]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.45} />
-      </mesh>
-    </group>
+    <Html position={[p.x, p.y, p.z]} style={{ pointerEvents: "none" }} zIndexRange={[10, 0]} occlude={false}>
+      <div style={{ position: "relative", transform: "translate(-50%, -100%)", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div
+          style={{
+            background: color,
+            color: "#fff",
+            fontSize: 11,
+            fontWeight: 700,
+            padding: "3px 9px",
+            borderRadius: 7,
+            whiteSpace: "nowrap",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+            border: "1.5px solid rgba(255,255,255,0.55)",
+            fontFamily: "var(--font-sans)",
+          }}
+        >
+          {label}
+        </div>
+        <div style={{ width: 2, height: 24, background: color }} />
+        {statusColor && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: -3,
+              left: "50%",
+              transform: "translateX(-50%)",
+              width: 9,
+              height: 9,
+              borderRadius: 999,
+              background: statusColor,
+              border: "1.5px solid white",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+            }}
+          />
+        )}
+      </div>
+    </Html>
   );
 }
 
@@ -117,7 +155,17 @@ function YieldMarker({ edge }: { edge: Edge3D }) {
   );
 }
 
-function EdgeGroup({ edge, contract }: { edge: Edge3D; contract?: ContractStatus }) {
+function EdgeGroup({
+  edge,
+  contract,
+  badgeIndex,
+  typeIndex,
+}: {
+  edge: Edge3D;
+  contract?: ContractStatus;
+  badgeIndex?: number;
+  typeIndex?: number;
+}) {
   const geometries = useMemo(() => buildEdgeGeometries(edge), [edge]);
   const isSelected = useEditorStore(
     (s) => s.selection?.kind === "edge" && s.selection.id === edge.id
@@ -197,8 +245,9 @@ function EdgeGroup({ edge, contract }: { edge: Edge3D; contract?: ContractStatus
         );
       })}
 
-      <ZoneMarker edge={edge} contract={contract} />
-      <DestinationMarker edge={edge} contract={contract} />
+      {edge.zone && badgeIndex !== undefined && typeIndex !== undefined && (
+        <ZoneBadge edge={edge} badgeIndex={badgeIndex} typeIndex={typeIndex} contract={contract} />
+      )}
     </group>
   );
 }
@@ -226,15 +275,36 @@ export default function RoadNetworkMesh({ contracts }: { contracts?: ContractSta
     return set;
   }, [network]);
 
+  const badgeIndexByEdgeId = useMemo(() => {
+    const map = new Map<string, number>();
+    let colorIdx = 0;
+    for (const edge of network.edges) {
+      if (edge.zone) map.set(edge.id, colorIdx++);
+    }
+    return map;
+  }, [network]);
+
+  const typeIndexByEdgeId = useMemo(() => {
+    const map = new Map<string, number>();
+    let entryIdx = 0;
+    let destIdx = 0;
+    for (const edge of network.edges) {
+      if (edge.zone?.type === "entry") map.set(edge.id, entryIdx++);
+      else if (edge.zone?.type === "destination") map.set(edge.id, destIdx++);
+    }
+    return map;
+  }, [network]);
+
   return (
     <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.15, 0]} receiveShadow>
-        <planeGeometry args={[30000, 30000]} />
-        <meshStandardMaterial color="#1c1c20" roughness={1} metalness={0} />
-      </mesh>
-
       {network.edges.map((edge) => (
-        <EdgeGroup key={edge.id} edge={edge} contract={contractsByEdgeId.get(edge.id)} />
+        <EdgeGroup
+          key={edge.id}
+          edge={edge}
+          contract={contractsByEdgeId.get(edge.id)}
+          badgeIndex={badgeIndexByEdgeId.get(edge.id)}
+          typeIndex={typeIndexByEdgeId.get(edge.id)}
+        />
       ))}
 
       {network.edges

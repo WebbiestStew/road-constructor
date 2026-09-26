@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #16161a;
-  --foreground: #e4e4e7;
+  --background: #cdc4a0;
+  --foreground: #2b2a22;
   --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -26,15 +26,13 @@ body {
   overflow: hidden;
 }
 
-/* Frosted glass panel used by every floating HUD surface. */
+/* Solid "paper map" card used by every floating HUD surface. */
 .hud-panel {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background: linear-gradient(180deg, rgba(30, 30, 35, 0.82), rgba(20, 20, 24, 0.82));
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: #f3ede0;
+  border: 1px solid #c9bd9c;
   box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    0 6px 18px rgba(43, 38, 20, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
 .hud-scrollbar::-webkit-scrollbar {
@@ -42,7 +40,7 @@ body {
 }
 
 .hud-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(43, 38, 20, 0.2);
   border-radius: 4px;
 }
 
@@ -52,9 +50,9 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 0.75rem;
-  color: rgb(212 212 216);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #4b452f;
+  background: rgba(43, 38, 20, 0.05);
+  border: 1px solid rgba(43, 38, 20, 0.08);
   transition:
     background-color 120ms ease,
     color 120ms ease,
@@ -63,8 +61,8 @@ body {
 }
 
 .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: white;
+  background: rgba(43, 38, 20, 0.12);
+  color: #201d13;
 }
 
 .icon-btn:active {
@@ -72,10 +70,12 @@ body {
 }
 
 .icon-btn[data-active="true"] {
-  background: linear-gradient(180deg, #38bdf8, #0ea5e9);
-  border-color: rgba(56, 189, 248, 0.6);
-  color: #04222f;
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35), 0 4px 14px rgba(14, 165, 233, 0.35);
+  background: linear-gradient(180deg, #f59e0b, #ea8006);
+  border-color: rgba(234, 128, 6, 0.5);
+  color: #2c1400;
+  box-shadow:
+    0 0 0 1px rgba(234, 128, 6, 0.3),
+    0 4px 12px rgba(234, 128, 6, 0.3);
 }
 
 .icon-btn:disabled {
@@ -88,7 +88,7 @@ input[type="range"] {
   appearance: none;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(43, 38, 20, 0.15);
 }
 
 input[type="range"]::-webkit-slider-thumb {
@@ -97,16 +97,18 @@ input[type="range"]::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #38bdf8;
+  background: #0ea5e9;
   cursor: pointer;
-  border: 2px solid #0c4a6e;
+  border: 2px solid #f3ede0;
+  box-shadow: 0 0 0 1px rgba(43, 38, 20, 0.25);
 }
 
 input[type="range"]::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #38bdf8;
+  background: #0ea5e9;
   cursor: pointer;
-  border: 2px solid #0c4a6e;
+  border: 2px solid #f3ede0;
+  box-shadow: 0 0 0 1px rgba(43, 38, 20, 0.25);
 }

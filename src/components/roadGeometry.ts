@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { edgePointAt, edgeRightVectorAt } from "@/sim/laneGeometry";
+import { edgePointAt, edgeRightVectorAt, laneOffsetFt } from "@/sim/laneGeometry";
 import type { Edge3D } from "@/sim/types";
 
 /** A single point of a 2D cross-section profile: x = lateral (along the road's "right" vector), y = vertical (world up). */
@@ -147,6 +147,56 @@ export function buildDashedStripe(
       positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
       positions.push(a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
     }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** Builds periodic painted direction-arrow chevrons down the centerline of a single lane. */
+export function buildLaneArrows(
+  edge: Edge3D,
+  laneIndex: number,
+  spacingFt = 140,
+  lengthFt = 16,
+  widthFt = 5,
+  verticalOffsetFt = 0.04
+): THREE.BufferGeometry {
+  const totalLen = edge.length;
+  const tangentScratch = new THREE.Vector3();
+  const rightScratch = new THREE.Vector3();
+  const pointScratch = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  const laneOffset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt);
+
+  const positions: number[] = [];
+  const startOffset = spacingFt * 0.5;
+
+  for (let s = startOffset; s < totalLen - lengthFt; s += spacingFt) {
+    const tMid = clamp01((s + lengthFt / 2) / totalLen);
+    edgePointAt(edge, tMid, pointScratch);
+    edgeRightVectorAt(edge, tMid, tangentScratch, rightScratch);
+    const forward = tangentScratch;
+
+    const center = pointScratch
+      .clone()
+      .addScaledVector(rightScratch, laneOffset)
+      .addScaledVector(up, verticalOffsetFt);
+
+    const tip = center.clone().addScaledVector(forward, lengthFt / 2);
+    const backLeft = center
+      .clone()
+      .addScaledVector(forward, -lengthFt / 2)
+      .addScaledVector(rightScratch, -widthFt / 2);
+    const backRight = center
+      .clone()
+      .addScaledVector(forward, -lengthFt / 2)
+      .addScaledVector(rightScratch, widthFt / 2);
+
+    positions.push(tip.x, tip.y, tip.z, backLeft.x, backLeft.y, backLeft.z, backRight.x, backRight.y, backRight.z);
   }
 
   const geometry = new THREE.BufferGeometry();

@@ -8,7 +8,6 @@ import {
   IconCar,
   IconClock,
   IconClose,
-  IconCoin,
   IconFlag,
   IconGauge,
   IconRoundabout,
@@ -17,11 +16,6 @@ import {
 } from "./icons";
 
 const MAX_DEMAND = 2400;
-
-function formatMoney(n: number): string {
-  const sign = n < 0 ? "-" : "";
-  return `${sign}$${Math.abs(Math.round(n)).toLocaleString()}`;
-}
 
 function formatSimTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -41,15 +35,15 @@ function StatCard({
   unit?: string;
 }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-xl bg-white/5 px-3 py-2.5">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/5 text-sky-400">
+    <div className="flex items-center gap-2.5 rounded-xl bg-black/[0.03] px-3 py-2.5">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-sky-600 shadow-sm">
         <Icon className="h-3.5 w-3.5" />
       </span>
       <div className="flex min-w-0 flex-col">
         <span className="truncate text-[9.5px] uppercase tracking-wide text-zinc-500">{label}</span>
-        <span className="text-base font-semibold leading-tight text-zinc-50 tabular-nums">
+        <span className="text-base font-semibold leading-tight text-zinc-900 tabular-nums">
           {value}
-          {unit ? <span className="ml-1 text-[10px] font-normal text-zinc-400">{unit}</span> : null}
+          {unit ? <span className="ml-1 text-[10px] font-normal text-zinc-500">{unit}</span> : null}
         </span>
       </div>
     </div>
@@ -87,38 +81,38 @@ function SelectionInspector() {
     return (
       <div className="hud-panel flex flex-col gap-3 rounded-2xl p-3.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-zinc-100">Road segment</span>
-          <button type="button" onClick={() => setSelection(null)} className="text-zinc-500 hover:text-zinc-200">
+          <span className="text-xs font-semibold text-zinc-800">Road segment</span>
+          <button type="button" onClick={() => setSelection(null)} className="text-zinc-400 hover:text-zinc-700">
             <IconClose className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <div className="flex items-center justify-between text-xs text-zinc-300">
+        <div className="flex items-center justify-between text-xs text-zinc-600">
           <span>Lanes / direction</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setEdgeLanes(edge.id, edge.lanes - 1)}
-              className="flex h-6 w-6 items-center justify-center rounded-md bg-white/10 hover:bg-white/20"
+              className="flex h-6 w-6 items-center justify-center rounded-md bg-black/5 hover:bg-black/10"
             >
               −
             </button>
-            <span className="w-4 text-center tabular-nums">{edge.lanes}</span>
+            <span className="w-4 text-center tabular-nums text-zinc-900">{edge.lanes}</span>
             <button
               type="button"
               onClick={() => setEdgeLanes(edge.id, edge.lanes + 1)}
-              className="flex h-6 w-6 items-center justify-center rounded-md bg-white/10 hover:bg-white/20"
+              className="flex h-6 w-6 items-center justify-center rounded-md bg-black/5 hover:bg-black/10"
             >
               +
             </button>
           </div>
         </div>
 
-        <label className="flex items-center justify-between text-xs text-zinc-300">
+        <label className="flex items-center justify-between text-xs text-zinc-600">
           <span>One-way</span>
           <input
             type="checkbox"
-            className="accent-sky-500"
+            className="accent-sky-600"
             checked={isOneWay}
             onChange={(e) => setEdgeOneWay(edge.id, e.target.checked)}
           />
@@ -133,7 +127,7 @@ function SelectionInspector() {
                 type="button"
                 onClick={() => setEdgeRoadClass(edge.id, c.id)}
                 className={`rounded-lg px-2 py-1 text-[11px] font-medium transition ${
-                  edge.roadClassId === c.id ? "bg-sky-500 text-white" : "bg-white/5 text-zinc-300 hover:bg-white/10"
+                  edge.roadClassId === c.id ? "bg-sky-600 text-white" : "bg-black/5 text-zinc-600 hover:bg-black/10"
                 }`}
               >
                 {c.label.split(" ")[0]}
@@ -148,7 +142,7 @@ function SelectionInspector() {
             deleteEdge(edge.id);
             setSelection(null);
           }}
-          className="rounded-lg bg-red-500/15 px-2.5 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/25"
+          className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-500/20"
         >
           Demolish (50% refund)
         </button>
@@ -168,8 +162,8 @@ function SelectionInspector() {
   return (
     <div className="hud-panel flex flex-col gap-3 rounded-2xl p-3.5">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-zinc-100">Junction</span>
-        <button type="button" onClick={() => setSelection(null)} className="text-zinc-500 hover:text-zinc-200">
+        <span className="text-xs font-semibold text-zinc-800">Junction</span>
+        <button type="button" onClick={() => setSelection(null)} className="text-zinc-400 hover:text-zinc-700">
           <IconClose className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -179,7 +173,7 @@ function SelectionInspector() {
           type="button"
           onClick={() => setNodeControl(node.id, undefined)}
           className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-medium transition ${
-            !isSignal ? "bg-sky-500 text-white" : "bg-white/5 text-zinc-300 hover:bg-white/10"
+            !isSignal ? "bg-sky-600 text-white" : "bg-black/5 text-zinc-600 hover:bg-black/10"
           }`}
         >
           <IconYield className="h-4 w-4" />
@@ -197,7 +191,7 @@ function SelectionInspector() {
             })
           }
           className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-medium transition ${
-            isSignal ? "bg-sky-500 text-white" : "bg-white/5 text-zinc-300 hover:bg-white/10"
+            isSignal ? "bg-sky-600 text-white" : "bg-black/5 text-zinc-600 hover:bg-black/10"
           }`}
         >
           <IconSignal className="h-4 w-4" />
@@ -215,7 +209,7 @@ function SelectionInspector() {
         type="button"
         disabled={legCount < 2}
         onClick={() => convertNodeToRoundabout(node.id)}
-        className="flex items-center justify-center gap-1.5 rounded-lg bg-sky-500/15 px-2.5 py-1.5 text-xs font-medium text-sky-300 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex items-center justify-center gap-1.5 rounded-lg bg-sky-600/10 px-2.5 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-600/20 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <IconRoundabout className="h-3.5 w-3.5" />
         Make roundabout
@@ -226,30 +220,21 @@ function SelectionInspector() {
 }
 
 function BuildInfo() {
-  const budget = useEditorStore((s) => s.budget);
   const clearNetwork = useEditorStore((s) => s.clearNetwork);
   const selection = useEditorStore((s) => s.selection);
 
+  if (!selection) return null;
+
   return (
     <div className="flex w-72 flex-col gap-3">
-      <div className="hud-panel flex items-center justify-between rounded-2xl p-3.5">
-        <span className="flex items-center gap-2 text-xs font-medium text-zinc-400">
-          <IconCoin className="h-4 w-4 text-amber-400" />
-          Budget
-        </span>
-        <span className={`text-base font-semibold tabular-nums ${budget < 0 ? "text-red-400" : "text-zinc-50"}`}>
-          {formatMoney(budget)}
-        </span>
-      </div>
-
-      {selection && <SelectionInspector />}
+      <SelectionInspector />
 
       <button
         type="button"
         onClick={() => {
           if (window.confirm("Clear the entire network? This cannot be undone.")) clearNetwork();
         }}
-        className="self-end text-[11px] text-zinc-600 underline decoration-dotted hover:text-zinc-400"
+        className="self-end text-[11px] text-zinc-500 underline decoration-dotted hover:text-zinc-700"
       >
         Clear network
       </button>
@@ -276,7 +261,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
       </div>
 
       {(entries.length === 0 || destinations.length === 0) && (
-        <p className="rounded-xl bg-amber-500/10 p-2.5 text-[11px] leading-snug text-amber-300">
+        <p className="rounded-xl bg-amber-500/15 p-2.5 text-[11px] leading-snug text-amber-800">
           Go back to Build, pick the Zone tool, and mark at least one road as an Entry and one as a Destination —
           traffic only flows once both exist.
         </p>
@@ -288,8 +273,8 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
             {entries.map((edge, i) => (
               <div key={edge.id} className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-300">Entry {i + 1}</span>
-                  <span className="font-medium text-zinc-100 tabular-nums">
+                  <span className="text-zinc-600">Entry {i + 1}</span>
+                  <span className="font-medium text-zinc-900 tabular-nums">
                     {edge.zone?.type === "entry" ? edge.zone.demandVehPerHour : 0} veh/h
                   </span>
                 </div>
@@ -320,18 +305,21 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
               const ok = status?.meetsThreshold ?? false;
               const hasData = (status?.sampleCount ?? 0) > 0;
               return (
-                <div key={edge.id} className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs">
-                  <span className="flex items-center gap-1.5 text-zinc-300">
+                <div
+                  key={edge.id}
+                  className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs"
+                >
+                  <span className="flex items-center gap-1.5 text-zinc-600">
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
-                        !hasData ? "bg-zinc-500" : ok ? "bg-emerald-400" : "bg-red-400"
+                        !hasData ? "bg-zinc-400" : ok ? "bg-emerald-500" : "bg-red-500"
                       }`}
                     />
                     Destination {i + 1}
                   </span>
                   <span
                     className={`font-medium tabular-nums ${
-                      !hasData ? "text-zinc-500" : ok ? "text-emerald-400" : "text-red-400"
+                      !hasData ? "text-zinc-500" : ok ? "text-emerald-600" : "text-red-600"
                     }`}
                   >
                     {hasData ? `${status!.actualSpeedMph.toFixed(0)} / ${target} mph` : `target ${target} mph`}
@@ -343,7 +331,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
         </PanelSection>
       )}
 
-      <div className="border-t border-white/10 pt-2 text-[11px] text-zinc-600">
+      <div className="border-t border-black/10 pt-2 text-[11px] text-zinc-500">
         Total spawned: {metrics.spawnedTotal}
       </div>
     </div>
@@ -354,7 +342,7 @@ export default function InfoPanel({ sim }: { sim: UseTrafficSimulationReturn }) 
   const mode = useEditorStore((s) => s.mode);
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-4 z-20">
+    <div className="pointer-events-auto absolute right-4 top-20 z-20">
       {mode === "build" ? <BuildInfo /> : <SimulateInfo sim={sim} />}
     </div>
   );

@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
-import { Line } from "@react-three/drei";
+import { Html, Line } from "@react-three/drei";
 import { useEditorStore } from "@/state/editorStore";
-import { ELEVATION_BY_ID, ROAD_CLASS_LIST } from "@/sim/roadClasses";
+import { ELEVATION_BY_ID, ROAD_CLASSES, ROAD_CLASS_LIST, estimateEdgeCost } from "@/sim/roadClasses";
 
 const NODE_RADIUS_FT = 7;
 const NODE_HEIGHT_FT = 2;
@@ -21,6 +21,8 @@ export default function RoadEditor() {
   const nodes = useEditorStore((s) => s.nodes);
   const drawFromNodeId = useEditorStore((s) => s.drawFromNodeId);
   const selectedElevationId = useEditorStore((s) => s.selectedElevationId);
+  const selectedRoadClassId = useEditorStore((s) => s.selectedRoadClassId);
+  const twoWay = useEditorStore((s) => s.twoWay);
   const selection = useEditorStore((s) => s.selection);
 
   const [hoverPoint, setHoverPoint] = useState<[number, number, number] | null>(null);
@@ -94,6 +96,26 @@ export default function RoadEditor() {
 
   const drawFromNode = drawFromNodeId ? nodes.find((n) => n.id === drawFromNodeId) : null;
 
+  let dragInfo: { midpoint: [number, number, number]; lengthFt: number; costLabel: string } | null = null;
+  if (drawFromNode && hoverPoint) {
+    const dx = hoverPoint[0] - drawFromNode.position[0];
+    const dy = hoverPoint[1] - drawFromNode.position[1];
+    const dz = hoverPoint[2] - drawFromNode.position[2];
+    const lengthFt = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const roadClass = ROAD_CLASSES[selectedRoadClassId];
+    const costOneWay = estimateEdgeCost(selectedRoadClassId, selectedElevationId, lengthFt, roadClass.lanesPerDirection);
+    const totalCost = twoWay ? costOneWay * 2 : costOneWay;
+    dragInfo = {
+      midpoint: [
+        (drawFromNode.position[0] + hoverPoint[0]) / 2,
+        (drawFromNode.position[1] + hoverPoint[1]) / 2,
+        (drawFromNode.position[2] + hoverPoint[2]) / 2,
+      ],
+      lengthFt,
+      costLabel: `$${Math.round(totalCost).toLocaleString()}`,
+    };
+  }
+
   return (
     <group>
       <mesh
@@ -143,6 +165,27 @@ export default function RoadEditor() {
           transparent
           opacity={0.8}
         />
+      )}
+
+      {dragInfo && (
+        <Html position={dragInfo.midpoint} style={{ pointerEvents: "none" }} zIndexRange={[10, 0]}>
+          <div
+            style={{
+              transform: "translate(-50%, -140%)",
+              background: "#1c1c20",
+              color: "#f4f4f5",
+              fontSize: 11,
+              fontWeight: 600,
+              padding: "4px 8px",
+              borderRadius: 6,
+              whiteSpace: "nowrap",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+              fontFamily: "var(--font-sans)",
+            }}
+          >
+            {Math.round(dragInfo.lengthFt)} ft &middot; {dragInfo.costLabel}
+          </div>
+        </Html>
       )}
     </group>
   );
