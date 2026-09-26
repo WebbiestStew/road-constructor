@@ -19,6 +19,9 @@ import type {
   NodeSpec,
   ZoneSpec,
 } from "@/sim/types";
+import { loadAutosave, saveAutosave, type PersistedPayload } from "./persistence";
+import { playDemolish, playPlaceRoad } from "@/lib/sound";
+import type { ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
 export type EditorTool = "draw" | "delete" | "inspect" | "zone";
@@ -44,12 +47,24 @@ function reversePoints(points: [number, number, number][]): [number, number, num
   return [...points].reverse();
 }
 
+interface HistoryEntry {
+  nodes: NodeSpec[];
+  edges: EdgeSpec[];
+  budget: number;
+  nextNodeSeq: number;
+  nextEdgeSeq: number;
+}
+
+const MAX_HISTORY = 50;
+
 interface EditorState {
   mode: EditorMode;
   tool: EditorTool;
   selectedRoadClassId: RoadClassId;
   selectedElevationId: ElevationLevelId;
   twoWay: boolean;
+  heatmapEnabled: boolean;
+  setHeatmapEnabled: (v: boolean) => void;
 
   nodes: NodeSpec[];
   edges: EdgeSpec[];
@@ -62,6 +77,12 @@ interface EditorState {
 
   nextNodeSeq: number;
   nextEdgeSeq: number;
+
+  past: HistoryEntry[];
+  future: HistoryEntry[];
+  pushHistoryEntry: () => void;
+  undo: () => void;
+  redo: () => void;
 
   setMode: (mode: EditorMode) => void;
   setTool: (tool: EditorTool) => void;
@@ -98,11 +119,19 @@ interface EditorState {
 
   clearNetwork: () => void;
   getSnapshot: () => NetworkSnapshot;
+  exportPayload: () => PersistedPayload;
+  importPayload: (payload: PersistedPayload) => void;
+
+  activeScenarioId: string | null;
+  loadScenario: (scenario: ScenarioDef) => void;
+  exitScenario: () => void;
 }
 
 function findCounterpart(edges: EdgeSpec[], edge: EdgeSpec): EdgeSpec | undefined {
   return edges.find((e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId);
 }
+
+const autosaved = loadAutosave();
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   mode: "build",
@@ -110,18 +139,84 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selectedRoadClassId: "street",
   selectedElevationId: "ground",
   twoWay: true,
+  heatmapEnabled: false,
+  setHeatmapEnabled: (v) => set({ heatmapEnabled: v }),
 
-  nodes: [],
-  edges: [],
-  nodesById: new Map(),
-  edgesById: new Map(),
+  nodes: autosaved?.network.nodes ?? [],
+  edges: autosaved?.network.edges ?? [],
+  nodesById: new Map((autosaved?.network.nodes ?? []).map((n) => [n.id, n])),
+  edgesById: new Map((autosaved?.network.edges ?? []).map((e) => [e.id, e])),
 
-  budget: STARTING_BUDGET,
+  budget: autosaved?.budget ?? STARTING_BUDGET,
   selection: null,
   drawFromNodeId: null,
 
-  nextNodeSeq: 1,
-  nextEdgeSeq: 1,
+  nextNodeSeq: autosaved?.nextNodeSeq ?? 1,
+  nextEdgeSeq: autosaved?.nextEdgeSeq ?? 1,
+
+  past: [],
+  future: [],
+  pushHistoryEntry: () => {
+    const s = get();
+    const entry: HistoryEntry = {
+      nodes: s.nodes,
+      edges: s.edges,
+      budget: s.budget,
+      nextNodeSeq: s.nextNodeSeq,
+      nextEdgeSeq: s.nextEdgeSeq,
+    };
+    set((state) => ({ past: [...state.past.slice(-(MAX_HISTORY - 1)), entry], future: [] }));
+  },
+  undo: () => {
+    const s = get();
+    if (s.past.length === 0) return;
+    const prev = s.past[s.past.length - 1];
+    const currentEntry: HistoryEntry = {
+      nodes: s.nodes,
+      edges: s.edges,
+      budget: s.budget,
+      nextNodeSeq: s.nextNodeSeq,
+      nextEdgeSeq: s.nextEdgeSeq,
+    };
+    set({
+      nodes: prev.nodes,
+      edges: prev.edges,
+      nodesById: new Map(prev.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(prev.edges.map((e) => [e.id, e])),
+      budget: prev.budget,
+      nextNodeSeq: prev.nextNodeSeq,
+      nextEdgeSeq: prev.nextEdgeSeq,
+      past: s.past.slice(0, -1),
+      future: [...s.future, currentEntry],
+      selection: null,
+      drawFromNodeId: null,
+    });
+  },
+  redo: () => {
+    const s = get();
+    if (s.future.length === 0) return;
+    const next = s.future[s.future.length - 1];
+    const currentEntry: HistoryEntry = {
+      nodes: s.nodes,
+      edges: s.edges,
+      budget: s.budget,
+      nextNodeSeq: s.nextNodeSeq,
+      nextEdgeSeq: s.nextEdgeSeq,
+    };
+    set({
+      nodes: next.nodes,
+      edges: next.edges,
+      nodesById: new Map(next.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(next.edges.map((e) => [e.id, e])),
+      budget: next.budget,
+      nextNodeSeq: next.nextNodeSeq,
+      nextEdgeSeq: next.nextEdgeSeq,
+      past: [...s.past, currentEntry],
+      future: s.future.slice(0, -1),
+      selection: null,
+      drawFromNodeId: null,
+    });
+  },
 
   setMode: (mode) => set({ mode, drawFromNodeId: null }),
   setTool: (tool) => set({ tool, drawFromNodeId: null, selection: null }),
@@ -134,6 +229,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   cancelDrawChain: () => set({ drawFromNodeId: null }),
 
   createNodeAt: (position) => {
+    get().pushHistoryEntry();
     const id = `n${get().nextNodeSeq}`;
     const node: NodeSpec = { id, position };
     set((s) => {
@@ -166,7 +262,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const fromNode = state.nodesById.get(fromNodeId);
     if (!fromNode) return fromNodeId;
 
-    const targetNodeId = toNodeId ?? state.createNodeAt(toPosition);
+    let targetNodeId: string;
+    if (toNodeId) {
+      get().pushHistoryEntry();
+      targetNodeId = toNodeId;
+    } else {
+      targetNodeId = state.createNodeAt(toPosition);
+    }
     const targetNode = get().nodesById.get(targetNodeId)!;
 
     const roadClass = ROAD_CLASSES[state.selectedRoadClassId];
@@ -224,6 +326,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       };
     });
 
+    playPlaceRoad();
     return targetNodeId;
   },
 
@@ -284,6 +387,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   deleteEdge: (edgeId) => {
     const edge = get().edgesById.get(edgeId);
     if (!edge) return;
+    get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
     const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
@@ -294,10 +398,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       edgesById.delete(edgeId);
       return { edges, edgesById, budget: s.budget + cost * DEMOLISH_REFUND_FRACTION };
     });
+    playDemolish();
   },
 
   deleteNode: (nodeId) => {
     const connected = get().edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
+    if (connected.length === 0) get().pushHistoryEntry();
     for (const e of connected) get().deleteEdge(e.id);
     set((s) => {
       const nodes = s.nodes.filter((n) => n.id !== nodeId);
@@ -312,6 +418,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!edge) return;
     const clamped = Math.max(1, Math.min(6, Math.round(lanes)));
     if (clamped === edge.lanes) return;
+    get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
     const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
@@ -338,6 +445,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
 
     if (!counterpart) {
+      get().pushHistoryEntry();
       const node = state.nodesById.get(edge.fromNodeId);
       const toNode = state.nodesById.get(edge.toNodeId);
       const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
@@ -365,6 +473,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setEdgeRoadClass: (edgeId, roadClassId) => {
     const edge = get().edgesById.get(edgeId);
     if (!edge) return;
+    get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
     const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
@@ -389,6 +498,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   cycleEdgeZone: (edgeId) => {
     const edge = get().edgesById.get(edgeId);
     if (!edge) return;
+    get().pushHistoryEntry();
     let zone: ZoneSpec | undefined;
     if (!edge.zone) zone = { type: "entry", demandVehPerHour: 600 };
     else if (edge.zone.type === "entry") zone = { type: "destination", targetSpeedMph: 25 };
@@ -430,6 +540,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get();
     const node = state.nodesById.get(nodeId);
     if (!node) return;
+    get().pushHistoryEntry();
     let resolvedControl = control;
     if (control?.type === "signal") {
       const { groupA, groupB } = computeSignalPhaseGroups(nodeId, state.edges, state.nodesById);
@@ -451,6 +562,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const connected = state.edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
     if (connected.length === 0) return;
+    get().pushHistoryEntry();
 
     const legMap = new Map<string, EdgeSpec[]>();
     for (const e of connected) {
@@ -550,7 +662,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  clearNetwork: () =>
+  clearNetwork: () => {
+    get().pushHistoryEntry();
     set({
       nodes: [],
       edges: [],
@@ -561,10 +674,73 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       drawFromNodeId: null,
       nextNodeSeq: 1,
       nextEdgeSeq: 1,
-    }),
+    });
+  },
 
   getSnapshot: () => {
     const s = get();
     return { nodes: s.nodes, edges: s.edges } satisfies NetworkSnapshot;
   },
+
+  exportPayload: () => {
+    const s = get();
+    return {
+      version: 1,
+      network: { nodes: s.nodes, edges: s.edges },
+      budget: s.budget,
+      nextNodeSeq: s.nextNodeSeq,
+      nextEdgeSeq: s.nextEdgeSeq,
+    };
+  },
+
+  importPayload: (payload) => {
+    get().pushHistoryEntry();
+    set({
+      nodes: payload.network.nodes,
+      edges: payload.network.edges,
+      nodesById: new Map(payload.network.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(payload.network.edges.map((e) => [e.id, e])),
+      budget: payload.budget,
+      nextNodeSeq: payload.nextNodeSeq,
+      nextEdgeSeq: payload.nextEdgeSeq,
+      selection: null,
+      drawFromNodeId: null,
+    });
+  },
+
+  activeScenarioId: null,
+
+  loadScenario: (scenario) => {
+    set({
+      nodes: scenario.startingNetwork.nodes,
+      edges: scenario.startingNetwork.edges,
+      nodesById: new Map(scenario.startingNetwork.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(scenario.startingNetwork.edges.map((e) => [e.id, e])),
+      budget: scenario.startingBudget,
+      nextNodeSeq: 1,
+      nextEdgeSeq: 1,
+      selection: null,
+      drawFromNodeId: null,
+      mode: "build",
+      activeScenarioId: scenario.id,
+      past: [],
+      future: [],
+    });
+  },
+
+  exitScenario: () => set({ activeScenarioId: null }),
 }));
+
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+useEditorStore.subscribe((state) => {
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    saveAutosave({
+      version: 1,
+      network: { nodes: state.nodes, edges: state.edges },
+      budget: state.budget,
+      nextNodeSeq: state.nextNodeSeq,
+      nextEdgeSeq: state.nextEdgeSeq,
+    });
+  }, 600);
+});

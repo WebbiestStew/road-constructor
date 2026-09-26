@@ -188,3 +188,69 @@ export function IconRoad(props: IconProps) {
     </svg>
   );
 }
+
+export function IconUndo(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 10h9a5.5 5.5 0 0 1 0 11h-2" />
+      <path d="M9 5.5L4.5 10 9 14.5" />
+    </svg>
+  );
+}
+
+export function IconRedo(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M19 10h-9a5.5 5.5 0 0 0 0 11h2" />
+      <path d="M15 5.5L19.5 10 15 14.5" />
+    </svg>
+  );
+}
+
+export function IconDownload(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3.5v11.5" />
+      <path d="M7.5 11L12 15.5 16.5 11" />
+      <path d="M4.5 17.5v2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+
+export function IconUpload(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 20.5V9" />
+      <path d="M7.5 13L12 8.5 16.5 13" />
+      <path d="M4.5 17.5v2a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-2" />
+    </svg>
+  );
+}
+
+export function IconSpeakerOn(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4.5 9.5v5h3.2L13 19V5l-5.3 4.5z" />
+      <path d="M16.2 8.8a5 5 0 0 1 0 6.4" />
+      <path d="M18.6 6.4a8.5 8.5 0 0 1 0 11.2" />
+    </svg>
+  );
+}
+
+export function IconHeatmap(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3.5c1.6 2 2.4 3.6 2.4 5.1a2.4 2.4 0 1 1-4.8 0c0-.7.2-1.4.6-2.1-1.3 1.1-2.2 2.8-2.2 4.7a4 4 0 1 0 8 0c0-3-1.5-5.6-4-7.7z" />
+      <path d="M6 20.5h12" opacity={0.35} />
+    </svg>
+  );
+}
+
+export function IconSpeakerOff(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4.5 9.5v5h3.2L13 19V5l-5.3 4.5z" />
+      <path d="M16 9.5l4.5 5M20.5 9.5L16 14.5" />
+    </svg>
+  );
+}

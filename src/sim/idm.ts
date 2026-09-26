@@ -123,6 +123,8 @@ export interface MobilInputs {
   newFollowerAccelAfter: number;
   /** +1 if the candidate lane is to the right (bias favors this), -1 if left, 0 if neutral. */
   laneBiasDirection: -1 | 0 | 1;
+  /** Extra incentive (ft/s^2, added unscaled) for merging toward a required diverge lane — ramps up with proximity to the junction. Defaults to 0. */
+  extraBias?: number;
 }
 
 export interface MobilResult {
@@ -161,7 +163,8 @@ export function mobilEvaluate(
 
   const incentive =
     selfAdvantage +
-    bias -
+    bias +
+    (inputs.extraBias ?? 0) -
     politeness * (oldFollowerDisadvantage + newFollowerDisadvantage);
 
   return { shouldChange: incentive > changeThreshold, incentive };

@@ -36,6 +36,17 @@ export default function RoadEditor() {
         store.setSelection(null);
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) store.redo();
+        else store.undo();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        store.redo();
+        return;
+      }
       const idx = Number(e.key) - 1;
       if (Number.isInteger(idx) && idx >= 0 && idx < ROAD_CLASS_LIST.length) {
         store.setRoadClass(ROAD_CLASS_LIST[idx].id);

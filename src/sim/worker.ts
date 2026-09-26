@@ -21,6 +21,7 @@ import {
   mphToFtps,
   type ContractStatus,
   type Edge3D,
+  type EdgeSpeedRatio,
   type RoadNetwork,
   type VehicleState,
   type WorkerInMessage,
@@ -527,6 +528,21 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
   const oldLeader = idx < currentArr.length - 1 ? vehicles.get(currentArr[idx + 1])! : null;
   const oldFollower = idx > 0 ? vehicles.get(currentArr[idx - 1])! : null;
 
+  // If this edge diverges and the vehicle's actual next route edge requires a
+  // specific lane range, ramp up an extra merge incentive as the junction
+  // approaches so it tends to be in the right lane before it must transition.
+  let requiredDirection = 0;
+  let mergeUrgency = 0;
+  if (edge.divergeLaneRanges) {
+    const nextRouteEdgeId = v.routeEdgeIds[v.routeIndex + 1];
+    const range = nextRouteEdgeId ? edge.divergeLaneRanges.get(nextRouteEdgeId) : undefined;
+    if (range && (v.laneIndex < range[0] || v.laneIndex > range[1])) {
+      requiredDirection = v.laneIndex < range[0] ? 1 : -1;
+      const distanceToNode = edge.length - v.distanceAlongEdge;
+      mergeUrgency = clamp(1 - distanceToNode / 500, 0, 1);
+    }
+  }
+
   let bestLane = -1;
   let bestIncentive = -Infinity;
 
@@ -557,6 +573,9 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
     const oldFollowerAccelBefore = oldFollower ? pairAccel(oldFollower, oldFollower.distanceAlongEdge, v, edge) : 0;
     const oldFollowerAccelAfter = oldFollower ? pairAccel(oldFollower, oldFollower.distanceAlongEdge, oldLeader, edge) : 0;
 
+    const candidateDirection = candidateLane > v.laneIndex ? 1 : -1;
+    const extraBias = requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * 8 : 0;
+
     const inputs: MobilInputs = {
       currentAccel: v.accel,
       targetLaneAccel,
@@ -564,7 +583,8 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
       oldFollowerAccelAfter,
       newFollowerAccelBefore,
       newFollowerAccelAfter,
-      laneBiasDirection: candidateLane > v.laneIndex ? 1 : -1,
+      laneBiasDirection: candidateDirection,
+      extraBias,
     };
 
     const result = mobilEvaluate(inputs, MOBIL_DEFAULTS);
@@ -707,8 +727,13 @@ function speedColorInto(ratio: number, out: THREE.Color) {
   }
 }
 
+const edgeSpeedRatioSum = new Map<string, number>();
+const edgeSpeedRatioCount = new Map<string, number>();
+
 function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: number } {
   if (!network) return { activeCount: 0, avgSpeedFtS: 0 };
+  edgeSpeedRatioSum.clear();
+  edgeSpeedRatioCount.clear();
   let i = 0;
   let speedSum = 0;
   for (const v of vehicles.values()) {
@@ -726,13 +751,26 @@ function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: numb
     _matrix.toArray(buf.matrices, i * 16);
 
     const speedLimitFtps = mphToFtps(edge.speedLimitMph);
-    speedColorInto(v.speed / speedLimitFtps, _color);
+    const ratio = v.speed / speedLimitFtps;
+    speedColorInto(ratio, _color);
     _color.toArray(buf.colors, i * 3);
+
+    edgeSpeedRatioSum.set(edge.id, (edgeSpeedRatioSum.get(edge.id) ?? 0) + ratio);
+    edgeSpeedRatioCount.set(edge.id, (edgeSpeedRatioCount.get(edge.id) ?? 0) + 1);
 
     speedSum += v.speed;
     i++;
   }
   return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0 };
+}
+
+function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
+  const result: EdgeSpeedRatio[] = [];
+  for (const [edgeId, sum] of edgeSpeedRatioSum) {
+    const count = edgeSpeedRatioCount.get(edgeId) ?? 1;
+    result.push([edgeId, sum / count]);
+  }
+  return result;
 }
 
 function postSnapshot() {
@@ -750,6 +788,7 @@ function postSnapshot() {
     throughputLastMinute: despawnTimestamps.length,
     spawnedTotal,
     contracts: computeContracts(),
+    edgeSpeedRatios: computeEdgeSpeedRatios(),
   };
   ctx.postMessage(message, [matricesBuffer, colorsBuffer]);
 }

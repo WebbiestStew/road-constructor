@@ -1,16 +1,24 @@
 "use client";
 
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
+import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import BudgetBar from "./hud/BudgetBar";
 import Confetti from "./hud/Confetti";
 import HintBar from "./hud/HintBar";
 import InfoPanel from "./hud/InfoPanel";
 import Minimap from "./hud/Minimap";
 import PlayButton from "./hud/PlayButton";
+import ScenarioHud from "./hud/ScenarioHud";
 import ToolDock from "./hud/ToolDock";
 import TopBar from "./hud/TopBar";
 
-export default function SimControls({ sim }: { sim: UseTrafficSimulationReturn }) {
+export default function SimControls({
+  sim,
+  scenarioRunner,
+}: {
+  sim: UseTrafficSimulationReturn;
+  scenarioRunner: UseScenarioRunnerReturn;
+}) {
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
       <TopBar sim={sim} />
@@ -21,6 +29,7 @@ export default function SimControls({ sim }: { sim: UseTrafficSimulationReturn }
       <HintBar />
       <Minimap />
       <Confetti sim={sim} />
+      <ScenarioHud runner={scenarioRunner} />
     </div>
   );
 }

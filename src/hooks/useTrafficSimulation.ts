@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ContractStatus, WorkerInMessage, WorkerOutMessage } from "@/sim/types";
+import type { ContractStatus, EdgeSpeedRatio, WorkerInMessage, WorkerOutMessage } from "@/sim/types";
 import { ftpsToMph } from "@/sim/types";
 import { useEditorStore } from "@/state/editorStore";
 
@@ -19,6 +19,7 @@ export interface SimMetricsState {
   simTime: number;
   spawnedTotal: number;
   contracts: ContractStatus[];
+  edgeSpeedRatios: EdgeSpeedRatio[];
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -28,6 +29,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   simTime: 0,
   spawnedTotal: 0,
   contracts: [],
+  edgeSpeedRatios: [],
 };
 
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
@@ -103,6 +105,7 @@ export function useTrafficSimulation() {
             simTime: msg.simTime,
             spawnedTotal: msg.spawnedTotal,
             contracts: msg.contracts,
+            edgeSpeedRatios: msg.edgeSpeedRatios,
           });
         }
       }

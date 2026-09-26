@@ -113,6 +113,15 @@ export interface Edge3D {
   isRoundaboutRing: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
+  /**
+   * When this edge diverges into 2+ distinct next edges, the inclusive
+   * [minLane, maxLane] range of lanes assigned to reach each one — lanes
+   * ordered left-to-right by exit heading. Null when there's only one
+   * next edge (no assignment needed).
+   */
+  divergeLaneRanges: Map<string, [number, number]> | null;
+  /** Per-lane turn direction in [-1, 1] (negative = left, positive = right, 0 = straight) at this edge's diverge, for turn-arrow rendering. All zero when `divergeLaneRanges` is null. */
+  laneTurnBias: number[];
 }
 
 export interface RoadNetwork {
@@ -169,6 +178,9 @@ export interface ContractStatus {
   meetsThreshold: boolean;
 }
 
+/** Per-edge average speed as a fraction of that edge's speed limit (0 = gridlock, 1 = free-flow), for the traffic heatmap. */
+export type EdgeSpeedRatio = [edgeId: string, ratio: number];
+
 export type WorkerOutMessage =
   | { type: "ready" }
   | {
@@ -181,4 +193,5 @@ export type WorkerOutMessage =
       throughputLastMinute: number;
       spawnedTotal: number;
       contracts: ContractStatus[];
+      edgeSpeedRatios: EdgeSpeedRatio[];
     };

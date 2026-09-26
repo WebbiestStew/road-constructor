@@ -6,7 +6,7 @@ import { Html } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
-import type { ContractStatus, Edge3D } from "@/sim/types";
+import type { ContractStatus, Edge3D, EdgeSpeedRatio } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import {
   buildAsphaltRibbon,
@@ -27,6 +27,20 @@ const YELLOW_COLOR = "#eab308";
 const BARRIER_COLOR = "#9a9aa0";
 const PIER_COLOR = "#75757c";
 const SHOULDER_FT = 4;
+
+const HEATMAP_FREE = new THREE.Color("#22c55e");
+const HEATMAP_SLOW = new THREE.Color("#eab308");
+const HEATMAP_STOP = new THREE.Color("#ef4444");
+const _heatmapColor = new THREE.Color();
+
+function heatmapColorHex(ratio: number): string {
+  const r = Math.max(0, Math.min(1.2, ratio));
+  if (r >= 0.75) _heatmapColor.copy(HEATMAP_FREE);
+  else if (r <= 0.2) _heatmapColor.copy(HEATMAP_STOP);
+  else if (r <= 0.5) _heatmapColor.lerpColors(HEATMAP_STOP, HEATMAP_SLOW, (r - 0.2) / 0.3);
+  else _heatmapColor.lerpColors(HEATMAP_SLOW, HEATMAP_FREE, (r - 0.5) / 0.25);
+  return `#${_heatmapColor.getHexString()}`;
+}
 
 interface StripeSpec {
   geometry: THREE.BufferGeometry;
@@ -62,7 +76,8 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
 
   if (edge.length > 90) {
     for (let lane = 0; lane < edge.lanes; lane++) {
-      stripes.push({ geometry: buildLaneArrows(edge, lane), color: WHITE_COLOR });
+      const turnBias = edge.laneTurnBias[lane] ?? 0;
+      stripes.push({ geometry: buildLaneArrows(edge, lane, 140, 16, 5, 0.04, turnBias), color: WHITE_COLOR });
     }
   }
 
@@ -160,16 +175,21 @@ function EdgeGroup({
   contract,
   badgeIndex,
   typeIndex,
+  speedRatio,
 }: {
   edge: Edge3D;
   contract?: ContractStatus;
   badgeIndex?: number;
   typeIndex?: number;
+  speedRatio?: number;
 }) {
   const geometries = useMemo(() => buildEdgeGeometries(edge), [edge]);
   const isSelected = useEditorStore(
     (s) => s.selection?.kind === "edge" && s.selection.id === edge.id
   );
+  const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
+  const mode = useEditorStore((s) => s.mode);
+  const showHeatmap = heatmapEnabled && mode === "simulate" && speedRatio !== undefined && !edge.isRoundaboutRing;
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
@@ -201,9 +221,11 @@ function EdgeGroup({
               ? isSelected
                 ? ROUNDABOUT_SELECTED_COLOR
                 : ROUNDABOUT_COLOR
-              : isSelected
-                ? ASPHALT_SELECTED_COLOR
-                : ASPHALT_COLOR
+              : showHeatmap
+                ? heatmapColorHex(speedRatio!)
+                : isSelected
+                  ? ASPHALT_SELECTED_COLOR
+                  : ASPHALT_COLOR
           }
           roughness={0.95}
           metalness={0.05}
@@ -252,7 +274,13 @@ function EdgeGroup({
   );
 }
 
-export default function RoadNetworkMesh({ contracts }: { contracts?: ContractStatus[] }) {
+export default function RoadNetworkMesh({
+  contracts,
+  edgeSpeedRatios,
+}: {
+  contracts?: ContractStatus[];
+  edgeSpeedRatios?: EdgeSpeedRatio[];
+}) {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
 
@@ -263,6 +291,12 @@ export default function RoadNetworkMesh({ contracts }: { contracts?: ContractSta
     for (const c of contracts ?? []) map.set(c.edgeId, c);
     return map;
   }, [contracts]);
+
+  const speedRatioByEdgeId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [edgeId, ratio] of edgeSpeedRatios ?? []) map.set(edgeId, ratio);
+    return map;
+  }, [edgeSpeedRatios]);
 
   const ringNodeIds = useMemo(() => {
     const set = new Set<string>();
@@ -304,6 +338,7 @@ export default function RoadNetworkMesh({ contracts }: { contracts?: ContractSta
           contract={contractsByEdgeId.get(edge.id)}
           badgeIndex={badgeIndexByEdgeId.get(edge.id)}
           typeIndex={typeIndexByEdgeId.get(edge.id)}
+          speedRatio={speedRatioByEdgeId.get(edge.id)}
         />
       ))}
 

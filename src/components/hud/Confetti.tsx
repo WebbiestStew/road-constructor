@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
+import { playSuccessChime } from "@/lib/sound";
 
 interface Piece {
   id: number;
@@ -47,6 +48,7 @@ export default function Confetti({ sim }: { sim: UseTrafficSimulationReturn }) {
     // reacting to an external system's change, per React's effect guidance.
     const raf = requestAnimationFrame(() => {
       setPieces((prev) => [...prev, ...burst]);
+      playSuccessChime();
     });
 
     const timer = setTimeout(() => {

@@ -69,6 +69,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       zone: spec.zone,
       isRoundaboutRing: spec.isRoundaboutRing ?? false,
       nextEdgeIds: [],
+      divergeLaneRanges: null,
+      laneTurnBias: new Array(spec.lanes).fill(0),
     };
   });
 
@@ -79,7 +81,58 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       .map((e2) => e2.id);
   }
 
+  for (const edge of edges) {
+    assignDivergeLanes(edge, edgesById);
+  }
+
   return { nodesById, edges, edgesById };
+}
+
+const UP = new THREE.Vector3(0, 1, 0);
+
+/**
+ * When an edge has 2+ lanes and diverges into 2+ distinct next edges, splits
+ * its lanes into contiguous left-to-right ranges — one per next edge, ordered
+ * by exit heading — so vehicles have a specific lane (or lanes) to merge into
+ * ahead of the diverge, mirroring how real multi-lane roads sign turn/exit lanes.
+ */
+function assignDivergeLanes(edge: Edge3D, edgesById: Map<string, Edge3D>): void {
+  if (edge.lanes < 2 || edge.nextEdgeIds.length < 2) return;
+  const nextEdges = edge.nextEdgeIds
+    .map((id) => edgesById.get(id))
+    .filter((e): e is Edge3D => !!e);
+  if (nextEdges.length < 2) return;
+
+  const tangentEnd = edge.spline.getTangentAt(1);
+  const rightEnd = new THREE.Vector3().crossVectors(tangentEnd, UP).normalize();
+
+  const scored = nextEdges
+    .map((ne) => ({ id: ne.id, score: ne.spline.getTangentAt(0).dot(rightEnd) }))
+    .sort((a, b) => a.score - b.score);
+
+  const lanes = edge.lanes;
+  const count = scored.length;
+  const base = Math.floor(lanes / count);
+  let remainder = lanes - base * count;
+
+  const ranges = new Map<string, [number, number]>();
+  let cursor = 0;
+  for (const s of scored) {
+    let laneCount = base;
+    if (remainder > 0) {
+      laneCount += 1;
+      remainder -= 1;
+    }
+    if (laneCount < 1) laneCount = 1;
+    const start = cursor;
+    const end = Math.min(lanes - 1, cursor + laneCount - 1);
+    ranges.set(s.id, [start, end]);
+    for (let i = start; i <= end; i++) {
+      edge.laneTurnBias[i] = Math.max(-1, Math.min(1, s.score * 2));
+    }
+    cursor = end + 1;
+  }
+  edge.divergeLaneRanges = ranges;
 }
 
 /**

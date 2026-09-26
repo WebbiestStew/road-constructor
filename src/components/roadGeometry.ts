@@ -163,7 +163,8 @@ export function buildLaneArrows(
   spacingFt = 140,
   lengthFt = 16,
   widthFt = 5,
-  verticalOffsetFt = 0.04
+  verticalOffsetFt = 0.04,
+  turnBias = 0
 ): THREE.BufferGeometry {
   const totalLen = edge.length;
   const tangentScratch = new THREE.Vector3();
@@ -171,6 +172,10 @@ export function buildLaneArrows(
   const pointScratch = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
   const laneOffset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt);
+  // A turn lane's arrowhead kinks sideways toward its exit direction instead
+  // of pointing straight ahead, so drivers read it the way real lane-use
+  // signage reads: straight arrow for through lanes, angled for turn lanes.
+  const tipSkew = turnBias * widthFt * 0.7;
 
   const positions: number[] = [];
   const startOffset = spacingFt * 0.5;
@@ -186,7 +191,10 @@ export function buildLaneArrows(
       .addScaledVector(rightScratch, laneOffset)
       .addScaledVector(up, verticalOffsetFt);
 
-    const tip = center.clone().addScaledVector(forward, lengthFt / 2);
+    const tip = center
+      .clone()
+      .addScaledVector(forward, lengthFt / 2)
+      .addScaledVector(rightScratch, tipSkew);
     const backLeft = center
       .clone()
       .addScaledVector(forward, -lengthFt / 2)

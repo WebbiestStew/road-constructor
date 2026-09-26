@@ -9,12 +9,14 @@ import VehicleRenderer from "@/components/VehicleRenderer";
 import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulation";
+import { useScenarioRunner } from "@/hooks/useScenarioRunner";
 
 /** Steep top-down-ish default camera direction, in feet, looking at the origin where building starts. Orthographic, so only the angle matters — not the distance. */
 const CAMERA_POSITION: [number, number, number] = [300, 650, 300];
 
 export default function Home() {
   const sim = useTrafficSimulation();
+  const scenarioRunner = useScenarioRunner(sim);
 
   return (
     <div id="sim-root">
@@ -46,7 +48,7 @@ export default function Home() {
         />
 
         <Terrain />
-        <RoadNetworkMesh contracts={sim.metrics.contracts} />
+        <RoadNetworkMesh contracts={sim.metrics.contracts} edgeSpeedRatios={sim.metrics.edgeSpeedRatios} />
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
 
@@ -65,7 +67,7 @@ export default function Home() {
         />
       </Canvas>
 
-      <SimControls sim={sim} />
+      <SimControls sim={sim} scenarioRunner={scenarioRunner} />
     </div>
   );
 }

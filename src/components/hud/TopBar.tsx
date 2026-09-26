@@ -1,15 +1,47 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
-import { IconRoad } from "./icons";
+import { downloadNetworkFile, parseNetworkFile } from "@/state/persistence";
+import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
+import { IconDownload, IconHeatmap, IconRedo, IconRoad, IconSpeakerOff, IconSpeakerOn, IconUndo, IconUpload } from "./icons";
 
 const SPEED_OPTIONS = [1, 2, 5, 10];
 
 export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const mode = useEditorStore((s) => s.mode);
   const setMode = useEditorStore((s) => s.setMode);
+  const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
+  const setHeatmapEnabled = useEditorStore((s) => s.setHeatmapEnabled);
+  const [muted, setMutedState] = useState(false);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setMutedState(isMuted()));
+    const unsubscribe = subscribeMuted(setMutedState);
+    return () => {
+      cancelAnimationFrame(raf);
+      unsubscribe();
+    };
+  }, []);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
+  const canUndo = useEditorStore((s) => s.past.length > 0);
+  const canRedo = useEditorStore((s) => s.future.length > 0);
+  const exportPayload = useEditorStore((s) => s.exportPayload);
+  const importPayload = useEditorStore((s) => s.importPayload);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { speedMultiplier, setSpeedMultiplier } = sim;
+
+  const handleImportFile = async (file: File) => {
+    const text = await file.text();
+    const payload = parseNetworkFile(text);
+    if (!payload) {
+      window.alert("That file doesn't look like a valid Road Constructor network export.");
+      return;
+    }
+    importPayload(payload);
+  };
 
   return (
     <div className="pointer-events-auto absolute left-4 top-4 z-20 flex items-center gap-1 rounded-full p-1.5 hud-panel">
@@ -49,6 +81,62 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
         </button>
       </div>
 
+      {mode === "build" && (
+        <>
+          <div className="h-6 w-px bg-black/10" />
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <IconUndo className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <IconRedo className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="h-6 w-px bg-black/10" />
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => downloadNetworkFile(exportPayload())}
+              title="Export network to a file"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+            >
+              <IconDownload className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              title="Import network from a file"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+            >
+              <IconUpload className="h-3.5 w-3.5" />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleImportFile(file);
+                e.target.value = "";
+              }}
+            />
+          </div>
+        </>
+      )}
+
       {mode === "simulate" && (
         <>
           <div className="h-6 w-px bg-black/10" />
@@ -68,8 +156,32 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
               </button>
             ))}
           </div>
+          <div className="h-6 w-px bg-black/10" />
+          <button
+            type="button"
+            onClick={() => setHeatmapEnabled(!heatmapEnabled)}
+            title="Toggle traffic speed heatmap"
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              heatmapEnabled
+                ? "bg-gradient-to-br from-rose-400 to-orange-500 text-white shadow"
+                : "bg-black/5 text-zinc-600 hover:text-zinc-900"
+            }`}
+          >
+            <IconHeatmap className="h-3.5 w-3.5" />
+            Heatmap
+          </button>
         </>
       )}
+
+      <div className="h-6 w-px bg-black/10" />
+      <button
+        type="button"
+        onClick={toggleMuted}
+        title={muted ? "Unmute sound" : "Mute sound"}
+        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+      >
+        {muted ? <IconSpeakerOff className="h-3.5 w-3.5" /> : <IconSpeakerOn className="h-3.5 w-3.5" />}
+      </button>
     </div>
   );
 }
