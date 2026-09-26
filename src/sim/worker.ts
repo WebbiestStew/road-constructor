@@ -111,7 +111,10 @@ const _matrix = new THREE.Matrix4();
 const _color = new THREE.Color();
 const FORWARD_AXIS = new THREE.Vector3(0, 0, 1);
 
-const COLOR_FREE = new THREE.Color(0x22c55e);
+// Blue -> amber -> red (never green) so free-flow vs. stopped traffic reads
+// correctly for red-green colorblind players, who lose the green/red contrast
+// but keep blue fully distinct.
+const COLOR_FREE = new THREE.Color(0x3b82f6);
 const COLOR_SLOW = new THREE.Color(0xeab308);
 const COLOR_STOP = new THREE.Color(0xef4444);
 

@@ -237,6 +237,16 @@ export function IconSpeakerOn(props: IconProps) {
   );
 }
 
+export function IconHelp(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.3 9.2a2.7 2.7 0 0 1 5.2 1c0 1.7-2.5 1.9-2.5 3.6" />
+      <circle cx="12" cy="17" r="0.15" fill="currentColor" stroke="currentColor" strokeWidth={2.2} />
+    </svg>
+  );
+}
+
 export function IconHeatmap(props: IconProps) {
   return (
     <svg {...base} {...props}>

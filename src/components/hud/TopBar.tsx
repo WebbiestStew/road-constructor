@@ -5,7 +5,18 @@ import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { downloadNetworkFile, parseNetworkFile } from "@/state/persistence";
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
-import { IconDownload, IconHeatmap, IconRedo, IconRoad, IconSpeakerOff, IconSpeakerOn, IconUndo, IconUpload } from "./icons";
+import { requestOpenTutorial } from "@/lib/tutorial";
+import {
+  IconDownload,
+  IconHeatmap,
+  IconHelp,
+  IconRedo,
+  IconRoad,
+  IconSpeakerOff,
+  IconSpeakerOn,
+  IconUndo,
+  IconUpload,
+} from "./icons";
 
 const SPEED_OPTIONS = [1, 2, 5, 10];
 
@@ -181,6 +192,14 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
         className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
       >
         {muted ? <IconSpeakerOff className="h-3.5 w-3.5" /> : <IconSpeakerOn className="h-3.5 w-3.5" />}
+      </button>
+      <button
+        type="button"
+        onClick={requestOpenTutorial}
+        title="How to play"
+        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+      >
+        <IconHelp className="h-3.5 w-3.5" />
       </button>
     </div>
   );

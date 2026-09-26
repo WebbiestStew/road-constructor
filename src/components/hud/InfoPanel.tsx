@@ -345,14 +345,14 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
                   <span className="flex items-center gap-1.5 text-zinc-600">
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${
-                        !hasData ? "bg-zinc-400" : ok ? "bg-emerald-500" : "bg-red-500"
+                        !hasData ? "bg-zinc-400" : ok ? "bg-blue-500" : "bg-red-500"
                       }`}
                     />
                     Destination {i + 1}
                   </span>
                   <span
                     className={`font-medium tabular-nums ${
-                      !hasData ? "text-zinc-500" : ok ? "text-emerald-600" : "text-red-600"
+                      !hasData ? "text-zinc-500" : ok ? "text-blue-600" : "text-red-600"
                     }`}
                   >
                     {hasData ? `${status!.actualSpeedMph.toFixed(0)} / ${target} mph` : `target ${target} mph`}

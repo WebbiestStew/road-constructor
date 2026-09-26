@@ -11,6 +11,7 @@ import PlayButton from "./hud/PlayButton";
 import ScenarioHud from "./hud/ScenarioHud";
 import ToolDock from "./hud/ToolDock";
 import TopBar from "./hud/TopBar";
+import Tutorial from "./hud/Tutorial";
 
 export default function SimControls({
   sim,
@@ -30,6 +31,7 @@ export default function SimControls({
       <Minimap />
       <Confetti sim={sim} />
       <ScenarioHud runner={scenarioRunner} />
+      <Tutorial />
     </div>
   );
 }

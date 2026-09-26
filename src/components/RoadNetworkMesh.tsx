@@ -28,7 +28,9 @@ const BARRIER_COLOR = "#9a9aa0";
 const PIER_COLOR = "#75757c";
 const SHOULDER_FT = 4;
 
-const HEATMAP_FREE = new THREE.Color("#22c55e");
+// Blue -> amber -> red (never green) so the heatmap stays readable for
+// red-green colorblind players — see matching comment in sim/worker.ts.
+const HEATMAP_FREE = new THREE.Color("#3b82f6");
 const HEATMAP_SLOW = new THREE.Color("#eab308");
 const HEATMAP_STOP = new THREE.Color("#ef4444");
 const _heatmapColor = new THREE.Color();
@@ -114,7 +116,7 @@ function ZoneBadge({
 
   let statusColor: string | null = null;
   if (!isEntry) {
-    statusColor = !contract || contract.sampleCount === 0 ? "#9ca3af" : contract.meetsThreshold ? "#22c55e" : "#ef4444";
+    statusColor = !contract || contract.sampleCount === 0 ? "#9ca3af" : contract.meetsThreshold ? "#3b82f6" : "#ef4444";
   }
 
   return (
