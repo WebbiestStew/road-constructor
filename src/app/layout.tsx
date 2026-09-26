@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
+import { Manrope } from "next/font/google";
 import "./globals.css";
 
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-ui",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Road Constructor — 3D Microscopic Traffic Simulation",
+  title: "Road Constructor — Traffic Engineering Sandbox",
   description:
-    "Real-time 3D microscopic traffic simulation of a highway interchange using IDM + MOBIL car-following models, Three.js and React Three Fiber.",
+    "Design road networks, open them to traffic, and see if they hold up — a 3D microscopic traffic simulation built with IDM + MOBIL car-following models, Three.js and React Three Fiber.",
 };
 
 export default function RootLayout({
@@ -12,7 +19,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className={`${manrope.variable} antialiased`}>{children}</body>
     </html>
   );
 }
