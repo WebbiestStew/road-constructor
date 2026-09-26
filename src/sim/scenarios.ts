@@ -28,19 +28,19 @@ function node(id: string, x: number, z: number): NodeSpec {
 }
 
 const bottleneckAlley: NetworkSnapshot = {
-  nodes: [node("sN1", -260, 0), node("sN2", 0, 0), node("sN3", 260, 0)],
+  nodes: [node("sN1", 0, -220), node("sN2", -220, 0), node("sN3", 0, 0), node("sN4", 220, 0)],
   edges: [
     {
       id: "sE1",
       fromNodeId: "sN1",
-      toNodeId: "sN2",
+      toNodeId: "sN3",
       interiorPoints: [],
       roadClassId: "street",
       elevationLevelId: "ground",
       lanes: 1,
       laneWidthFt: 11,
       speedLimitMph: 30,
-      zone: { type: "entry", demandVehPerHour: 900 },
+      zone: { type: "entry", demandVehPerHour: 1000 },
     },
     {
       id: "sE2",
@@ -52,7 +52,19 @@ const bottleneckAlley: NetworkSnapshot = {
       lanes: 1,
       laneWidthFt: 11,
       speedLimitMph: 30,
-      zone: { type: "destination", targetSpeedMph: 25 },
+      zone: { type: "entry", demandVehPerHour: 1000 },
+    },
+    {
+      id: "sE3",
+      fromNodeId: "sN3",
+      toNodeId: "sN4",
+      interiorPoints: [],
+      roadClassId: "street",
+      elevationLevelId: "ground",
+      lanes: 1,
+      laneWidthFt: 11,
+      speedLimitMph: 30,
+      zone: { type: "destination", targetSpeedMph: 20 },
     },
   ] satisfies EdgeSpec[],
 };
@@ -76,7 +88,7 @@ const fourWayRush: NetworkSnapshot = {
       lanes: 1,
       laneWidthFt: 11,
       speedLimitMph: 30,
-      zone: { type: "entry", demandVehPerHour: 500 },
+      zone: { type: "entry", demandVehPerHour: 900 },
     },
     {
       id: "sE2",
@@ -88,7 +100,7 @@ const fourWayRush: NetworkSnapshot = {
       lanes: 1,
       laneWidthFt: 11,
       speedLimitMph: 30,
-      zone: { type: "entry", demandVehPerHour: 500 },
+      zone: { type: "entry", demandVehPerHour: 900 },
     },
     {
       id: "sE3",
@@ -100,7 +112,7 @@ const fourWayRush: NetworkSnapshot = {
       lanes: 1,
       laneWidthFt: 11,
       speedLimitMph: 30,
-      zone: { type: "entry", demandVehPerHour: 400 },
+      zone: { type: "entry", demandVehPerHour: 700 },
     },
     {
       id: "sE4",
@@ -154,7 +166,7 @@ const highwayMerge: NetworkSnapshot = {
       lanes: 2,
       laneWidthFt: 12,
       speedLimitMph: 55,
-      zone: { type: "destination", targetSpeedMph: 45 },
+      zone: { type: "destination", targetSpeedMph: 30 },
     },
   ] satisfies EdgeSpec[],
 };
@@ -163,14 +175,14 @@ export const SCENARIOS: ScenarioDef[] = [
   {
     id: "bottleneck-alley",
     name: "Bottleneck Alley",
-    tagline: "One skinny street, way too many cars.",
+    tagline: "Two streets merge into one skinny lane.",
     briefing:
-      "A single one-lane street can't keep up with entry demand. Widen it, add lanes, or route around the jam — whatever gets cars through at a decent clip before time's up.",
+      "Two side streets dump straight into one skinny lane with no signal — it gridlocks fast. Add a signal, try a roundabout, or widen the shared stretch to keep cars moving.",
     startingNetwork: bottleneckAlley,
     startingBudget: 300_000,
-    durationS: 75,
+    durationS: 90,
     targetThroughputPerMinute: 12,
-    targetAvgSpeedMph: 25,
+    targetAvgSpeedMph: 12,
   },
   {
     id: "four-way-rush",
@@ -189,7 +201,7 @@ export const SCENARIOS: ScenarioDef[] = [
     name: "Highway Merge",
     tagline: "Two ramps merging onto one fast highway.",
     briefing:
-      "Traffic from two ramps has to merge cleanly onto the highway and stay fast all the way to the destination. Smooth the merge point and keep speeds up.",
+      "Drivers cruise at whatever speed they picked up entering the network, so a slow ramp means a slow highway. Upgrade the ramps to a faster road class before they merge, then smooth the merge point itself.",
     startingNetwork: highwayMerge,
     startingBudget: 400_000,
     durationS: 100,
