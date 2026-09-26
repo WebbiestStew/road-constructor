@@ -8,6 +8,7 @@ import { assembleNetwork } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
+import { IconWarning } from "./hud/icons";
 import {
   buildAsphaltRibbon,
   buildDashedStripe,
@@ -160,6 +161,32 @@ function ZoneBadge({
   );
 }
 
+/** A pulsing "trouble here" marker over an edge that's been badly congested for a while — the game's "find the problem" signal, on by default (unlike the opt-in heatmap). */
+function ProblemMarker({ edge }: { edge: Edge3D }) {
+  const p = edge.spline.getPointAt(0.5);
+  return (
+    <Html position={[p.x, p.y, p.z]} style={{ pointerEvents: "none" }} zIndexRange={[15, 0]} occlude={false}>
+      <div
+        className="animate-warn-pulse"
+        style={{
+          transform: "translate(-50%, -130%)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 26,
+          height: 26,
+          borderRadius: 999,
+          background: "linear-gradient(180deg, #fb923c, #ea580c)",
+          border: "2px solid #7c2d12",
+        }}
+        title="Badly congested"
+      >
+        <IconWarning style={{ width: 15, height: 15 }} />
+      </div>
+    </Html>
+  );
+}
+
 function YieldMarker({ edge }: { edge: Edge3D }) {
   const p = edge.spline.getPointAt(1);
   const tangent = edge.spline.getTangentAt(1);
@@ -279,12 +306,15 @@ function EdgeGroup({
 export default function RoadNetworkMesh({
   contracts,
   edgeSpeedRatios,
+  problemEdgeIds,
 }: {
   contracts?: ContractStatus[];
   edgeSpeedRatios?: EdgeSpeedRatio[];
+  problemEdgeIds?: string[];
 }) {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
+  const mode = useEditorStore((s) => s.mode);
 
   const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
 
@@ -299,6 +329,8 @@ export default function RoadNetworkMesh({
     for (const [edgeId, ratio] of edgeSpeedRatios ?? []) map.set(edgeId, ratio);
     return map;
   }, [edgeSpeedRatios]);
+
+  const problemEdgeIdSet = useMemo(() => new Set(problemEdgeIds ?? []), [problemEdgeIds]);
 
   const ringNodeIds = useMemo(() => {
     const set = new Set<string>();
@@ -349,6 +381,13 @@ export default function RoadNetworkMesh({
         .map((edge) => (
           <YieldMarker key={`yield-${edge.id}`} edge={edge} />
         ))}
+
+      {mode === "simulate" &&
+        network.edges
+          .filter((edge) => problemEdgeIdSet.has(edge.id))
+          .map((edge) => (
+            <ProblemMarker key={`problem-${edge.id}`} edge={edge} />
+          ))}
     </group>
   );
 }

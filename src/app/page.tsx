@@ -48,7 +48,11 @@ export default function Home() {
         />
 
         <Terrain />
-        <RoadNetworkMesh contracts={sim.metrics.contracts} edgeSpeedRatios={sim.metrics.edgeSpeedRatios} />
+        <RoadNetworkMesh
+          contracts={sim.metrics.contracts}
+          edgeSpeedRatios={sim.metrics.edgeSpeedRatios}
+          problemEdgeIds={sim.metrics.problemEdgeIds}
+        />
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
 

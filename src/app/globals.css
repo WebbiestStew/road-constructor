@@ -157,6 +157,20 @@ input[type="range"]::-moz-range-thumb {
   animation: idle-pulse 2s ease-out infinite;
 }
 
+@keyframes warn-pulse {
+  0%,
+  100% {
+    box-shadow: 0 2px 0 #7c2d12, 0 0 0 0 rgba(249, 115, 22, 0.55);
+  }
+  50% {
+    box-shadow: 0 2px 0 #7c2d12, 0 0 0 8px rgba(249, 115, 22, 0);
+  }
+}
+
+.animate-warn-pulse {
+  animation: warn-pulse 1.3s ease-out infinite;
+}
+
 @keyframes wiggle {
   0%,
   100% {

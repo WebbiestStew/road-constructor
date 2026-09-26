@@ -194,4 +194,6 @@ export type WorkerOutMessage =
       spawnedTotal: number;
       contracts: ContractStatus[];
       edgeSpeedRatios: EdgeSpeedRatio[];
+      /** Edge IDs that have been badly congested (well under the speed limit) for a sustained stretch of time — surfaced as warning markers so players can spot trouble without reading stats. */
+      problemEdgeIds: string[];
     };

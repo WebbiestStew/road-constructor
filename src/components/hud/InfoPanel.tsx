@@ -12,6 +12,7 @@ import {
   IconGauge,
   IconRoundabout,
   IconSignal,
+  IconWarning,
   IconYield,
 } from "./icons";
 
@@ -292,6 +293,17 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
           gradient="from-violet-400 to-fuchsia-500"
         />
       </div>
+
+      {metrics.problemEdgeIds.length > 0 && (
+        <div className="flex items-center gap-2 rounded-xl bg-orange-500/15 p-2.5 text-[11px] leading-snug text-orange-800">
+          <span className="animate-warn-pulse flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-red-600">
+            <IconWarning className="h-3.5 w-3.5" />
+          </span>
+          {metrics.problemEdgeIds.length === 1
+            ? "1 road is badly jammed — look for the flashing marker."
+            : `${metrics.problemEdgeIds.length} roads are badly jammed — look for the flashing markers.`}
+        </div>
+      )}
 
       {(entries.length === 0 || destinations.length === 0) && (
         <p className="rounded-xl bg-amber-500/15 p-2.5 text-[11px] leading-snug text-amber-800">

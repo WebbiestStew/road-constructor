@@ -20,6 +20,7 @@ export interface SimMetricsState {
   spawnedTotal: number;
   contracts: ContractStatus[];
   edgeSpeedRatios: EdgeSpeedRatio[];
+  problemEdgeIds: string[];
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -30,6 +31,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   spawnedTotal: 0,
   contracts: [],
   edgeSpeedRatios: [],
+  problemEdgeIds: [],
 };
 
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
@@ -106,6 +108,7 @@ export function useTrafficSimulation() {
             spawnedTotal: msg.spawnedTotal,
             contracts: msg.contracts,
             edgeSpeedRatios: msg.edgeSpeedRatios,
+            problemEdgeIds: msg.problemEdgeIds,
           });
         }
       }

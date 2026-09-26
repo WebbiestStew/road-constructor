@@ -242,6 +242,10 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
     if (!currentDestIds.has(key)) contractSamples.delete(key);
   }
 
+  congestionTimer.clear();
+  problemEdges.clear();
+  lastSnapshotSimTime = simTime;
+
   for (const [id, v] of vehicles) {
     if (!network.edgesById.has(v.edgeId)) {
       releaseVehicle(v);
@@ -776,9 +780,49 @@ function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Problem detection: flag edges stuck well under the speed limit for a
+// sustained stretch, with hysteresis so a momentary red light doesn't flicker
+// a marker on and off. This is the "find the problem" signal the heatmap
+// alone doesn't give you — it survives a paused/opt-in heatmap being off.
+// ---------------------------------------------------------------------------
+
+const CONGESTION_LOW_RATIO = 0.35;
+const CONGESTION_RECOVER_RATIO = 0.55;
+const CONGESTION_SUSTAIN_S = 4;
+
+const congestionTimer = new Map<string, number>();
+const problemEdges = new Set<string>();
+let lastSnapshotSimTime = 0;
+
+function updateCongestionState(deltaSimTime: number) {
+  if (!network) return;
+  for (const edge of network.edges) {
+    const count = edgeSpeedRatioCount.get(edge.id) ?? 0;
+    if (count === 0) {
+      congestionTimer.set(edge.id, 0);
+      problemEdges.delete(edge.id);
+      continue;
+    }
+    const ratio = (edgeSpeedRatioSum.get(edge.id) ?? 0) / count;
+    if (ratio <= CONGESTION_LOW_RATIO) {
+      const next = (congestionTimer.get(edge.id) ?? 0) + deltaSimTime;
+      congestionTimer.set(edge.id, next);
+      if (next >= CONGESTION_SUSTAIN_S) problemEdges.add(edge.id);
+    } else if (ratio >= CONGESTION_RECOVER_RATIO) {
+      congestionTimer.set(edge.id, 0);
+      problemEdges.delete(edge.id);
+    }
+    // Between the two thresholds: hold steady, neither accumulating nor clearing.
+  }
+}
+
 function postSnapshot() {
   const buf = acquireBufferSet();
   const { activeCount, avgSpeedFtS } = writeSnapshot(buf);
+  const deltaSimTime = Math.max(0, simTime - lastSnapshotSimTime);
+  lastSnapshotSimTime = simTime;
+  updateCongestionState(deltaSimTime);
   const matricesBuffer = buf.matrices.buffer as ArrayBuffer;
   const colorsBuffer = buf.colors.buffer as ArrayBuffer;
   const message: WorkerOutMessage = {
@@ -792,6 +836,7 @@ function postSnapshot() {
     spawnedTotal,
     contracts: computeContracts(),
     edgeSpeedRatios: computeEdgeSpeedRatios(),
+    problemEdgeIds: Array.from(problemEdges),
   };
   ctx.postMessage(message, [matricesBuffer, colorsBuffer]);
 }

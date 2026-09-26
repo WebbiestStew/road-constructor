@@ -247,6 +247,16 @@ export function IconHelp(props: IconProps) {
   );
 }
 
+export function IconWarning(props: IconProps) {
+  return (
+    <svg {...base} fill="currentColor" stroke="none" viewBox="0 0 24 24" {...props}>
+      <path d="M12 2.5 23 21.5H1L12 2.5z" />
+      <rect x="11" y="9" width="2" height="6.2" rx="1" fill="#241b3d" />
+      <circle cx="12" cy="18" r="1.15" fill="#241b3d" />
+    </svg>
+  );
+}
+
 export function IconHeatmap(props: IconProps) {
   return (
     <svg {...base} {...props}>
