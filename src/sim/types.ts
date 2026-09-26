@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { ElevationLevelId, RoadClassId } from "./roadClasses";
 
 /**
  * Global shared constants. All spatial units are feet, speeds are ft/s
@@ -30,21 +31,64 @@ export const VEHICLE_HEIGHT_FT = 4.5;
 
 export const DEFAULT_LANE_WIDTH_FT = 12;
 
+// ---------------------------------------------------------------------------
+// Editable network model (the "source of truth" the road editor mutates)
+// ---------------------------------------------------------------------------
+
+export interface SignalControl {
+  type: "signal";
+  /** Incoming edge IDs that share a green phase. */
+  groupA: string[];
+  groupB: string[];
+  greenDurationS: number;
+  allRedDurationS: number;
+}
+
+export type JunctionControl = SignalControl | { type: "priority" };
+
 /** A junction / control point in the road graph, in feet (x, y-up, z). */
-export interface Node3D {
+export interface NodeSpec {
   id: string;
   /** [x, y, z] in feet. y is elevation (up). */
   position: [number, number, number];
+  control?: JunctionControl;
 }
 
-export type EdgeKind = "mainline" | "ramp" | "turnaround" | "overpass";
+export type ZoneSpec =
+  | { type: "entry"; demandVehPerHour: number }
+  | { type: "destination"; targetSpeedMph: number };
 
 /**
- * A directed road segment connecting two nodes. The centerline is a
- * Catmull-Rom spline built from the node positions plus any interior
- * shaping control points. Lanes are indexed left-to-right (0 = leftmost)
- * across the segment, all traveling the same direction (one-way).
+ * A directed, one-way road segment connecting two nodes. Two-way roads are
+ * represented as a pair of EdgeSpecs running opposite directions between
+ * the same nodes (which is also how asymmetric lane counts fall out
+ * naturally — the two directions are just independently editable edges).
  */
+export interface EdgeSpec {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  /** Interior shaping points only; endpoints are taken from the node positions. */
+  interiorPoints: [number, number, number][];
+  roadClassId: RoadClassId;
+  elevationLevelId: ElevationLevelId;
+  lanes: number;
+  laneWidthFt: number;
+  speedLimitMph: number;
+  zone?: ZoneSpec;
+}
+
+/** The editable network as plain, structured-cloneable data. */
+export interface NetworkSnapshot {
+  nodes: NodeSpec[];
+  edges: EdgeSpec[];
+}
+
+// ---------------------------------------------------------------------------
+// Assembled/runtime network (built from a NetworkSnapshot by assembleNetwork)
+// ---------------------------------------------------------------------------
+
+/** Runtime edge: an EdgeSpec plus its constructed spline and derived data. */
 export interface Edge3D {
   id: string;
   fromNodeId: string;
@@ -55,35 +99,23 @@ export interface Edge3D {
   speedLimitMph: number;
   /** Arc length of the centerline, in feet (cached from the spline). */
   length: number;
-  kind: EdgeKind;
-  /** IDs of edges that this edge may transition into at its terminal node. */
-  nextEdgeIds: string[];
+  roadClassId: RoadClassId;
+  elevationLevelId: ElevationLevelId;
+  /** Priority ranking copied from the road class, for junction yielding. */
+  priority: number;
+  /** True for highway/motorway classes (gets median + Jersey barriers). */
+  isFreeway: boolean;
   /** True if any sampled point along this edge has elevation > 1 ft. */
   isElevated: boolean;
-}
-
-export interface RouteDef {
-  id: string;
-  /** Ordered edge IDs a vehicle following this route will traverse. */
-  edgeIds: string[];
-  /** Relative spawn probability weight among routes sharing an entry. */
-  weight: number;
-}
-
-export interface EntryPointDef {
-  id: string;
-  label: string;
-  edgeId: string;
-  /** Lane index on edgeId that spawned vehicles enter on. */
-  laneIndex: number;
-  routes: RouteDef[];
+  zone?: ZoneSpec;
+  /** IDs of edges that this edge may transition into at its terminal node. */
+  nextEdgeIds: string[];
 }
 
 export interface RoadNetwork {
-  nodes: Node3D[];
+  nodesById: Map<string, NodeSpec>;
   edges: Edge3D[];
   edgesById: Map<string, Edge3D>;
-  entries: EntryPointDef[];
 }
 
 /** Mutable per-vehicle simulation state, held only inside the worker. */
@@ -105,33 +137,37 @@ export interface VehicleState {
   desiredHeadway: number;
   minGap: number;
   length: number;
-  /** Route this vehicle is following, and its index into edgeIds. */
+  /** Route this vehicle is following (a sequence of edge IDs), and its index into it. */
   routeEdgeIds: string[];
   routeIndex: number;
   /** Ticks until this vehicle is allowed to re-evaluate a lane change. */
   laneChangeCooldown: number;
-  /** Distance already accumulated toward the current lap (for despawn / metrics). */
-  totalDistanceFt: number;
+  /** Destination edge ID this vehicle is trying to reach (for contract metrics). */
+  destinationEdgeId: string;
   spawnTime: number;
 }
 
-/** Message protocol: main thread -> worker. */
+// ---------------------------------------------------------------------------
+// Worker message protocol
+// ---------------------------------------------------------------------------
+
 export type WorkerInMessage =
+  | { type: "updateNetwork"; network: NetworkSnapshot; seed: number }
   | { type: "setRunning"; running: boolean }
   | { type: "setSpeedMultiplier"; value: number }
-  | { type: "setDemand"; entryId: string; vehiclesPerHour: number }
-  | {
-      type: "returnBuffers";
-      matrices: ArrayBuffer;
-      colors: ArrayBuffer;
-    };
+  | { type: "setDemand"; edgeId: string; vehiclesPerHour: number }
+  | { type: "returnBuffers"; matrices: ArrayBuffer; colors: ArrayBuffer };
 
-/** Message protocol: worker -> main thread. */
+export interface ContractStatus {
+  edgeId: string;
+  targetSpeedMph: number;
+  actualSpeedMph: number;
+  sampleCount: number;
+  meetsThreshold: boolean;
+}
+
 export type WorkerOutMessage =
-  | {
-      type: "ready";
-      entries: { id: string; label: string }[];
-    }
+  | { type: "ready" }
   | {
       type: "tick";
       matrices: ArrayBuffer;
@@ -141,11 +177,5 @@ export type WorkerOutMessage =
       avgSpeedFtS: number;
       throughputLastMinute: number;
       spawnedTotal: number;
+      contracts: ContractStatus[];
     };
-
-export interface SimMetrics {
-  activeCount: number;
-  avgSpeedMph: number;
-  throughputPerMinute: number;
-  simTime: number;
-}

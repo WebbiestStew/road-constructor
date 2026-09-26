@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { WorkerInMessage, WorkerOutMessage } from "@/sim/types";
+import type { ContractStatus, WorkerInMessage, WorkerOutMessage } from "@/sim/types";
 import { ftpsToMph } from "@/sim/types";
+import { useEditorStore } from "@/state/editorStore";
 
 export interface VehicleSnapshot {
   matrices: Float32Array;
@@ -17,11 +18,7 @@ export interface SimMetricsState {
   throughputPerMinute: number;
   simTime: number;
   spawnedTotal: number;
-}
-
-export interface EntryInfo {
-  id: string;
-  label: string;
+  contracts: ContractStatus[];
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -30,7 +27,11 @@ const DEFAULT_METRICS: SimMetricsState = {
   throughputPerMinute: 0,
   simTime: 0,
   spawnedTotal: 0,
+  contracts: [],
 };
+
+/** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
+const DEFAULT_SEED = 1337;
 
 const METRICS_UPDATE_INTERVAL_MS = 200;
 
@@ -41,6 +42,10 @@ const METRICS_UPDATE_INTERVAL_MS = 200;
  *    re-render — that would defeat the whole point of the worker).
  *  - throttled React `metrics` state, safe for the HUD to render normally.
  *  - control functions that post commands to the worker.
+ *
+ * The network itself lives in the editor store (src/state/editorStore.ts);
+ * this hook watches that store's `mode` and pushes a full network resync to
+ * the worker whenever Build -> Simulate is crossed.
  */
 export function useTrafficSimulation() {
   const workerRef = useRef<Worker | null>(null);
@@ -50,10 +55,12 @@ export function useTrafficSimulation() {
   const lastMetricsFlushRef = useRef(0);
 
   const [metrics, setMetrics] = useState<SimMetricsState>(DEFAULT_METRICS);
-  const [entries, setEntries] = useState<EntryInfo[]>([]);
-  const [running, setRunningState] = useState(true);
+  const [userPaused, setUserPaused] = useState(false);
   const [speedMultiplier, setSpeedMultiplierState] = useState(1);
   const [ready, setReady] = useState(false);
+
+  const mode = useEditorStore((s) => s.mode);
+  const running = mode === "simulate" && !userPaused;
 
   useEffect(() => {
     const worker = new Worker(new URL("../sim/worker.ts", import.meta.url), {
@@ -64,7 +71,6 @@ export function useTrafficSimulation() {
     worker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
       const msg = event.data;
       if (msg.type === "ready") {
-        setEntries(msg.entries);
         setReady(true);
         return;
       }
@@ -96,13 +102,12 @@ export function useTrafficSimulation() {
             throughputPerMinute: msg.throughputLastMinute,
             simTime: msg.simTime,
             spawnedTotal: msg.spawnedTotal,
+            contracts: msg.contracts,
           });
         }
       }
     };
 
-    // Send initial control state once the worker is constructed.
-    worker.postMessage({ type: "setRunning", running: true } satisfies WorkerInMessage);
     worker.postMessage({ type: "setSpeedMultiplier", value: 1 } satisfies WorkerInMessage);
 
     return () => {
@@ -111,9 +116,24 @@ export function useTrafficSimulation() {
     };
   }, []);
 
+  // Cross Build -> Simulate: push a full network resync so the worker
+  // always simulates exactly what's on screen.
+  useEffect(() => {
+    if (mode !== "simulate") return;
+    const worker = workerRef.current;
+    if (!worker) return;
+    const snapshot = useEditorStore.getState().getSnapshot();
+    worker.postMessage({ type: "updateNetwork", network: snapshot, seed: DEFAULT_SEED } satisfies WorkerInMessage);
+  }, [mode]);
+
+  // `running` is derived (mode === "simulate" && !userPaused); keep the
+  // worker's clock in sync with it whenever either input changes.
+  useEffect(() => {
+    workerRef.current?.postMessage({ type: "setRunning", running } satisfies WorkerInMessage);
+  }, [running]);
+
   const setRunning = useCallback((value: boolean) => {
-    setRunningState(value);
-    workerRef.current?.postMessage({ type: "setRunning", running: value } satisfies WorkerInMessage);
+    setUserPaused(!value);
   }, []);
 
   const setSpeedMultiplier = useCallback((value: number) => {
@@ -121,10 +141,10 @@ export function useTrafficSimulation() {
     workerRef.current?.postMessage({ type: "setSpeedMultiplier", value } satisfies WorkerInMessage);
   }, []);
 
-  const setDemand = useCallback((entryId: string, vehiclesPerHour: number) => {
+  const setDemand = useCallback((edgeId: string, vehiclesPerHour: number) => {
     workerRef.current?.postMessage({
       type: "setDemand",
-      entryId,
+      edgeId,
       vehiclesPerHour,
     } satisfies WorkerInMessage);
   }, []);
@@ -132,7 +152,6 @@ export function useTrafficSimulation() {
   return {
     snapshotRef,
     metrics,
-    entries,
     running,
     speedMultiplier,
     ready,

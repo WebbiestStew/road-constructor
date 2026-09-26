@@ -1,206 +1,30 @@
 import * as THREE from "three";
-import {
-  DEFAULT_LANE_WIDTH_FT,
-  type Edge3D,
-  type EdgeKind,
-  type EntryPointDef,
-  type Node3D,
-  type RoadNetwork,
-  type RouteDef,
+import { ROAD_CLASSES } from "./roadClasses";
+import { mphToFtps } from "./types";
+import type {
+  Edge3D,
+  EdgeSpec,
+  NetworkSnapshot,
+  NodeSpec,
+  RoadNetwork,
 } from "./types";
 
-/**
- * Demo network: a closed-loop 2-lane divided mainline ("highway oval")
- * featuring one grade-separated overpass, two single-lane off-ramps, and a
- * Texas turnaround that loops ramp traffic back under the overpass to
- * re-merge onto the mainline. All coordinates are in feet; y is elevation.
- *
- * Layout (plan view, x = longitudinal, z = lateral):
- *
- *        C=====D            (bridge deck, y=24)
- *       /       \
- *   B--/         \--E------F
- *   |                        \
- *   A                         (curve)
- *   |                        /
- *   J------I------H---------
- *        \
- *   M (ramp merge) -- turnaround loop under bridge -- back to A
- *
- * Off-ramp 1 branches from node E (just past the overpass, eastbound).
- * Off-ramp 2 branches from node I (on the return leg, before the bridge).
- * Both ramps converge at node M, which feeds the Texas turnaround edge
- * that passes back under the bridge (y=0, well below the y=24 deck) and
- * re-merges onto the mainline at node A, closing the loop.
- */
-
-interface NodeSpec {
-  id: string;
-  position: [number, number, number];
-}
-
-interface EdgeSpec {
-  id: string;
-  from: string;
-  to: string;
-  /** Interior shaping points (not graph nodes), in order, between from and to. */
-  interior?: [number, number, number][];
-  lanes: number;
-  speedLimitMph: number;
-  laneWidthFt?: number;
-  kind: EdgeKind;
-}
-
-const NODES: NodeSpec[] = [
-  { id: "A", position: [-2600, 0, 0] },
-  { id: "B", position: [-1200, 0, 0] },
-  { id: "C", position: [-300, 24, 0] },
-  { id: "D", position: [300, 24, 0] },
-  { id: "E", position: [1000, 0, 0] },
-  { id: "F", position: [2400, 0, 0] },
-  { id: "H", position: [2400, 0, 600] },
-  { id: "I", position: [1000, 0, 600] },
-  { id: "J", position: [-1200, 0, 600] },
-  { id: "M", position: [300, 0, -260] },
-];
-
-const EDGES: EdgeSpec[] = [
-  { id: "e_AB", from: "A", to: "B", lanes: 2, speedLimitMph: 65, kind: "mainline" },
-  {
-    id: "e_bridge_w",
-    from: "B",
-    to: "C",
-    lanes: 2,
-    speedLimitMph: 55,
-    kind: "mainline",
-  },
-  {
-    id: "e_bridge",
-    from: "C",
-    to: "D",
-    lanes: 2,
-    speedLimitMph: 55,
-    kind: "overpass",
-  },
-  {
-    id: "e_bridge_e",
-    from: "D",
-    to: "E",
-    lanes: 2,
-    speedLimitMph: 55,
-    kind: "mainline",
-  },
-  { id: "e_EF", from: "E", to: "F", lanes: 2, speedLimitMph: 65, kind: "mainline" },
-  {
-    id: "e_curveE",
-    from: "F",
-    to: "H",
-    interior: [[3000, 0, 300]],
-    lanes: 2,
-    speedLimitMph: 45,
-    kind: "mainline",
-  },
-  { id: "e_HI", from: "H", to: "I", lanes: 2, speedLimitMph: 65, kind: "mainline" },
-  { id: "e_IJ", from: "I", to: "J", lanes: 2, speedLimitMph: 65, kind: "mainline" },
-  {
-    id: "e_curveW",
-    from: "J",
-    to: "A",
-    interior: [[-2000, 0, 300]],
-    lanes: 2,
-    speedLimitMph: 45,
-    kind: "mainline",
-  },
-  {
-    id: "e_ramp1",
-    from: "E",
-    to: "M",
-    interior: [
-      [1150, 0, -140],
-      [700, 0, -260],
-    ],
-    lanes: 1,
-    speedLimitMph: 35,
-    laneWidthFt: 13,
-    kind: "ramp",
-  },
-  {
-    id: "e_ramp2",
-    from: "I",
-    to: "M",
-    interior: [
-      [700, 0, 300],
-      [500, 0, 0],
-    ],
-    lanes: 1,
-    speedLimitMph: 35,
-    laneWidthFt: 13,
-    kind: "ramp",
-  },
-  {
-    id: "e_turnaround",
-    from: "M",
-    to: "A",
-    interior: [
-      [0, 0, -340],
-      [-400, 0, -260],
-      [-1200, 0, -140],
-      [-2000, 0, -40],
-    ],
-    lanes: 1,
-    speedLimitMph: 30,
-    laneWidthFt: 13,
-    kind: "turnaround",
-  },
-];
-
-const ROUTE_THROUGH: string[] = [
-  "e_AB",
-  "e_bridge_w",
-  "e_bridge",
-  "e_bridge_e",
-  "e_EF",
-  "e_curveE",
-  "e_HI",
-  "e_IJ",
-  "e_curveW",
-];
-
-const ROUTE_RAMP1: string[] = [
-  "e_AB",
-  "e_bridge_w",
-  "e_bridge",
-  "e_bridge_e",
-  "e_EF",
-  "e_ramp1",
-  "e_turnaround",
-];
-
-const ROUTE_RAMP2: string[] = [
-  "e_AB",
-  "e_bridge_w",
-  "e_bridge",
-  "e_bridge_e",
-  "e_EF",
-  "e_curveE",
-  "e_HI",
-  "e_ramp2",
-  "e_turnaround",
-];
-
-const ELEVATION_SAMPLE_STEPS = 24;
+const ELEVATION_SAMPLE_STEPS = 16;
 const ELEVATION_THRESHOLD_FT = 1;
 
-function buildSpline(spec: EdgeSpec, nodeById: Map<string, NodeSpec>): THREE.CatmullRomCurve3 {
-  const fromNode = nodeById.get(spec.from);
-  const toNode = nodeById.get(spec.to);
+/** A brand-new, empty buildable network — the sandbox starting state. */
+export function createEmptyNetworkSnapshot(): NetworkSnapshot {
+  return { nodes: [], edges: [] };
+}
+
+function buildSpline(spec: EdgeSpec, nodesById: Map<string, NodeSpec>): THREE.CatmullRomCurve3 {
+  const fromNode = nodesById.get(spec.fromNodeId);
+  const toNode = nodesById.get(spec.toNodeId);
   if (!fromNode || !toNode) {
     throw new Error(`Edge ${spec.id} references unknown node`);
   }
   const points: THREE.Vector3[] = [new THREE.Vector3(...fromNode.position)];
-  for (const p of spec.interior ?? []) {
-    points.push(new THREE.Vector3(...p));
-  }
+  for (const p of spec.interiorPoints) points.push(new THREE.Vector3(...p));
   points.push(new THREE.Vector3(...toNode.position));
   return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
 }
@@ -214,35 +38,36 @@ function computeIsElevated(curve: THREE.CatmullRomCurve3): boolean {
   return false;
 }
 
-let cachedNetwork: RoadNetwork | null = null;
-
 /**
- * Builds the demo road network. Pure and deterministic — safe to call
- * independently from both the main thread (for mesh generation) and the
- * simulation worker (for vehicle routing), always producing identical
- * geometry without needing to serialize THREE objects across the
- * postMessage boundary.
+ * Pure function converting the editable NetworkSnapshot into the runtime
+ * RoadNetwork (real splines, derived adjacency). Called independently by
+ * both the main thread (for rendering) and the simulation worker (for
+ * routing/physics) — the two never need to share live THREE objects across
+ * the postMessage boundary, only the plain snapshot data.
  */
-export function buildNetwork(): RoadNetwork {
-  if (cachedNetwork) return cachedNetwork;
+export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
+  const nodesById = new Map(snapshot.nodes.map((n) => [n.id, n]));
 
-  const nodeById = new Map(NODES.map((n) => [n.id, n]));
-
-  const edges: Edge3D[] = EDGES.map((spec) => {
-    const spline = buildSpline(spec, nodeById);
+  const edges: Edge3D[] = snapshot.edges.map((spec) => {
+    const spline = buildSpline(spec, nodesById);
     const length = spline.getLength();
+    const roadClass = ROAD_CLASSES[spec.roadClassId];
     return {
       id: spec.id,
-      fromNodeId: spec.from,
-      toNodeId: spec.to,
+      fromNodeId: spec.fromNodeId,
+      toNodeId: spec.toNodeId,
       spline,
       lanes: spec.lanes,
-      laneWidthFt: spec.laneWidthFt ?? DEFAULT_LANE_WIDTH_FT,
+      laneWidthFt: spec.laneWidthFt,
       speedLimitMph: spec.speedLimitMph,
       length,
-      kind: spec.kind,
-      nextEdgeIds: [],
+      roadClassId: spec.roadClassId,
+      elevationLevelId: spec.elevationLevelId,
+      priority: roadClass.priority,
+      isFreeway: spec.roadClassId === "highway" || spec.roadClassId === "motorway",
       isElevated: computeIsElevated(spline),
+      zone: spec.zone,
+      nextEdgeIds: [],
     };
   });
 
@@ -253,39 +78,115 @@ export function buildNetwork(): RoadNetwork {
       .map((e2) => e2.id);
   }
 
-  const nodes: Node3D[] = NODES.map((n) => ({ id: n.id, position: n.position }));
-
-  const makeRoute = (id: string, edgeIds: string[], weight: number): RouteDef => ({
-    id,
-    edgeIds,
-    weight,
-  });
-
-  const entries: EntryPointDef[] = [
-    {
-      id: "entry_A",
-      label: "Mainline West Entry",
-      edgeId: "e_AB",
-      laneIndex: 0,
-      routes: [
-        makeRoute("through", ROUTE_THROUGH, 0.7),
-        makeRoute("ramp1_turnaround", ROUTE_RAMP1, 0.15),
-        makeRoute("ramp2_turnaround", ROUTE_RAMP2, 0.15),
-      ],
-    },
-  ];
-
-  cachedNetwork = { nodes, edges, edgesById, entries };
-  return cachedNetwork;
+  return { nodesById, edges, edgesById };
 }
 
-/** Picks a weighted-random route from a list, using the supplied RNG (defaults to Math.random). */
-export function pickWeightedRoute(routes: RouteDef[], rng: () => number = Math.random): RouteDef {
-  const total = routes.reduce((sum, r) => sum + r.weight, 0);
-  let roll = rng() * total;
-  for (const route of routes) {
-    if (roll < route.weight) return route;
-    roll -= route.weight;
+/**
+ * Shortest-route search (Dijkstra, weighted by estimated travel time) over
+ * the edge-adjacency graph. Small networks (hundreds of edges), so a plain
+ * O(V^2) scan is simpler and plenty fast — no heap needed.
+ */
+export function computeRoute(
+  network: RoadNetwork,
+  fromEdgeId: string,
+  toEdgeId: string
+): string[] | null {
+  if (fromEdgeId === toEdgeId) return [fromEdgeId];
+
+  const startEdge = network.edgesById.get(fromEdgeId);
+  if (!startEdge || !network.edgesById.has(toEdgeId)) return null;
+
+  const travelTime = (e: Edge3D) => e.length / Math.max(mphToFtps(e.speedLimitMph), 1);
+
+  const dist = new Map<string, number>();
+  const prev = new Map<string, string>();
+  const visited = new Set<string>();
+  dist.set(fromEdgeId, travelTime(startEdge));
+
+  for (;;) {
+    let currentId: string | null = null;
+    let currentDist = Infinity;
+    for (const [id, d] of dist) {
+      if (!visited.has(id) && d < currentDist) {
+        currentDist = d;
+        currentId = id;
+      }
+    }
+    if (currentId === null || currentId === toEdgeId) break;
+    visited.add(currentId);
+
+    const currentEdge = network.edgesById.get(currentId);
+    if (!currentEdge) continue;
+
+    for (const nextId of currentEdge.nextEdgeIds) {
+      if (visited.has(nextId)) continue;
+      const nextEdge = network.edgesById.get(nextId);
+      if (!nextEdge) continue;
+      const candidate = currentDist + travelTime(nextEdge);
+      if (candidate < (dist.get(nextId) ?? Infinity)) {
+        dist.set(nextId, candidate);
+        prev.set(nextId, currentId);
+      }
+    }
   }
-  return routes[routes.length - 1];
+
+  if (!dist.has(toEdgeId)) return null;
+
+  const path: string[] = [toEdgeId];
+  let cursor = toEdgeId;
+  while (cursor !== fromEdgeId) {
+    const p = prev.get(cursor);
+    if (!p) return null;
+    path.push(p);
+    cursor = p;
+  }
+  path.reverse();
+  return path;
+}
+
+function angleDiff(a: number, b: number): number {
+  let d = Math.abs(a - b) % (Math.PI * 2);
+  if (d > Math.PI) d = Math.PI * 2 - d;
+  return d;
+}
+
+/**
+ * Buckets a node's incoming edges into two traffic-signal phase groups
+ * using approach heading: edges arriving roughly head-on to each other
+ * (opposing through movements) or from the same direction share a phase,
+ * everything else goes to the other phase. A reasonable default for T- and
+ * 4-way junctions without requiring the user to hand-assign phases.
+ */
+export function computeSignalPhaseGroups(
+  nodeId: string,
+  edges: EdgeSpec[],
+  nodesById: Map<string, NodeSpec>
+): { groupA: string[]; groupB: string[] } {
+  const incoming = edges.filter((e) => e.toNodeId === nodeId);
+  const headings = incoming
+    .map((e) => {
+      const from = nodesById.get(e.fromNodeId);
+      const to = nodesById.get(e.toNodeId);
+      if (!from || !to) return null;
+      const dx = to.position[0] - from.position[0];
+      const dz = to.position[2] - from.position[2];
+      return { id: e.id, angle: Math.atan2(dz, dx) };
+    })
+    .filter((h): h is { id: string; angle: number } => h !== null);
+
+  const groupA: string[] = [];
+  const groupB: string[] = [];
+  if (headings.length === 0) return { groupA, groupB };
+
+  const ref = headings[0].angle;
+  for (const h of headings) {
+    const diff = angleDiff(h.angle, ref);
+    const diffOpposite = angleDiff(h.angle, ref + Math.PI);
+    if (diff < Math.PI / 4 || diffOpposite < Math.PI / 4) {
+      groupA.push(h.id);
+    } else {
+      groupB.push(h.id);
+    }
+  }
+  return { groupA, groupB };
 }
