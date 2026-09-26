@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+:root {
+  --background: #18181b;
+  --foreground: #e4e4e7;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  overscroll-behavior: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#sim-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+.hud-panel {
+  backdrop-filter: blur(10px);
+  background: rgba(24, 24, 27, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hud-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.hud-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #38bdf8;
+  cursor: pointer;
+  border: 2px solid #0c4a6e;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #38bdf8;
+  cursor: pointer;
+  border: 2px solid #0c4a6e;
+}
