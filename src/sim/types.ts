@@ -141,8 +141,14 @@ export interface VehicleState {
   speed: number;
   /** Current acceleration from last IDM evaluation, ft/s^2. */
   accel: number;
-  /** Desired free-flow speed for this driver, ft/s. */
-  desiredSpeed: number;
+  /**
+   * Personal cruising-speed preference as a multiplier of whatever edge's
+   * speed limit the vehicle is currently on (e.g. 1.08 = likes to cruise 8%
+   * over the limit). Recomputed against the current edge every tick rather
+   * than fixed at spawn, so a vehicle actually speeds up after merging onto
+   * a faster road instead of keeping the pace of the road it started on.
+   */
+  speedFactor: number;
   maxAccel: number;
   comfortBrake: number;
   jamDistance: number;

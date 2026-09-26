@@ -142,7 +142,7 @@ const highwayMerge: NetworkSnapshot = {
       lanes: 1,
       laneWidthFt: 11,
       speedLimitMph: 30,
-      zone: { type: "entry", demandVehPerHour: 500 },
+      zone: { type: "entry", demandVehPerHour: 1400 },
     },
     {
       id: "sE2",
@@ -154,7 +154,7 @@ const highwayMerge: NetworkSnapshot = {
       lanes: 1,
       laneWidthFt: 11,
       speedLimitMph: 30,
-      zone: { type: "entry", demandVehPerHour: 500 },
+      zone: { type: "entry", demandVehPerHour: 1400 },
     },
     {
       id: "sE3",

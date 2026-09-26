@@ -154,7 +154,7 @@ function acquireVehicle(): VehicleState {
     distanceAlongEdge: 0,
     speed: 0,
     accel: 0,
-    desiredSpeed: 0,
+    speedFactor: 1,
     maxAccel: 0,
     comfortBrake: 0,
     jamDistance: 0,
@@ -305,8 +305,8 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.jamDistance = randRange(5.5, 7.5);
   v.desiredHeadway = isTruck ? randRange(1.6, 2.0) : randRange(1.1, 1.7);
   v.minGap = v.jamDistance;
-  v.desiredSpeed = mphToFtps(edge.speedLimitMph) * randNormalish(1.0, 0.12);
-  v.speed = Math.min(v.desiredSpeed, mphToFtps(edge.speedLimitMph)) * 0.85;
+  v.speedFactor = randNormalish(1.0, 0.12);
+  v.speed = Math.min(v.speedFactor, 1.0) * mphToFtps(edge.speedLimitMph) * 0.85;
   v.accel = 0;
   v.laneChangeCooldown = randRange(0, 60);
   v.spawnTime = simTime;
@@ -486,7 +486,7 @@ function findLeaderGapForVehicle(v: VehicleState, edge: Edge3D): GapInfo {
 }
 
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
-  const v0 = Math.min(v.desiredSpeed, mphToFtps(edge.speedLimitMph) * 1.05);
+  const v0 = mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05);
   const deltaV = v.speed - gapInfo.leaderSpeed;
   const params = {
     a: v.maxAccel,
@@ -504,7 +504,7 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
 // ---------------------------------------------------------------------------
 
 function pairAccel(followerV: VehicleState, followerDist: number, leader: VehicleState | null, edge: Edge3D): number {
-  const v0 = Math.min(followerV.desiredSpeed, mphToFtps(edge.speedLimitMph) * 1.05);
+  const v0 = mphToFtps(edge.speedLimitMph) * Math.min(followerV.speedFactor, 1.05);
   let gap = NO_LEADER_GAP;
   let leaderSpeed = followerV.speed;
   if (leader) {
