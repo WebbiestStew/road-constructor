@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Baloo_2, Manrope } from "next/font/google";
+import { Manrope, Overpass } from "next/font/google";
 import "./globals.css";
 
 const manrope = Manrope({
@@ -8,7 +8,10 @@ const manrope = Manrope({
   display: "swap",
 });
 
-const baloo = Baloo_2({
+// Overpass is the open-source metric-compatible reimplementation of Highway
+// Gothic (the FHWA road-sign alphabet) — the real font isn't freely licensed,
+// this is the standard free substitute.
+const overpass = Overpass({
   subsets: ["latin"],
   weight: ["600", "700", "800"],
   variable: "--font-display",
@@ -26,7 +29,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${manrope.variable} ${baloo.variable} antialiased`}>{children}</body>
+      <body className={`${manrope.variable} ${overpass.variable} antialiased`}>{children}</body>
     </html>
   );
 }
