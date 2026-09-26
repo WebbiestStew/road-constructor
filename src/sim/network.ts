@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { ROAD_CLASSES } from "./roadClasses";
+import { ROAD_CLASSES, ROUNDABOUT_PRIORITY } from "./roadClasses";
 import { mphToFtps } from "./types";
 import type {
   Edge3D,
@@ -63,10 +63,11 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       length,
       roadClassId: spec.roadClassId,
       elevationLevelId: spec.elevationLevelId,
-      priority: roadClass.priority,
+      priority: spec.isRoundaboutRing ? ROUNDABOUT_PRIORITY : roadClass.priority,
       isFreeway: spec.roadClassId === "highway" || spec.roadClassId === "motorway",
       isElevated: computeIsElevated(spline),
       zone: spec.zone,
+      isRoundaboutRing: spec.isRoundaboutRing ?? false,
       nextEdgeIds: [],
     };
   });

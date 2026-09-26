@@ -132,3 +132,13 @@ export function estimateEdgeCost(
 
 /** Refund fraction when demolishing a road segment. */
 export const DEMOLISH_REFUND_FRACTION = 0.5;
+
+/**
+ * Priority rank given to roundabout ring edges — always higher than any
+ * road class (max 5), so circulating traffic never yields to entering
+ * traffic, matching real right-of-way rules.
+ */
+export const ROUNDABOUT_PRIORITY = 99;
+
+export const ROUNDABOUT_SPEED_MPH = 20;
+export const ROUNDABOUT_LANE_WIDTH_FT = 14;

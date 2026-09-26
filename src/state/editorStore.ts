@@ -6,6 +6,8 @@ import { computeSignalPhaseGroups } from "@/sim/network";
 import {
   DEMOLISH_REFUND_FRACTION,
   ROAD_CLASSES,
+  ROUNDABOUT_LANE_WIDTH_FT,
+  ROUNDABOUT_SPEED_MPH,
   type ElevationLevelId,
   type RoadClassId,
   estimateEdgeCost,
@@ -90,6 +92,9 @@ interface EditorState {
   setDestinationTarget: (edgeId: string, targetSpeedMph: number) => void;
 
   setNodeControl: (nodeId: string, control: JunctionControl | undefined) => void;
+
+  /** Replaces a junction node with an auto-generated roundabout ring, re-pointing its existing approach roads to the ring. */
+  convertNodeToRoundabout: (nodeId: string, radiusFt?: number) => void;
 
   clearNetwork: () => void;
   getSnapshot: () => NetworkSnapshot;
@@ -436,6 +441,112 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const nodesById = new Map(s.nodesById);
       nodesById.set(nodeId, updated);
       return { nodes, nodesById };
+    });
+  },
+
+  convertNodeToRoundabout: (nodeId, radiusFt) => {
+    const state = get();
+    const node = state.nodesById.get(nodeId);
+    if (!node) return;
+
+    const connected = state.edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
+    if (connected.length === 0) return;
+
+    const legMap = new Map<string, EdgeSpec[]>();
+    for (const e of connected) {
+      const otherId = e.fromNodeId === nodeId ? e.toNodeId : e.fromNodeId;
+      const arr = legMap.get(otherId) ?? [];
+      arr.push(e);
+      legMap.set(otherId, arr);
+    }
+    if (legMap.size < 2) return;
+
+    const angleOf = (otherId: string) => {
+      const other = state.nodesById.get(otherId);
+      if (!other) return 0;
+      return Math.atan2(other.position[2] - node.position[2], other.position[0] - node.position[0]);
+    };
+
+    const legs = Array.from(legMap.entries())
+      .map(([otherId, legEdges]) => ({ otherId, angle: angleOf(otherId), edges: legEdges }))
+      .sort((a, b) => a.angle - b.angle);
+
+    const radius = radiusFt ?? Math.max(45, legs.length * 16);
+    const y = node.position[1];
+
+    let nodeSeq = state.nextNodeSeq;
+    const ringNodes: NodeSpec[] = legs.map((leg) => {
+      const id = `n${nodeSeq++}`;
+      const rx = node.position[0] + Math.cos(leg.angle) * radius;
+      const rz = node.position[2] + Math.sin(leg.angle) * radius;
+      return { id, position: [rx, y, rz] };
+    });
+
+    // Re-point every existing approach edge from the old center node to its dedicated ring node.
+    const repointedById = new Map<string, EdgeSpec>();
+    legs.forEach((leg, i) => {
+      const ringNodeId = ringNodes[i].id;
+      for (const e of leg.edges) {
+        if (e.toNodeId === nodeId) repointedById.set(e.id, { ...e, toNodeId: ringNodeId });
+        else repointedById.set(e.id, { ...e, fromNodeId: ringNodeId });
+      }
+    });
+
+    // Ring edges connecting consecutive ring nodes, bowed out through the true arc midpoint so
+    // the ring reads as a circle even with only 3-4 legs.
+    let edgeSeq = state.nextEdgeSeq;
+    let ringCost = 0;
+    const ringEdges: EdgeSpec[] = [];
+    for (let i = 0; i < legs.length; i++) {
+      const a = legs[i];
+      const fromNode = ringNodes[i];
+      const toNode = ringNodes[(i + 1) % legs.length];
+      const delta = (((legs[(i + 1) % legs.length].angle - a.angle) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const midAngle = a.angle + delta / 2;
+      const midPoint: [number, number, number] = [
+        node.position[0] + Math.cos(midAngle) * radius,
+        y,
+        node.position[2] + Math.sin(midAngle) * radius,
+      ];
+      const length = edgeLengthFt(fromNode.position, toNode.position, [midPoint]);
+      ringCost += estimateEdgeCost("lane", "ground", length, 1);
+      ringEdges.push({
+        id: `e${edgeSeq++}`,
+        fromNodeId: fromNode.id,
+        toNodeId: toNode.id,
+        interiorPoints: [midPoint],
+        roadClassId: "lane",
+        elevationLevelId: "ground",
+        lanes: 1,
+        laneWidthFt: ROUNDABOUT_LANE_WIDTH_FT,
+        speedLimitMph: ROUNDABOUT_SPEED_MPH,
+        isRoundaboutRing: true,
+      });
+    }
+
+    set((s) => {
+      const edges = [
+        ...s.edges.filter((e) => !repointedById.has(e.id)),
+        ...Array.from(repointedById.values()),
+        ...ringEdges,
+      ];
+      const nodes = [...s.nodes.filter((n) => n.id !== nodeId), ...ringNodes];
+      const nodesById = new Map(s.nodesById);
+      nodesById.delete(nodeId);
+      for (const rn of ringNodes) nodesById.set(rn.id, rn);
+      const edgesById = new Map(s.edgesById);
+      for (const e of repointedById.values()) edgesById.set(e.id, e);
+      for (const e of ringEdges) edgesById.set(e.id, e);
+      return {
+        nodes,
+        edges,
+        nodesById,
+        edgesById,
+        nextNodeSeq: nodeSeq,
+        nextEdgeSeq: edgeSeq,
+        budget: s.budget - ringCost,
+        selection: null,
+      };
     });
   },
 

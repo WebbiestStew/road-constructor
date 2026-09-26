@@ -175,6 +175,7 @@ function SelectionInspector() {
   const setEdgeRoadClass = useEditorStore((s) => s.setEdgeRoadClass);
   const deleteEdge = useEditorStore((s) => s.deleteEdge);
   const setNodeControl = useEditorStore((s) => s.setNodeControl);
+  const convertNodeToRoundabout = useEditorStore((s) => s.convertNodeToRoundabout);
   const setSelection = useEditorStore((s) => s.setSelection);
   const edges = useEditorStore((s) => s.edges);
 
@@ -245,6 +246,11 @@ function SelectionInspector() {
   const node = nodesById.get(selection.id);
   if (!node) return null;
   const isSignal = node.control?.type === "signal";
+  const legCount = new Set(
+    edges
+      .filter((e) => e.fromNodeId === node.id || e.toNodeId === node.id)
+      .map((e) => (e.fromNodeId === node.id ? e.toNodeId : e.fromNodeId))
+  ).size;
   return (
     <div className="flex flex-col gap-2 rounded-lg bg-white/5 p-3">
       <div className="flex items-center justify-between">
@@ -268,6 +274,15 @@ function SelectionInspector() {
           ? "Approaches are auto-grouped into two phases by heading; 20s green + 2s all-red each."
           : "Higher-class roads get right of way; equal-class approaches yield to whoever arrives first."}
       </p>
+      <button
+        type="button"
+        disabled={legCount < 2}
+        onClick={() => convertNodeToRoundabout(node.id)}
+        className="mt-1 rounded-md bg-sky-500/20 px-2 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Make roundabout
+      </button>
+      {legCount < 2 && <p className="text-[11px] text-zinc-500">Needs at least 2 connected roads.</p>}
     </div>
   );
 }

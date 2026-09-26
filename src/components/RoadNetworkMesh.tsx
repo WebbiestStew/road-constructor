@@ -17,6 +17,8 @@ import {
 
 const ASPHALT_COLOR = "#2a2a2e";
 const ASPHALT_SELECTED_COLOR = "#3a4a5e";
+const ROUNDABOUT_COLOR = "#33383f";
+const ROUNDABOUT_SELECTED_COLOR = "#3d4a5e";
 const WHITE_COLOR = "#f4f4f5";
 const YELLOW_COLOR = "#eab308";
 const BARRIER_COLOR = "#8d8d93";
@@ -103,6 +105,18 @@ function DestinationMarker({ edge, contract }: { edge: Edge3D; contract?: Contra
   );
 }
 
+function YieldMarker({ edge }: { edge: Edge3D }) {
+  const p = edge.spline.getPointAt(1);
+  const tangent = edge.spline.getTangentAt(1);
+  const rotationY = Math.atan2(tangent.x, tangent.z);
+  return (
+    <mesh position={[p.x, p.y + 0.1, p.z]} rotation={[-Math.PI / 2, 0, rotationY]}>
+      <coneGeometry args={[3.2, 0.4, 3]} />
+      <meshStandardMaterial color="#f4f4f5" emissive="#f4f4f5" emissiveIntensity={0.15} />
+    </mesh>
+  );
+}
+
 function EdgeGroup({ edge, contract }: { edge: Edge3D; contract?: ContractStatus }) {
   const geometries = useMemo(() => buildEdgeGeometries(edge), [edge]);
   const isSelected = useEditorStore(
@@ -134,7 +148,15 @@ function EdgeGroup({ edge, contract }: { edge: Edge3D; contract?: ContractStatus
     <group>
       <mesh geometry={geometries.ribbon} receiveShadow onClick={handleClick}>
         <meshStandardMaterial
-          color={isSelected ? ASPHALT_SELECTED_COLOR : ASPHALT_COLOR}
+          color={
+            edge.isRoundaboutRing
+              ? isSelected
+                ? ROUNDABOUT_SELECTED_COLOR
+                : ROUNDABOUT_COLOR
+              : isSelected
+                ? ASPHALT_SELECTED_COLOR
+                : ASPHALT_COLOR
+          }
           roughness={0.95}
           metalness={0.05}
         />
@@ -193,6 +215,17 @@ export default function RoadNetworkMesh({ contracts }: { contracts?: ContractSta
     return map;
   }, [contracts]);
 
+  const ringNodeIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of network.edges) {
+      if (e.isRoundaboutRing) {
+        set.add(e.fromNodeId);
+        set.add(e.toNodeId);
+      }
+    }
+    return set;
+  }, [network]);
+
   return (
     <group>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.15, 0]} receiveShadow>
@@ -203,6 +236,12 @@ export default function RoadNetworkMesh({ contracts }: { contracts?: ContractSta
       {network.edges.map((edge) => (
         <EdgeGroup key={edge.id} edge={edge} contract={contractsByEdgeId.get(edge.id)} />
       ))}
+
+      {network.edges
+        .filter((edge) => !edge.isRoundaboutRing && ringNodeIds.has(edge.toNodeId))
+        .map((edge) => (
+          <YieldMarker key={`yield-${edge.id}`} edge={edge} />
+        ))}
     </group>
   );
 }

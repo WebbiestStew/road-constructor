@@ -76,6 +76,8 @@ export interface EdgeSpec {
   laneWidthFt: number;
   speedLimitMph: number;
   zone?: ZoneSpec;
+  /** True for the auto-generated ring segments of a roundabout — always outranks any road class at a junction. */
+  isRoundaboutRing?: boolean;
 }
 
 /** The editable network as plain, structured-cloneable data. */
@@ -108,6 +110,7 @@ export interface Edge3D {
   /** True if any sampled point along this edge has elevation > 1 ft. */
   isElevated: boolean;
   zone?: ZoneSpec;
+  isRoundaboutRing: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
 }
