@@ -20,14 +20,14 @@ export default function Minimap() {
     if (!ctx) return;
 
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-    ctx.fillStyle = "#e7dfc6";
+    ctx.fillStyle = "#c9f0cf";
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
     if (nodes.length === 0) {
-      ctx.fillStyle = "#8a8266";
+      ctx.fillStyle = "#5c8a63";
       ctx.font = "10px var(--font-ui), sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("Nothing built yet", CANVAS_W / 2, CANVAS_H / 2);
+      ctx.fillText("🗺️ blank canvas!", CANVAS_W / 2, CANVAS_H / 2);
       return;
     }
 

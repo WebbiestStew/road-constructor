@@ -14,10 +14,10 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   return (
     <div className="pointer-events-auto absolute left-4 top-4 z-20 flex items-center gap-1 rounded-full p-1.5 hud-panel">
       <div className="flex items-center gap-1.5 pl-1.5 pr-2.5">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500/15 text-amber-700">
-          <IconRoad className="h-3.5 w-3.5" />
+        <span className="hover-wiggle flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-pink-500 text-white shadow-sm">
+          <IconRoad className="h-4 w-4" />
         </span>
-        <span className="hidden text-sm font-semibold tracking-tight text-zinc-900 sm:inline">
+        <span className="font-display hidden text-base font-extrabold tracking-tight text-[#241b3d] sm:inline">
           Road Constructor
         </span>
       </div>
@@ -28,8 +28,10 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
         <button
           type="button"
           onClick={() => setMode("build")}
-          className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-            mode === "build" ? "bg-zinc-900 text-white shadow" : "text-zinc-600 hover:text-zinc-900"
+          className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
+            mode === "build"
+              ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow"
+              : "text-zinc-600 hover:text-zinc-900"
           }`}
         >
           Build
@@ -37,11 +39,13 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
         <button
           type="button"
           onClick={() => setMode("simulate")}
-          className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-            mode === "simulate" ? "bg-emerald-500 text-white shadow" : "text-zinc-600 hover:text-zinc-900"
+          className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
+            mode === "simulate"
+              ? "bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow"
+              : "text-zinc-600 hover:text-zinc-900"
           }`}
         >
-          Open to Traffic
+          Open to Traffic 🚦
         </button>
       </div>
 
@@ -54,8 +58,10 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
                 key={mult}
                 type="button"
                 onClick={() => setSpeedMultiplier(mult)}
-                className={`rounded-full px-2.5 py-1.5 text-[11px] font-semibold tabular-nums transition ${
-                  speedMultiplier === mult ? "bg-sky-500 text-white" : "text-zinc-600 hover:text-zinc-900"
+                className={`rounded-full px-2.5 py-1.5 text-[11px] font-bold tabular-nums transition ${
+                  speedMultiplier === mult
+                    ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white"
+                    : "text-zinc-600 hover:text-zinc-900"
                 }`}
               >
                 {mult}×

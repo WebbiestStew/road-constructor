@@ -56,8 +56,10 @@ function RoadClassPanel() {
             type="button"
             onClick={() => setRoadClass(cls.id)}
             title={`${cls.label} — key ${i + 1}`}
-            className={`flex w-20 flex-col items-center gap-1.5 rounded-xl px-1.5 py-2 transition ${
-              active ? "bg-zinc-900 text-white" : "text-zinc-700 hover:bg-black/5"
+            className={`flex w-20 flex-col items-center gap-1.5 rounded-xl px-1.5 py-2 transition active:scale-95 ${
+              active
+                ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm"
+                : "text-zinc-700 hover:bg-black/5"
             }`}
           >
             <div className="flex h-6 w-14 flex-col items-center justify-center gap-[3px] rounded-sm bg-[#3a4155] p-1">
@@ -66,7 +68,7 @@ function RoadClassPanel() {
               ))}
             </div>
             <span className="text-[10px] font-semibold leading-none">{cls.label}</span>
-            <span className={`text-[9px] leading-none ${active ? "text-zinc-300" : "text-zinc-500"}`}>
+            <span className={`text-[9px] leading-none ${active ? "text-white/80" : "text-zinc-500"}`}>
               ${pricePerFt}/ft
             </span>
           </button>
@@ -93,8 +95,10 @@ function ElevationPanel() {
             type="button"
             onClick={() => setElevation(lvl.id)}
             title={`${lvl.label} (${lvl.elevationFt >= 0 ? "+" : ""}${lvl.elevationFt} ft)`}
-            className={`flex w-12 flex-col items-center gap-1 rounded-lg py-1.5 text-[8px] font-medium leading-none transition ${
-              selectedElevationId === lvl.id ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-black/5"
+            className={`flex w-12 flex-col items-center gap-1 rounded-lg py-1.5 text-[8px] font-medium leading-none transition active:scale-95 ${
+              selectedElevationId === lvl.id
+                ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm"
+                : "text-zinc-600 hover:bg-black/5"
             }`}
           >
             <span
@@ -113,9 +117,9 @@ function ElevationPanel() {
         <button
           type="button"
           onClick={cancelDrawChain}
-          className="rounded-lg bg-zinc-900 px-2 py-1.5 text-[11px] font-medium text-white hover:bg-zinc-700"
+          className="animate-pop rounded-lg bg-gradient-to-br from-pink-500 to-rose-500 px-2 py-1.5 text-[11px] font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
         >
-          Finish road (Esc)
+          Finish road (Esc) ✓
         </button>
       )}
     </div>
@@ -132,7 +136,7 @@ export default function ToolDock() {
   return (
     <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
       {tool === "draw" && (
-        <div className="flex items-end gap-2">
+        <div className="animate-pop flex items-end gap-2">
           <RoadClassPanel />
           <ElevationPanel />
         </div>

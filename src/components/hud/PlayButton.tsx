@@ -18,6 +18,7 @@ export default function PlayButton({ sim }: { sim: UseTrafficSimulationReturn })
   };
 
   const showPause = mode === "simulate" && running;
+  const shouldPulse = mode === "build";
 
   return (
     <button
@@ -25,7 +26,9 @@ export default function PlayButton({ sim }: { sim: UseTrafficSimulationReturn })
       onClick={handleClick}
       disabled={mode === "simulate" && !ready}
       title={mode === "build" ? "Open to traffic" : showPause ? "Pause" : "Play"}
-      className="pointer-events-auto absolute right-4 top-4 z-20 flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 active:scale-95 disabled:opacity-40"
+      className={`pointer-events-auto absolute right-4 top-4 z-20 flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[#2b1c40] bg-gradient-to-br from-emerald-400 to-green-500 text-white shadow-[0_4px_0_#145c3d] transition hover:-translate-y-0.5 hover:shadow-[0_6px_0_#145c3d] active:translate-y-1 active:shadow-[0_1px_0_#145c3d] disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-[0_4px_0_#145c3d] ${
+        shouldPulse ? "animate-idle-pulse" : ""
+      }`}
     >
       {showPause ? <IconPause className="h-5 w-5" /> : <IconPlay className="ml-0.5 h-5 w-5" />}
     </button>

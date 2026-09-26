@@ -1,16 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --background: #cdc4a0;
-  --foreground: #2b2a22;
+  --background: #d7c9f2;
+  --foreground: #241b3d;
   --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display, var(--font-ui)), ui-rounded, system-ui, sans-serif;
 }
 
 html,
 body {
   height: 100%;
   margin: 0;
-  background: var(--background);
+  background: linear-gradient(160deg, #ffe8a3 0%, #ffd1e8 45%, #c7b4f7 100%);
   color: var(--foreground);
   font-family: var(--font-sans);
   overscroll-behavior: none;
@@ -20,19 +21,24 @@ body {
   box-sizing: border-box;
 }
 
+.font-display {
+  font-family: var(--font-display);
+}
+
 #sim-root {
   position: fixed;
   inset: 0;
   overflow: hidden;
 }
 
-/* Solid "paper map" card used by every floating HUD surface. */
+/* Punchy card used by every floating HUD surface. */
 .hud-panel {
-  background: #f3ede0;
-  border: 1px solid #c9bd9c;
+  background: #fffaf0;
+  border: 2px solid #2b1c40;
+  border-radius: 1rem;
   box-shadow:
-    0 6px 18px rgba(43, 38, 20, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    0 4px 0 #2b1c40,
+    0 10px 22px rgba(43, 28, 64, 0.28);
 }
 
 .hud-scrollbar::-webkit-scrollbar {
@@ -40,7 +46,7 @@ body {
 }
 
 .hud-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(43, 38, 20, 0.2);
+  background: rgba(43, 28, 64, 0.25);
   border-radius: 4px;
 }
 
@@ -49,66 +55,142 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.75rem;
-  color: #4b452f;
-  background: rgba(43, 38, 20, 0.05);
-  border: 1px solid rgba(43, 38, 20, 0.08);
+  border-radius: 0.85rem;
+  color: #43305f;
+  background: #f1e9ff;
+  border: 2px solid #2b1c40;
+  box-shadow: 0 3px 0 #2b1c40;
   transition:
     background-color 120ms ease,
     color 120ms ease,
-    border-color 120ms ease,
-    transform 80ms ease;
+    transform 90ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 90ms ease;
 }
 
 .icon-btn:hover {
-  background: rgba(43, 38, 20, 0.12);
-  color: #201d13;
+  background: #e3d4ff;
+  color: #241b3d;
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 #2b1c40;
 }
 
 .icon-btn:active {
-  transform: scale(0.94);
+  transform: translateY(2px) scale(0.96);
+  box-shadow: 0 1px 0 #2b1c40;
 }
 
 .icon-btn[data-active="true"] {
-  background: linear-gradient(180deg, #f59e0b, #ea8006);
-  border-color: rgba(234, 128, 6, 0.5);
-  color: #2c1400;
-  box-shadow:
-    0 0 0 1px rgba(234, 128, 6, 0.3),
-    0 4px 12px rgba(234, 128, 6, 0.3);
+  background: linear-gradient(180deg, #ff8fd6, #ff5fa8);
+  border-color: #2b1c40;
+  color: #3a0524;
+  box-shadow: 0 3px 0 #2b1c40, 0 0 0 3px rgba(255, 95, 168, 0.35);
 }
 
 .icon-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+  transform: none !important;
 }
 
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(43, 38, 20, 0.15);
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff8fd6, #7dd3fc);
+  opacity: 0.35;
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #0ea5e9;
+  background: #ff5fa8;
   cursor: pointer;
-  border: 2px solid #f3ede0;
-  box-shadow: 0 0 0 1px rgba(43, 38, 20, 0.25);
+  border: 2.5px solid white;
+  box-shadow: 0 0 0 2px #2b1c40;
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #0ea5e9;
+  background: #ff5fa8;
   cursor: pointer;
-  border: 2px solid #f3ede0;
-  box-shadow: 0 0 0 1px rgba(43, 38, 20, 0.25);
+  border: 2.5px solid white;
+  box-shadow: 0 0 0 2px #2b1c40;
+}
+
+/* --- Playful micro-animations --- */
+
+@keyframes pop-in {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-pop {
+  animation: pop-in 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes idle-pulse {
+  0%,
+  100% {
+    box-shadow: 0 4px 0 #145c3d, 0 0 0 0 rgba(34, 197, 94, 0.55);
+  }
+  50% {
+    box-shadow: 0 4px 0 #145c3d, 0 0 0 10px rgba(34, 197, 94, 0);
+  }
+}
+
+.animate-idle-pulse {
+  animation: idle-pulse 2s ease-out infinite;
+}
+
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-4deg);
+  }
+  75% {
+    transform: rotate(4deg);
+  }
+}
+
+.hover-wiggle:hover {
+  animation: wiggle 320ms ease-in-out;
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--drift, 0px), 140px) rotate(var(--spin, 360deg));
+    opacity: 0;
+  }
+}
+
+.confetti-piece {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: confetti-fall 900ms ease-in forwards;
 }

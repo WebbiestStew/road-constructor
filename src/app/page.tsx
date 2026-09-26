@@ -23,12 +23,12 @@ export default function Home() {
         dpr={[1, 2]}
         gl={{ antialias: true, powerPreference: "high-performance" }}
       >
-        <color attach="background" args={["#d9d2b8"]} />
-        <fog attach="fog" args={["#d9d2b8", 4200, 13000]} />
+        <color attach="background" args={["#bff0c8"]} />
+        <fog attach="fog" args={["#bff0c8", 4200, 13000]} />
 
         <OrthographicCamera makeDefault position={CAMERA_POSITION} zoom={1.05} near={1} far={20000} />
 
-        <hemisphereLight intensity={0.65} color="#fff6e0" groundColor="#8a8460" />
+        <hemisphereLight intensity={0.7} color="#fff6e0" groundColor="#5fb85f" />
         <ambientLight intensity={0.35} />
         <directionalLight
           position={[900, 1000, 500]}

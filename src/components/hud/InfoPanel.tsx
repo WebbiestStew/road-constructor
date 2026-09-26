@@ -28,20 +28,24 @@ function StatCard({
   label,
   value,
   unit,
+  gradient,
 }: {
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   label: string;
   value: string;
   unit?: string;
+  gradient: string;
 }) {
   return (
     <div className="flex items-center gap-2.5 rounded-xl bg-black/[0.03] px-3 py-2.5">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-sky-600 shadow-sm">
+      <span
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-sm ${gradient}`}
+      >
         <Icon className="h-3.5 w-3.5" />
       </span>
       <div className="flex min-w-0 flex-col">
         <span className="truncate text-[9.5px] uppercase tracking-wide text-zinc-500">{label}</span>
-        <span className="text-base font-semibold leading-tight text-zinc-900 tabular-nums">
+        <span className="font-display text-base font-bold leading-tight text-[#241b3d] tabular-nums">
           {value}
           {unit ? <span className="ml-1 text-[10px] font-normal text-zinc-500">{unit}</span> : null}
         </span>
@@ -126,8 +130,10 @@ function SelectionInspector() {
                 key={c.id}
                 type="button"
                 onClick={() => setEdgeRoadClass(edge.id, c.id)}
-                className={`rounded-lg px-2 py-1 text-[11px] font-medium transition ${
-                  edge.roadClassId === c.id ? "bg-sky-600 text-white" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+                className={`rounded-lg px-2 py-1 text-[11px] font-bold transition active:scale-95 ${
+                  edge.roadClassId === c.id
+                    ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm"
+                    : "bg-black/5 text-zinc-600 hover:bg-black/10"
                 }`}
               >
                 {c.label.split(" ")[0]}
@@ -142,9 +148,9 @@ function SelectionInspector() {
             deleteEdge(edge.id);
             setSelection(null);
           }}
-          className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-500/20"
+          className="rounded-lg bg-gradient-to-br from-red-500 to-rose-600 px-2.5 py-1.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
         >
-          Demolish (50% refund)
+          💥 Demolish (50% refund)
         </button>
       </div>
     );
@@ -172,8 +178,10 @@ function SelectionInspector() {
         <button
           type="button"
           onClick={() => setNodeControl(node.id, undefined)}
-          className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-medium transition ${
-            !isSignal ? "bg-sky-600 text-white" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+          className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-bold transition active:scale-95 ${
+            !isSignal
+              ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm"
+              : "bg-black/5 text-zinc-600 hover:bg-black/10"
           }`}
         >
           <IconYield className="h-4 w-4" />
@@ -190,8 +198,10 @@ function SelectionInspector() {
               allRedDurationS: 2,
             })
           }
-          className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-medium transition ${
-            isSignal ? "bg-sky-600 text-white" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+          className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-bold transition active:scale-95 ${
+            isSignal
+              ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm"
+              : "bg-black/5 text-zinc-600 hover:bg-black/10"
           }`}
         >
           <IconSignal className="h-4 w-4" />
@@ -209,10 +219,10 @@ function SelectionInspector() {
         type="button"
         disabled={legCount < 2}
         onClick={() => convertNodeToRoundabout(node.id)}
-        className="flex items-center justify-center gap-1.5 rounded-lg bg-sky-600/10 px-2.5 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-600/20 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 px-2.5 py-1.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
       >
         <IconRoundabout className="h-3.5 w-3.5" />
-        Make roundabout
+        Make roundabout 🔄
       </button>
       {legCount < 2 && <p className="text-[11px] text-zinc-500">Needs at least 2 connected roads.</p>}
     </div>
@@ -254,16 +264,39 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   return (
     <div className="hud-panel flex w-80 flex-col gap-4 rounded-2xl p-3.5">
       <div className="grid grid-cols-2 gap-2">
-        <StatCard icon={IconCar} label="Active" value={metrics.activeCount.toString()} unit="veh" />
-        <StatCard icon={IconGauge} label="Avg speed" value={metrics.avgSpeedMph.toFixed(0)} unit="mph" />
-        <StatCard icon={IconFlag} label="Throughput" value={metrics.throughputPerMinute.toString()} unit="/min" />
-        <StatCard icon={IconClock} label="Sim time" value={formatSimTime(metrics.simTime)} />
+        <StatCard
+          icon={IconCar}
+          label="Active"
+          value={metrics.activeCount.toString()}
+          unit="veh"
+          gradient="from-sky-400 to-blue-500"
+        />
+        <StatCard
+          icon={IconGauge}
+          label="Avg speed"
+          value={metrics.avgSpeedMph.toFixed(0)}
+          unit="mph"
+          gradient="from-emerald-400 to-teal-500"
+        />
+        <StatCard
+          icon={IconFlag}
+          label="Throughput"
+          value={metrics.throughputPerMinute.toString()}
+          unit="/min"
+          gradient="from-orange-400 to-amber-500"
+        />
+        <StatCard
+          icon={IconClock}
+          label="Sim time"
+          value={formatSimTime(metrics.simTime)}
+          gradient="from-violet-400 to-fuchsia-500"
+        />
       </div>
 
       {(entries.length === 0 || destinations.length === 0) && (
         <p className="rounded-xl bg-amber-500/15 p-2.5 text-[11px] leading-snug text-amber-800">
-          Go back to Build, pick the Zone tool, and mark at least one road as an Entry and one as a Destination —
-          traffic only flows once both exist.
+          🚧 Ghost town! Hop back to Build, grab the Zone tool, and mark an Entry + a Destination — nobody&rsquo;s
+          driving anywhere until then.
         </p>
       )}
 

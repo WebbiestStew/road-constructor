@@ -2,6 +2,7 @@
 
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import BudgetBar from "./hud/BudgetBar";
+import Confetti from "./hud/Confetti";
 import HintBar from "./hud/HintBar";
 import InfoPanel from "./hud/InfoPanel";
 import Minimap from "./hud/Minimap";
@@ -19,6 +20,7 @@ export default function SimControls({ sim }: { sim: UseTrafficSimulationReturn }
       <InfoPanel sim={sim} />
       <HintBar />
       <Minimap />
+      <Confetti sim={sim} />
     </div>
   );
 }
