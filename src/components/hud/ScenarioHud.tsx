@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SCENARIOS } from "@/sim/scenarios";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
-import { IconClock, IconFlag } from "./icons";
+import { playFailTone, playVictoryFanfare } from "@/lib/sound";
+import { IconClock, IconFlag, IconStar } from "./icons";
 
 function formatMMSS(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -77,26 +78,54 @@ function StatRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function StarRow({ stars }: { stars: 0 | 1 | 2 | 3 }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {[1, 2, 3].map((i) => (
+        <IconStar key={i} className={`h-9 w-9 ${i <= stars ? "text-amber-400" : "text-black/10"}`} />
+      ))}
+    </div>
+  );
+}
+
 function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
   const { scenario, results } = runner;
+
+  useEffect(() => {
+    if (!results) return;
+    if (results.won) playVictoryFanfare();
+    else playFailTone();
+  }, [results]);
+
   if (!scenario || !results) return null;
 
-  const grade = results.score >= 85 ? "S" : results.score >= 70 ? "A" : results.score >= 50 ? "B" : results.score >= 30 ? "C" : "D";
   const isLast = SCENARIOS[SCENARIOS.length - 1].id === scenario.id;
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
       <div className="hud-panel flex w-full max-w-sm flex-col items-center gap-3 rounded-2xl p-6 text-center">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{scenario.name} — time is up!</span>
-        <div className="hover-wiggle flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-pink-500 text-4xl font-black text-white shadow-lg">
-          {grade}
+        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{scenario.name}</span>
+        <div
+          className={`hover-wiggle flex h-20 w-20 items-center justify-center rounded-full text-3xl font-black text-white shadow-lg ${
+            results.won
+              ? "bg-gradient-to-br from-amber-400 to-pink-500"
+              : "bg-gradient-to-br from-zinc-400 to-zinc-600"
+          }`}
+        >
+          {results.won ? "🏆" : "✗"}
         </div>
-        <span className="font-display text-2xl font-extrabold text-[#241b3d]">{results.score} / 100</span>
+        <span className="font-display text-xl font-extrabold text-[#241b3d]">
+          {results.won ? "Scenario complete!" : "Time's up — not quite"}
+        </span>
+        {results.won && <StarRow stars={results.stars} />}
 
         <div className="flex w-full flex-col gap-1.5">
+          {results.summaryLines.map((line, i) => (
+            <div key={i} className="rounded-lg bg-black/[0.03] px-3 py-2 text-left text-[11px] text-zinc-700">
+              {line}
+            </div>
+          ))}
           <StatRow label="Avg speed" value={`${results.avgSpeedMph.toFixed(0)} mph`} />
-          <StatRow label="Throughput" value={`${results.throughputPerMinute.toFixed(0)} /min`} />
-          <StatRow label="Contracts met" value={`${results.contractsMet} / ${results.contractsTotal}`} />
           <StatRow label="Budget left" value={`$${Math.max(0, results.budgetRemaining).toLocaleString()}`} />
         </div>
 
@@ -108,14 +137,25 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
           >
             Retry ↻
           </button>
+          {results.won && (
+            <button
+              type="button"
+              onClick={runner.nextScenario}
+              className="flex-1 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
+            >
+              {isLast ? "Finish 🏆" : "Next ▶"}
+            </button>
+          )}
+        </div>
+        {results.won && (
           <button
             type="button"
-            onClick={runner.nextScenario}
-            className="flex-1 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
+            onClick={runner.continueSandbox}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
           >
-            {isLast ? "Finish 🏆" : "Next ▶"}
+            Continue in Sandbox Mode ♾️
           </button>
-        </div>
+        )}
         <button
           type="button"
           onClick={runner.exitToFreeBuild}
@@ -134,7 +174,12 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
 
   return (
     <>
-      <div className="pointer-events-auto absolute bottom-4 left-4 z-20">
+      <div className="pointer-events-auto absolute bottom-4 left-4 z-20 flex flex-col items-start gap-1.5">
+        {scenario && runner.progress && (
+          <span className="hud-panel rounded-full px-3 py-1 text-[10.5px] font-bold text-zinc-600">
+            {runner.progress.label}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setPickerOpen(true)}

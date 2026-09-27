@@ -19,9 +19,13 @@ import type {
   NodeSpec,
   ZoneSpec,
 } from "@/sim/types";
-import { loadAutosave, saveAutosave, type PersistedPayload } from "./persistence";
+import {
+  loadAutosave,
+  saveAutosave,
+  type PersistedPayload,
+} from "./persistence";
 import { playDemolish, playPlaceRoad } from "@/lib/sound";
-import type { ScenarioDef } from "@/sim/scenarios";
+import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
 export type EditorTool = "draw" | "delete" | "inspect" | "zone";
@@ -36,14 +40,20 @@ export const STARTING_BUDGET = 2_000_000;
 function edgeLengthFt(
   fromPos: [number, number, number],
   toPos: [number, number, number],
-  interiorPoints: [number, number, number][]
+  interiorPoints: [number, number, number][],
 ): number {
-  const points = [new THREE.Vector3(...fromPos), ...interiorPoints.map((p) => new THREE.Vector3(...p)), new THREE.Vector3(...toPos)];
+  const points = [
+    new THREE.Vector3(...fromPos),
+    ...interiorPoints.map((p) => new THREE.Vector3(...p)),
+    new THREE.Vector3(...toPos),
+  ];
   const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
   return curve.getLength();
 }
 
-function reversePoints(points: [number, number, number][]): [number, number, number][] {
+function reversePoints(
+  points: [number, number, number][],
+): [number, number, number][] {
   return [...points].reverse();
 }
 
@@ -65,6 +75,8 @@ interface EditorState {
   twoWay: boolean;
   heatmapEnabled: boolean;
   setHeatmapEnabled: (v: boolean) => void;
+  timeOfDay: "day" | "dusk";
+  setTimeOfDay: (v: "day" | "dusk") => void;
 
   nodes: NodeSpec[];
   edges: EdgeSpec[];
@@ -95,12 +107,22 @@ interface EditorState {
   cancelDrawChain: () => void;
 
   createNodeAt: (position: [number, number, number]) => string;
-  findNearbyNode: (position: [number, number, number], snapFt: number) => string | null;
+  findNearbyNode: (
+    position: [number, number, number],
+    snapFt: number,
+  ) => string | null;
 
   /** Draws a road from an existing node to a new/target point, extending the chain. Returns the terminal node id. */
-  drawTo: (fromNodeId: string, toNodeId: string | null, toPosition: [number, number, number]) => string;
+  drawTo: (
+    fromNodeId: string,
+    toNodeId: string | null,
+    toPosition: [number, number, number],
+  ) => string;
 
-  splitEdgeAt: (edgeId: string, worldPosition: [number, number, number]) => string;
+  splitEdgeAt: (
+    edgeId: string,
+    worldPosition: [number, number, number],
+  ) => string;
 
   deleteEdge: (edgeId: string) => void;
   deleteNode: (nodeId: string) => void;
@@ -112,7 +134,10 @@ interface EditorState {
   setEntryDemand: (edgeId: string, vehiclesPerHour: number) => void;
   setDestinationTarget: (edgeId: string, targetSpeedMph: number) => void;
 
-  setNodeControl: (nodeId: string, control: JunctionControl | undefined) => void;
+  setNodeControl: (
+    nodeId: string,
+    control: JunctionControl | undefined,
+  ) => void;
 
   /** Replaces a junction node with an auto-generated roundabout ring, re-pointing its existing approach roads to the ring. */
   convertNodeToRoundabout: (nodeId: string, radiusFt?: number) => void;
@@ -125,10 +150,17 @@ interface EditorState {
   activeScenarioId: string | null;
   loadScenario: (scenario: ScenarioDef) => void;
   exitScenario: () => void;
+  /** Clears the active scenario and grants an effectively-infinite budget, for continuing to play a won layout without constraints. */
+  enterSandboxMode: () => void;
 }
 
-function findCounterpart(edges: EdgeSpec[], edge: EdgeSpec): EdgeSpec | undefined {
-  return edges.find((e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId);
+function findCounterpart(
+  edges: EdgeSpec[],
+  edge: EdgeSpec,
+): EdgeSpec | undefined {
+  return edges.find(
+    (e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId,
+  );
 }
 
 const autosaved = loadAutosave();
@@ -141,6 +173,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   twoWay: true,
   heatmapEnabled: false,
   setHeatmapEnabled: (v) => set({ heatmapEnabled: v }),
+  timeOfDay: "day",
+  setTimeOfDay: (v) => set({ timeOfDay: v }),
 
   nodes: autosaved?.network.nodes ?? [],
   edges: autosaved?.network.edges ?? [],
@@ -165,7 +199,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextNodeSeq: s.nextNodeSeq,
       nextEdgeSeq: s.nextEdgeSeq,
     };
-    set((state) => ({ past: [...state.past.slice(-(MAX_HISTORY - 1)), entry], future: [] }));
+    set((state) => ({
+      past: [...state.past.slice(-(MAX_HISTORY - 1)), entry],
+      future: [],
+    }));
   },
   undo: () => {
     const s = get();
@@ -218,7 +255,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  setMode: (mode) => set({ mode, drawFromNodeId: null }),
+  setMode: (mode) =>
+    set({
+      mode,
+      drawFromNodeId: null,
+      tool: mode === "simulate" ? "inspect" : "draw",
+      selection: null,
+    }),
   setTool: (tool) => set({ tool, drawFromNodeId: null, selection: null }),
   setRoadClass: (id) => set({ selectedRoadClassId: id }),
   setElevation: (id) => set({ selectedElevationId: id }),
@@ -277,7 +320,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       state.selectedRoadClassId,
       state.selectedElevationId,
       lengthFt,
-      roadClass.lanesPerDirection
+      roadClass.lanesPerDirection,
     );
     const totalCost = state.twoWay ? cost * 2 : cost;
 
@@ -390,19 +433,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
-    const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-    const cost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
+    const lengthFt =
+      node && toNode
+        ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+        : 0;
+    const cost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      edge.lanes,
+    );
     set((s) => {
       const edges = s.edges.filter((e) => e.id !== edgeId);
       const edgesById = new Map(s.edgesById);
       edgesById.delete(edgeId);
-      return { edges, edgesById, budget: s.budget + cost * DEMOLISH_REFUND_FRACTION };
+      return {
+        edges,
+        edgesById,
+        budget: s.budget + cost * DEMOLISH_REFUND_FRACTION,
+      };
     });
     playDemolish();
   },
 
   deleteNode: (nodeId) => {
-    const connected = get().edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
+    const connected = get().edges.filter(
+      (e) => e.fromNodeId === nodeId || e.toNodeId === nodeId,
+    );
     if (connected.length === 0) get().pushHistoryEntry();
     for (const e of connected) get().deleteEdge(e.id);
     set((s) => {
@@ -421,9 +478,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
-    const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-    const oldCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
-    const newCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, clamped);
+    const lengthFt =
+      node && toNode
+        ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+        : 0;
+    const oldCost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      edge.lanes,
+    );
+    const newCost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      clamped,
+    );
     const updated: EdgeSpec = { ...edge, lanes: clamped };
     set((s) => {
       const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
@@ -448,8 +518,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       get().pushHistoryEntry();
       const node = state.nodesById.get(edge.fromNodeId);
       const toNode = state.nodesById.get(edge.toNodeId);
-      const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-      const cost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
+      const lengthFt =
+        node && toNode
+          ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+          : 0;
+      const cost = estimateEdgeCost(
+        edge.roadClassId,
+        edge.elevationLevelId,
+        lengthFt,
+        edge.lanes,
+      );
       const backward: EdgeSpec = {
         id: `e${get().nextEdgeSeq}`,
         fromNodeId: edge.toNodeId,
@@ -465,7 +543,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const edges = [...s.edges, backward];
         const edgesById = new Map(s.edgesById);
         edgesById.set(backward.id, backward);
-        return { edges, edgesById, nextEdgeSeq: s.nextEdgeSeq + 1, budget: s.budget - cost };
+        return {
+          edges,
+          edgesById,
+          nextEdgeSeq: s.nextEdgeSeq + 1,
+          budget: s.budget - cost,
+        };
       });
     }
   },
@@ -476,10 +559,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
-    const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-    const oldCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
+    const lengthFt =
+      node && toNode
+        ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+        : 0;
+    const oldCost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      edge.lanes,
+    );
     const cls = ROAD_CLASSES[roadClassId];
-    const newCost = estimateEdgeCost(roadClassId, edge.elevationLevelId, lengthFt, cls.lanesPerDirection);
+    const newCost = estimateEdgeCost(
+      roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      cls.lanesPerDirection,
+    );
     const updated: EdgeSpec = {
       ...edge,
       roadClassId,
@@ -501,7 +597,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     let zone: ZoneSpec | undefined;
     if (!edge.zone) zone = { type: "entry", demandVehPerHour: 600 };
-    else if (edge.zone.type === "entry") zone = { type: "destination", targetSpeedMph: 25 };
+    else if (edge.zone.type === "entry")
+      zone = { type: "destination", targetSpeedMph: 25 };
     else zone = undefined;
     const updated: EdgeSpec = { ...edge, zone };
     set((s) => {
@@ -515,7 +612,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setEntryDemand: (edgeId, vehiclesPerHour) => {
     const edge = get().edgesById.get(edgeId);
     if (!edge || edge.zone?.type !== "entry") return;
-    const updated: EdgeSpec = { ...edge, zone: { type: "entry", demandVehPerHour: vehiclesPerHour } };
+    const updated: EdgeSpec = {
+      ...edge,
+      zone: { type: "entry", demandVehPerHour: vehiclesPerHour },
+    };
     set((s) => {
       const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
       const edgesById = new Map(s.edgesById);
@@ -527,7 +627,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setDestinationTarget: (edgeId, targetSpeedMph) => {
     const edge = get().edgesById.get(edgeId);
     if (!edge || edge.zone?.type !== "destination") return;
-    const updated: EdgeSpec = { ...edge, zone: { type: "destination", targetSpeedMph } };
+    const updated: EdgeSpec = {
+      ...edge,
+      zone: { type: "destination", targetSpeedMph },
+    };
     set((s) => {
       const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
       const edgesById = new Map(s.edgesById);
@@ -543,8 +646,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     let resolvedControl = control;
     if (control?.type === "signal") {
-      const { groupA, groupB } = computeSignalPhaseGroups(nodeId, state.edges, state.nodesById);
-      resolvedControl = { type: "signal", groupA, groupB, greenDurationS: 20, allRedDurationS: 2 };
+      const { groupA, groupB } = computeSignalPhaseGroups(
+        nodeId,
+        state.edges,
+        state.nodesById,
+      );
+      resolvedControl = {
+        type: "signal",
+        groupA,
+        groupB,
+        greenDurationS: 20,
+        allRedDurationS: 2,
+      };
     }
     const updated: NodeSpec = { ...node, control: resolvedControl };
     set((s) => {
@@ -560,7 +673,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const node = state.nodesById.get(nodeId);
     if (!node) return;
 
-    const connected = state.edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
+    const connected = state.edges.filter(
+      (e) => e.fromNodeId === nodeId || e.toNodeId === nodeId,
+    );
     if (connected.length === 0) return;
     get().pushHistoryEntry();
 
@@ -576,11 +691,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const angleOf = (otherId: string) => {
       const other = state.nodesById.get(otherId);
       if (!other) return 0;
-      return Math.atan2(other.position[2] - node.position[2], other.position[0] - node.position[0]);
+      return Math.atan2(
+        other.position[2] - node.position[2],
+        other.position[0] - node.position[0],
+      );
     };
 
     const legs = Array.from(legMap.entries())
-      .map(([otherId, legEdges]) => ({ otherId, angle: angleOf(otherId), edges: legEdges }))
+      .map(([otherId, legEdges]) => ({
+        otherId,
+        angle: angleOf(otherId),
+        edges: legEdges,
+      }))
       .sort((a, b) => a.angle - b.angle);
 
     const radius = radiusFt ?? Math.max(45, legs.length * 16);
@@ -599,7 +721,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     legs.forEach((leg, i) => {
       const ringNodeId = ringNodes[i].id;
       for (const e of leg.edges) {
-        if (e.toNodeId === nodeId) repointedById.set(e.id, { ...e, toNodeId: ringNodeId });
+        if (e.toNodeId === nodeId)
+          repointedById.set(e.id, { ...e, toNodeId: ringNodeId });
         else repointedById.set(e.id, { ...e, fromNodeId: ringNodeId });
       }
     });
@@ -613,14 +736,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const a = legs[i];
       const fromNode = ringNodes[i];
       const toNode = ringNodes[(i + 1) % legs.length];
-      const delta = (((legs[(i + 1) % legs.length].angle - a.angle) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const delta =
+        (((legs[(i + 1) % legs.length].angle - a.angle) % (Math.PI * 2)) +
+          Math.PI * 2) %
+        (Math.PI * 2);
       const midAngle = a.angle + delta / 2;
       const midPoint: [number, number, number] = [
         node.position[0] + Math.cos(midAngle) * radius,
         y,
         node.position[2] + Math.sin(midAngle) * radius,
       ];
-      const length = edgeLengthFt(fromNode.position, toNode.position, [midPoint]);
+      const length = edgeLengthFt(fromNode.position, toNode.position, [
+        midPoint,
+      ]);
       ringCost += estimateEdgeCost("lane", "ground", length, 1);
       ringEdges.push({
         id: `e${edgeSeq++}`,
@@ -729,6 +857,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   exitScenario: () => set({ activeScenarioId: null }),
+  enterSandboxMode: () => set({ activeScenarioId: null, budget: SANDBOX_BUDGET }),
 }));
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;

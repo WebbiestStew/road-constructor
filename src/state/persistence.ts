@@ -76,3 +76,54 @@ export function parseNetworkFile(text: string): PersistedPayload | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// URL share/permalink: the same PersistedPayload, gzip-compressed and
+// base64url-encoded into a `#data=...` URL hash fragment so a whole network
+// can be shared as a link with no server-side storage.
+// ---------------------------------------------------------------------------
+
+async function gzipCompress(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([data as BlobPart]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buffer = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buffer);
+}
+
+async function gzipDecompress(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const buffer = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buffer);
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(b64url: string): Uint8Array {
+  const padded = b64url.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(b64url.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Serializes a network payload into a compact, URL-hash-safe string. */
+export async function encodePayloadToShareHash(payload: PersistedPayload): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const compressed = await gzipCompress(bytes);
+  return bytesToBase64Url(compressed);
+}
+
+/** Reverses `encodePayloadToShareHash`, returning null for anything malformed or corrupted. */
+export async function decodeShareHash(hash: string): Promise<PersistedPayload | null> {
+  try {
+    const bytes = base64UrlToBytes(hash);
+    const decompressed = await gzipDecompress(bytes);
+    const parsed = JSON.parse(new TextDecoder().decode(decompressed));
+    return isValidPayload(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}

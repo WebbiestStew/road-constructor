@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
 import { useEditorStore } from "@/state/editorStore";
 import { ELEVATION_BY_ID, ROAD_CLASSES, ROAD_CLASS_LIST, estimateEdgeCost } from "@/sim/roadClasses";
+import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
+import { playDrawWhoosh } from "@/lib/sound";
+
+/** Minimum drag distance, in feet, between successive draw-whoosh sound triggers. */
+const WHOOSH_DISTANCE_FT = 60;
 
 const NODE_RADIUS_FT = 7;
 const NODE_HEIGHT_FT = 2;
@@ -26,6 +31,11 @@ export default function RoadEditor() {
   const selection = useEditorStore((s) => s.selection);
 
   const [hoverPoint, setHoverPoint] = useState<[number, number, number] | null>(null);
+  const lastWhooshPointRef = useRef<[number, number, number] | null>(null);
+
+  useEffect(() => {
+    if (!drawFromNodeId) lastWhooshPointRef.current = null;
+  }, [drawFromNodeId]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -62,7 +72,20 @@ export default function RoadEditor() {
 
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
     if (tool !== "draw" || !drawFromNodeId) return;
-    setHoverPoint([event.point.x, elevationFt, event.point.z]);
+    const point: [number, number, number] = [event.point.x, elevationFt, event.point.z];
+    setHoverPoint(point);
+
+    const last = lastWhooshPointRef.current;
+    if (!last) {
+      lastWhooshPointRef.current = point;
+    } else {
+      const dx = point[0] - last[0];
+      const dz = point[2] - last[2];
+      if (Math.sqrt(dx * dx + dz * dz) >= WHOOSH_DISTANCE_FT) {
+        lastWhooshPointRef.current = point;
+        playDrawWhoosh();
+      }
+    }
   };
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
@@ -107,7 +130,12 @@ export default function RoadEditor() {
 
   const drawFromNode = drawFromNodeId ? nodes.find((n) => n.id === drawFromNodeId) : null;
 
-  let dragInfo: { midpoint: [number, number, number]; lengthFt: number; costLabel: string } | null = null;
+  let dragInfo: {
+    midpoint: [number, number, number];
+    lengthFt: number;
+    costLabel: string;
+    gradePercent: number;
+  } | null = null;
   if (drawFromNode && hoverPoint) {
     const dx = hoverPoint[0] - drawFromNode.position[0];
     const dy = hoverPoint[1] - drawFromNode.position[1];
@@ -124,6 +152,7 @@ export default function RoadEditor() {
       ],
       lengthFt,
       costLabel: `$${Math.round(totalCost).toLocaleString()}`,
+      gradePercent: computeGradePercent(drawFromNode.position, hoverPoint),
     };
   }
 
@@ -195,6 +224,16 @@ export default function RoadEditor() {
             }}
           >
             {Math.round(dragInfo.lengthFt)} ft &middot; {dragInfo.costLabel}
+            {Math.abs(dragInfo.gradePercent) >= 0.5 && (
+              <>
+                {" "}
+                &middot;{" "}
+                <span style={{ color: Math.abs(dragInfo.gradePercent) > MAX_GRADE_PERCENT ? "#f87171" : "#f4f4f5" }}>
+                  {dragInfo.gradePercent > 0 ? "+" : ""}
+                  {dragInfo.gradePercent.toFixed(1)}% grade
+                </span>
+              </>
+            )}
           </div>
         </Html>
       )}

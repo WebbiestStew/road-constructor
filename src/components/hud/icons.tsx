@@ -274,3 +274,39 @@ export function IconSpeakerOff(props: IconProps) {
     </svg>
   );
 }
+
+export function IconSun(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 3v2.2M12 18.8V21M4.4 4.4l1.55 1.55M18.05 18.05L19.6 19.6M3 12h2.2M18.8 12H21M4.4 19.6l1.55-1.55M18.05 5.95L19.6 4.4" />
+    </svg>
+  );
+}
+
+export function IconStar(props: IconProps) {
+  return (
+    <svg {...base} {...props} fill="currentColor" stroke="none">
+      <path d="M12 2.8l2.7 5.9 6.4.6-4.8 4.4 1.4 6.4L12 16.9 6.3 20.1l1.4-6.4-4.8-4.4 6.4-.6z" />
+    </svg>
+  );
+}
+
+export function IconShare(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="18" cy="5" r="2.4" />
+      <circle cx="6" cy="12" r="2.4" />
+      <circle cx="18" cy="19" r="2.4" />
+      <path d="M8.1 10.8l7.8-4.2M8.1 13.2l7.8 4.2" />
+    </svg>
+  );
+}
+
+export function IconMoon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M20 14.2A8.2 8.2 0 1 1 9.8 4a6.7 6.7 0 0 0 10.2 10.2z" />
+    </svg>
+  );
+}

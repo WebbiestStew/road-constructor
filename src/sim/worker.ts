@@ -11,6 +11,7 @@ import {
   type MobilInputs,
 } from "./idm";
 import { distanceToT, laneCenterPointAt } from "./laneGeometry";
+import { computeEdgeTrafficStats, type EdgeTrafficStats } from "./los";
 import { assembleNetwork, computeRoute } from "./network";
 import {
   MAX_VEHICLES,
@@ -91,12 +92,24 @@ let speedMultiplier = 1;
 let simTime = 0;
 let nextVehicleId = 1;
 let spawnedTotal = 0;
+let completedTripsTotal = 0;
 let accumulator = 0;
 let lastWallTimeMs = 0;
 
 const vehicles = new Map<number, VehicleState>();
 const vehiclePool: VehicleState[] = [];
 const despawnTimestamps: number[] = [];
+
+// ---------------------------------------------------------------------------
+// Gridlock detection: a vehicle stuck at near-zero speed for GRIDLOCK_DESPAWN_S
+// is forcibly removed (with a throughput penalty) rather than sitting frozen
+// forever. It gets a warning window first so the player sees it coming.
+// ---------------------------------------------------------------------------
+
+const STUCK_SPEED_THRESHOLD_FTPS = 1.5; // ~1 mph
+const GRIDLOCK_WARNING_S = 18;
+const GRIDLOCK_DESPAWN_S = 25;
+let gridlockPenaltyTotal = 0;
 
 // ---------------------------------------------------------------------------
 // Scratch objects (allocation-free hot path)
@@ -110,6 +123,8 @@ const _scale = new THREE.Vector3(1, 1, 1);
 const _matrix = new THREE.Matrix4();
 const _color = new THREE.Color();
 const FORWARD_AXIS = new THREE.Vector3(0, 0, 1);
+const _curveTangentA = new THREE.Vector3();
+const _curveTangentB = new THREE.Vector3();
 
 // Blue -> amber -> red (never green) so free-flow vs. stopped traffic reads
 // correctly for red-green colorblind players, who lose the green/red contrast
@@ -166,6 +181,7 @@ function acquireVehicle(): VehicleState {
     laneChangeCooldown: 0,
     destinationEdgeId: "",
     spawnTime: 0,
+    stuckTimeS: 0,
   };
 }
 
@@ -245,6 +261,8 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   congestionTimer.clear();
   problemEdges.clear();
   lastSnapshotSimTime = simTime;
+  gridlockPenaltyTotal = 0;
+  completedTripsTotal = 0;
 
   for (const [id, v] of vehicles) {
     if (!network.edgesById.has(v.edgeId)) {
@@ -298,7 +316,8 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.routeIndex = 0;
   v.destinationEdgeId = destinationEdgeId;
 
-  const isTruck = rng() < 0.08;
+  // 15% semi-trucks, 85% passenger sedans, each with distinct accel/braking physics.
+  const isTruck = rng() < 0.15;
   v.length = isTruck ? randRange(32, 42) : randRange(13, 19);
   v.maxAccel = isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
   v.comfortBrake = isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
@@ -310,6 +329,7 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.accel = 0;
   v.laneChangeCooldown = randRange(0, 60);
   v.spawnTime = simTime;
+  v.stuckTimeS = 0;
 
   vehicles.set(v.id, v);
   spawnedTotal++;
@@ -485,8 +505,34 @@ function findLeaderGapForVehicle(v: VehicleState, edge: Edge3D): GapInfo {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Curvature-based speed cap: sample the tangent direction a short lookahead
+// ahead of the vehicle and behind it; a bigger swing means a tighter curve,
+// which caps how fast a driver is willing to take it (independent of the
+// road's posted limit) — sharp bends slow traffic down like a real curve
+// advisory speed, not just a hard sign-post number.
+// ---------------------------------------------------------------------------
+
+const CURVATURE_LOOKAHEAD_FT = 55;
+const COMFORTABLE_LATERAL_ACCEL_FTPS2 = 11;
+
+function curvatureSpeedCapFtps(edge: Edge3D, distanceAlongEdge: number): number {
+  if (edge.length <= CURVATURE_LOOKAHEAD_FT) return Infinity;
+  const t0 = distanceToT(edge, Math.max(0, distanceAlongEdge - CURVATURE_LOOKAHEAD_FT / 2));
+  const t1 = distanceToT(edge, Math.min(edge.length, distanceAlongEdge + CURVATURE_LOOKAHEAD_FT / 2));
+  edge.spline.getTangentAt(t0, _curveTangentA);
+  edge.spline.getTangentAt(t1, _curveTangentB);
+  const angleRad = _curveTangentA.angleTo(_curveTangentB);
+  if (angleRad < 0.015) return Infinity; // effectively straight — no cap
+  const turnRadiusFt = CURVATURE_LOOKAHEAD_FT / angleRad;
+  return Math.sqrt(turnRadiusFt * COMFORTABLE_LATERAL_ACCEL_FTPS2);
+}
+
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
-  const v0 = mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05);
+  const v0 = Math.min(
+    mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05),
+    curvatureSpeedCapFtps(edge, v.distanceAlongEdge)
+  );
   const deltaV = v.speed - gapInfo.leaderSpeed;
   const params = {
     a: v.maxAccel,
@@ -672,11 +718,25 @@ function step(dt: number) {
   }
 
   const toRemove: number[] = [];
+  const gridlockRemoved = new Set<number>();
   for (const v of vehicles.values()) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
 
     v.speed = clamp(v.speed + v.accel * dt, 0, MAX_SPEED_FTPS);
+
+    if (v.speed < STUCK_SPEED_THRESHOLD_FTPS) {
+      v.stuckTimeS += dt;
+    } else {
+      v.stuckTimeS = 0;
+    }
+    if (v.stuckTimeS >= GRIDLOCK_DESPAWN_S) {
+      toRemove.push(v.id);
+      gridlockRemoved.add(v.id);
+      gridlockPenaltyTotal++;
+      continue;
+    }
+
     const deltaDist = v.speed * dt;
     v.distanceAlongEdge += deltaDist;
 
@@ -704,7 +764,12 @@ function step(dt: number) {
   for (const id of toRemove) {
     const v = vehicles.get(id);
     if (v) {
-      despawnTimestamps.push(simTime);
+      // Only trips that actually reached their destination count toward
+      // throughput — a gridlock-forced removal is a penalty, not a completion.
+      if (!gridlockRemoved.has(id)) {
+        despawnTimestamps.push(simTime);
+        completedTripsTotal++;
+      }
       releaseVehicle(v);
     }
     vehicles.delete(id);
@@ -721,26 +786,28 @@ function step(dt: number) {
 // Output buffer writing
 // ---------------------------------------------------------------------------
 
+/** Green(blue) >80% of the limit, amber 40-80%, red below 40% — matches the spec's 3-tier congestion coloring, substituting blue for green so the free-flow/stopped contrast survives red-green colorblindness. */
 function speedColorInto(ratio: number, out: THREE.Color) {
   const r = clamp(ratio, 0, 1.2);
-  if (r >= 0.75) {
+  if (r > 0.8) {
     out.copy(COLOR_FREE);
-  } else if (r <= 0.2) {
-    out.copy(COLOR_STOP);
-  } else if (r <= 0.5) {
-    out.lerpColors(COLOR_STOP, COLOR_SLOW, (r - 0.2) / 0.3);
+  } else if (r >= 0.4) {
+    out.copy(COLOR_SLOW);
   } else {
-    out.lerpColors(COLOR_SLOW, COLOR_FREE, (r - 0.5) / 0.25);
+    out.copy(COLOR_STOP);
   }
 }
 
 const edgeSpeedRatioSum = new Map<string, number>();
 const edgeSpeedRatioCount = new Map<string, number>();
+const edgeSpeedSumMph = new Map<string, number>();
 
-function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: number } {
-  if (!network) return { activeCount: 0, avgSpeedFtS: 0 };
+function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: number; gridlockMarkers: [number, number, number][] } {
+  if (!network) return { activeCount: 0, avgSpeedFtS: 0, gridlockMarkers: [] };
   edgeSpeedRatioSum.clear();
   edgeSpeedRatioCount.clear();
+  edgeSpeedSumMph.clear();
+  const gridlockMarkers: [number, number, number][] = [];
   let i = 0;
   let speedSum = 0;
   for (const v of vehicles.values()) {
@@ -751,6 +818,10 @@ function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: numb
     const t = distanceToT(edge, v.distanceAlongEdge);
     laneCenterPointAt(edge, t, v.laneIndex, _tangent, _right, _pos);
     _pos.y += VEHICLE_HEIGHT_FT / 2;
+
+    if (v.stuckTimeS >= GRIDLOCK_WARNING_S) {
+      gridlockMarkers.push([_pos.x, _pos.y, _pos.z]);
+    }
 
     _quat.setFromUnitVectors(FORWARD_AXIS, _tangent);
     _scale.set(1, 1, v.length / VEHICLE_LENGTH_FT);
@@ -764,11 +835,12 @@ function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: numb
 
     edgeSpeedRatioSum.set(edge.id, (edgeSpeedRatioSum.get(edge.id) ?? 0) + ratio);
     edgeSpeedRatioCount.set(edge.id, (edgeSpeedRatioCount.get(edge.id) ?? 0) + 1);
+    edgeSpeedSumMph.set(edge.id, (edgeSpeedSumMph.get(edge.id) ?? 0) + ftpsToMph(v.speed));
 
     speedSum += v.speed;
     i++;
   }
-  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0 };
+  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0, gridlockMarkers };
 }
 
 function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
@@ -776,6 +848,17 @@ function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
   for (const [edgeId, sum] of edgeSpeedRatioSum) {
     const count = edgeSpeedRatioCount.get(edgeId) ?? 1;
     result.push([edgeId, sum / count]);
+  }
+  return result;
+}
+
+function computeEdgeTrafficStatsList(): EdgeTrafficStats[] {
+  if (!network) return [];
+  const result: EdgeTrafficStats[] = [];
+  for (const edge of network.edges) {
+    const count = edgeSpeedRatioCount.get(edge.id) ?? 0;
+    const avgSpeedMph = count > 0 ? (edgeSpeedSumMph.get(edge.id) ?? 0) / count : 0;
+    result.push(computeEdgeTrafficStats(edge.id, count, avgSpeedMph, edge.length, edge.lanes, edge.roadClassId));
   }
   return result;
 }
@@ -819,7 +902,7 @@ function updateCongestionState(deltaSimTime: number) {
 
 function postSnapshot() {
   const buf = acquireBufferSet();
-  const { activeCount, avgSpeedFtS } = writeSnapshot(buf);
+  const { activeCount, avgSpeedFtS, gridlockMarkers } = writeSnapshot(buf);
   const deltaSimTime = Math.max(0, simTime - lastSnapshotSimTime);
   lastSnapshotSimTime = simTime;
   updateCongestionState(deltaSimTime);
@@ -834,9 +917,13 @@ function postSnapshot() {
     avgSpeedFtS,
     throughputLastMinute: despawnTimestamps.length,
     spawnedTotal,
+    completedTripsTotal,
     contracts: computeContracts(),
     edgeSpeedRatios: computeEdgeSpeedRatios(),
     problemEdgeIds: Array.from(problemEdges),
+    edgeTrafficStats: computeEdgeTrafficStatsList(),
+    gridlockPenaltyTotal,
+    gridlockMarkers,
   };
   ctx.postMessage(message, [matricesBuffer, colorsBuffer]);
 }

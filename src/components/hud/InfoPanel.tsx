@@ -1,7 +1,14 @@
 "use client";
 
-import type { ComponentType, SVGProps } from "react";
-import { ROAD_CLASS_LIST } from "@/sim/roadClasses";
+import { useMemo, type ComponentType, type SVGProps } from "react";
+import {
+  ROAD_CLASS_LIST,
+  estimateEdgeCost,
+  estimateEdgeUpkeepPerHour,
+} from "@/sim/roadClasses";
+import { LOS_COLOR, LOS_DESCRIPTIONS } from "@/sim/los";
+import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
+import { assembleNetwork } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import {
@@ -45,20 +52,34 @@ function StatCard({
         <Icon className="h-3.5 w-3.5" />
       </span>
       <div className="flex min-w-0 flex-col">
-        <span className="truncate text-[9.5px] uppercase tracking-wide text-zinc-500">{label}</span>
+        <span className="truncate text-[9.5px] uppercase tracking-wide text-zinc-500">
+          {label}
+        </span>
         <span className="font-display text-base font-bold leading-tight text-[#241b3d] tabular-nums">
           {value}
-          {unit ? <span className="ml-1 text-[10px] font-normal text-zinc-500">{unit}</span> : null}
+          {unit ? (
+            <span className="ml-1 text-[10px] font-normal text-zinc-500">
+              {unit}
+            </span>
+          ) : null}
         </span>
       </div>
     </div>
   );
 }
 
-function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
+function PanelSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500">{title}</h2>
+      <h2 className="text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500">
+        {title}
+      </h2>
       {children}
     </div>
   );
@@ -74,7 +95,9 @@ function SelectionInspector() {
   const setEdgeRoadClass = useEditorStore((s) => s.setEdgeRoadClass);
   const deleteEdge = useEditorStore((s) => s.deleteEdge);
   const setNodeControl = useEditorStore((s) => s.setNodeControl);
-  const convertNodeToRoundabout = useEditorStore((s) => s.convertNodeToRoundabout);
+  const convertNodeToRoundabout = useEditorStore(
+    (s) => s.convertNodeToRoundabout,
+  );
   const setSelection = useEditorStore((s) => s.setSelection);
 
   if (!selection) return null;
@@ -82,12 +105,23 @@ function SelectionInspector() {
   if (selection.kind === "edge") {
     const edge = edgesById.get(selection.id);
     if (!edge) return null;
-    const isOneWay = !edges.some((e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId);
+    const isOneWay = !edges.some(
+      (e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId,
+    );
+    const fromNode = nodesById.get(edge.fromNodeId);
+    const toNode = nodesById.get(edge.toNodeId);
+    const gradePercent = fromNode && toNode ? computeGradePercent(fromNode.position, toNode.position) : 0;
     return (
       <div className="hud-panel flex flex-col gap-3 rounded-2xl p-3.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-zinc-800">Road segment</span>
-          <button type="button" onClick={() => setSelection(null)} className="text-zinc-400 hover:text-zinc-700">
+          <span className="text-xs font-semibold text-zinc-800">
+            Road segment
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelection(null)}
+            className="text-zinc-400 hover:text-zinc-700"
+          >
             <IconClose className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -102,7 +136,9 @@ function SelectionInspector() {
             >
               −
             </button>
-            <span className="w-4 text-center tabular-nums text-zinc-900">{edge.lanes}</span>
+            <span className="w-4 text-center tabular-nums text-zinc-900">
+              {edge.lanes}
+            </span>
             <button
               type="button"
               onClick={() => setEdgeLanes(edge.id, edge.lanes + 1)}
@@ -123,8 +159,22 @@ function SelectionInspector() {
           />
         </label>
 
+        <div className="flex items-center justify-between text-xs text-zinc-600">
+          <span>Grade</span>
+          <span
+            className={`font-medium tabular-nums ${
+              Math.abs(gradePercent) > MAX_GRADE_PERCENT ? "text-red-600" : "text-zinc-900"
+            }`}
+          >
+            {gradePercent > 0 ? "+" : ""}
+            {gradePercent.toFixed(1)}%
+          </span>
+        </div>
+
         <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500">Class</span>
+          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+            Class
+          </span>
           <div className="flex flex-wrap gap-1">
             {ROAD_CLASS_LIST.map((c) => (
               <button
@@ -163,14 +213,18 @@ function SelectionInspector() {
   const legCount = new Set(
     edges
       .filter((e) => e.fromNodeId === node.id || e.toNodeId === node.id)
-      .map((e) => (e.fromNodeId === node.id ? e.toNodeId : e.fromNodeId))
+      .map((e) => (e.fromNodeId === node.id ? e.toNodeId : e.fromNodeId)),
   ).size;
 
   return (
     <div className="hud-panel flex flex-col gap-3 rounded-2xl p-3.5">
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold text-zinc-800">Junction</span>
-        <button type="button" onClick={() => setSelection(null)} className="text-zinc-400 hover:text-zinc-700">
+        <button
+          type="button"
+          onClick={() => setSelection(null)}
+          className="text-zinc-400 hover:text-zinc-700"
+        >
           <IconClose className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -225,7 +279,11 @@ function SelectionInspector() {
         <IconRoundabout className="h-3.5 w-3.5" />
         Make roundabout 🔄
       </button>
-      {legCount < 2 && <p className="text-[11px] text-zinc-500">Needs at least 2 connected roads.</p>}
+      {legCount < 2 && (
+        <p className="text-[11px] text-zinc-500">
+          Needs at least 2 connected roads.
+        </p>
+      )}
     </div>
   );
 }
@@ -243,12 +301,124 @@ function BuildInfo() {
       <button
         type="button"
         onClick={() => {
-          if (window.confirm("Clear the entire network? This cannot be undone.")) clearNetwork();
+          if (
+            window.confirm("Clear the entire network? This cannot be undone.")
+          )
+            clearNetwork();
         }}
         className="self-end text-[11px] text-zinc-500 underline decoration-dotted hover:text-zinc-700"
       >
         Clear network
       </button>
+    </div>
+  );
+}
+
+function LiveEdgeInspector({ sim }: { sim: UseTrafficSimulationReturn }) {
+  const selection = useEditorStore((s) => s.selection);
+  const nodes = useEditorStore((s) => s.nodes);
+  const edges = useEditorStore((s) => s.edges);
+  const setSelection = useEditorStore((s) => s.setSelection);
+  const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
+
+  if (!selection || selection.kind !== "edge") return null;
+  const edge = network.edgesById.get(selection.id);
+  if (!edge) return null;
+
+  const stats = sim.metrics.edgeTrafficStats.find((s) => s.edgeId === edge.id);
+  const buildCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, edge.length, edge.lanes);
+  const upkeepPerHour = estimateEdgeUpkeepPerHour(edge.roadClassId, edge.length, edge.lanes);
+  const los = stats?.los ?? "A";
+  const hasTraffic = (stats?.vehicleCount ?? 0) > 0;
+  const fromNode = network.nodesById.get(edge.fromNodeId);
+  const toNode = network.nodesById.get(edge.toNodeId);
+  const gradePercent = fromNode && toNode ? computeGradePercent(fromNode.position, toNode.position) : 0;
+
+  return (
+    <div className="hud-panel flex flex-col gap-2.5 rounded-2xl p-3.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-zinc-800">
+          Road segment
+        </span>
+        <button
+          type="button"
+          onClick={() => setSelection(null)}
+          className="text-zinc-400 hover:text-zinc-700"
+        >
+          <IconClose className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2.5 rounded-xl bg-black/[0.03] px-3 py-2.5">
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-base font-black text-white shadow-sm"
+          style={{ backgroundColor: LOS_COLOR[los] }}
+        >
+          {los}
+        </span>
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-[9.5px] uppercase tracking-wide text-zinc-500">
+            Level of Service
+          </span>
+          <span className="font-display text-sm font-bold leading-tight text-[#241b3d]">
+            {hasTraffic ? LOS_DESCRIPTIONS[los] : "No traffic yet"}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard
+          icon={IconCar}
+          label="Density"
+          value={stats ? stats.densityPerLane.toFixed(0) : "0"}
+          unit="veh/mi/ln"
+          gradient="from-sky-400 to-blue-500"
+        />
+        <StatCard
+          icon={IconGauge}
+          label="Avg speed"
+          value={stats ? stats.avgSpeedMph.toFixed(0) : "0"}
+          unit="mph"
+          gradient="from-emerald-400 to-teal-500"
+        />
+        <StatCard
+          icon={IconFlag}
+          label="Flow"
+          value={stats ? stats.flowPerLaneVehPerHour.toFixed(0) : "0"}
+          unit="veh/h/ln"
+          gradient="from-orange-400 to-amber-500"
+        />
+        <StatCard
+          icon={IconGauge}
+          label="v/c ratio"
+          value={stats ? stats.vcRatio.toFixed(2) : "0.00"}
+          gradient="from-violet-400 to-fuchsia-500"
+        />
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs">
+        <span className="text-zinc-600">Grade</span>
+        <span
+          className={`font-medium tabular-nums ${
+            Math.abs(gradePercent) > MAX_GRADE_PERCENT ? "text-red-600" : "text-zinc-900"
+          }`}
+        >
+          {gradePercent > 0 ? "+" : ""}
+          {gradePercent.toFixed(1)}%
+        </span>
+      </div>
+      <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs">
+        <span className="text-zinc-600">Build cost</span>
+        <span className="font-medium tabular-nums text-zinc-900">
+          ${Math.round(buildCost).toLocaleString()}
+        </span>
+      </div>
+      <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs">
+        <span className="text-zinc-600">Upkeep</span>
+        <span className="font-medium tabular-nums text-zinc-900">
+          ${upkeepPerHour.toFixed(2)}/hr
+        </span>
+      </div>
     </div>
   );
 }
@@ -263,127 +433,165 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const contractsByEdge = new Map(metrics.contracts.map((c) => [c.edgeId, c]));
 
   return (
-    <div className="hud-panel flex w-80 flex-col gap-4 rounded-2xl p-3.5">
-      <div className="grid grid-cols-2 gap-2">
-        <StatCard
-          icon={IconCar}
-          label="Active"
-          value={metrics.activeCount.toString()}
-          unit="veh"
-          gradient="from-sky-400 to-blue-500"
-        />
-        <StatCard
-          icon={IconGauge}
-          label="Avg speed"
-          value={metrics.avgSpeedMph.toFixed(0)}
-          unit="mph"
-          gradient="from-emerald-400 to-teal-500"
-        />
-        <StatCard
-          icon={IconFlag}
-          label="Throughput"
-          value={metrics.throughputPerMinute.toString()}
-          unit="/min"
-          gradient="from-orange-400 to-amber-500"
-        />
-        <StatCard
-          icon={IconClock}
-          label="Sim time"
-          value={formatSimTime(metrics.simTime)}
-          gradient="from-violet-400 to-fuchsia-500"
-        />
-      </div>
-
-      {metrics.problemEdgeIds.length > 0 && (
-        <div className="flex items-center gap-2 rounded-xl bg-orange-500/15 p-2.5 text-[11px] leading-snug text-orange-800">
-          <span className="animate-warn-pulse flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-red-600">
-            <IconWarning className="h-3.5 w-3.5" />
-          </span>
-          {metrics.problemEdgeIds.length === 1
-            ? "1 road is badly jammed — look for the flashing marker."
-            : `${metrics.problemEdgeIds.length} roads are badly jammed — look for the flashing markers.`}
+    <div className="flex w-80 flex-col gap-3">
+      <LiveEdgeInspector sim={sim} />
+      <div className="hud-panel flex flex-col gap-4 rounded-2xl p-3.5">
+        <div className="grid grid-cols-2 gap-2">
+          <StatCard
+            icon={IconCar}
+            label="Active"
+            value={metrics.activeCount.toString()}
+            unit="veh"
+            gradient="from-sky-400 to-blue-500"
+          />
+          <StatCard
+            icon={IconGauge}
+            label="Avg speed"
+            value={metrics.avgSpeedMph.toFixed(0)}
+            unit="mph"
+            gradient="from-emerald-400 to-teal-500"
+          />
+          <StatCard
+            icon={IconFlag}
+            label="Throughput"
+            value={metrics.throughputPerMinute.toString()}
+            unit="/min"
+            gradient="from-orange-400 to-amber-500"
+          />
+          <StatCard
+            icon={IconClock}
+            label="Sim time"
+            value={formatSimTime(metrics.simTime)}
+            gradient="from-violet-400 to-fuchsia-500"
+          />
         </div>
-      )}
 
-      {(entries.length === 0 || destinations.length === 0) && (
-        <p className="rounded-xl bg-amber-500/15 p-2.5 text-[11px] leading-snug text-amber-800">
-          🚧 Ghost town! Hop back to Build, grab the Zone tool, and mark an Entry + a Destination — nobody&rsquo;s
-          driving anywhere until then.
-        </p>
-      )}
-
-      {entries.length > 0 && (
-        <PanelSection title="Entry demand">
-          <div className="flex flex-col gap-3">
-            {entries.map((edge, i) => (
-              <div key={edge.id} className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-600">Entry {i + 1}</span>
-                  <span className="font-medium text-zinc-900 tabular-nums">
-                    {edge.zone?.type === "entry" ? edge.zone.demandVehPerHour : 0} veh/h
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={MAX_DEMAND}
-                  step={50}
-                  value={edge.zone?.type === "entry" ? edge.zone.demandVehPerHour : 0}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setEntryDemand(edge.id, value);
-                    setDemand(edge.id, value);
-                  }}
-                />
-              </div>
-            ))}
+        {metrics.gridlockPenaltyTotal > 0 && (
+          <div className="flex items-center gap-2 rounded-xl bg-red-500/15 p-2.5 text-[11px] leading-snug text-red-800">
+            <span className="animate-warn-pulse flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-700">
+              <IconWarning className="h-3.5 w-3.5" />
+            </span>
+            {metrics.gridlockPenaltyTotal === 1
+              ? "1 vehicle gave up in gridlock and left the network."
+              : `${metrics.gridlockPenaltyTotal} vehicles gave up in gridlock and left the network.`}
           </div>
-        </PanelSection>
-      )}
+        )}
 
-      {destinations.length > 0 && (
-        <PanelSection title="Contracts">
-          <div className="flex flex-col gap-1.5">
-            {destinations.map((edge, i) => {
-              const status = contractsByEdge.get(edge.id);
-              const target = edge.zone?.type === "destination" ? edge.zone.targetSpeedMph : 0;
-              const ok = status?.meetsThreshold ?? false;
-              const hasData = (status?.sampleCount ?? 0) > 0;
-              return (
-                <div
-                  key={edge.id}
-                  className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs"
-                >
-                  <span className="flex items-center gap-1.5 text-zinc-600">
-                    <span
-                      className={`h-1.5 w-1.5 rounded-full ${
-                        !hasData ? "bg-zinc-400" : ok ? "bg-blue-500" : "bg-red-500"
-                      }`}
-                    />
-                    Destination {i + 1}
-                  </span>
-                  <span
-                    className={`font-medium tabular-nums ${
-                      !hasData ? "text-zinc-500" : ok ? "text-blue-600" : "text-red-600"
-                    }`}
+        {metrics.problemEdgeIds.length > 0 && (
+          <div className="flex items-center gap-2 rounded-xl bg-orange-500/15 p-2.5 text-[11px] leading-snug text-orange-800">
+            <span className="animate-warn-pulse flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-red-600">
+              <IconWarning className="h-3.5 w-3.5" />
+            </span>
+            {metrics.problemEdgeIds.length === 1
+              ? "1 road is badly jammed — look for the flashing marker."
+              : `${metrics.problemEdgeIds.length} roads are badly jammed — look for the flashing markers.`}
+          </div>
+        )}
+
+        {(entries.length === 0 || destinations.length === 0) && (
+          <p className="rounded-xl bg-amber-500/15 p-2.5 text-[11px] leading-snug text-amber-800">
+            🚧 Ghost town! Hop back to Build, grab the Zone tool, and mark an
+            Entry + a Destination — nobody&rsquo;s driving anywhere until then.
+          </p>
+        )}
+
+        {entries.length > 0 && (
+          <PanelSection title="Entry demand">
+            <div className="flex flex-col gap-3">
+              {entries.map((edge, i) => (
+                <div key={edge.id} className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-600">Entry {i + 1}</span>
+                    <span className="font-medium text-zinc-900 tabular-nums">
+                      {edge.zone?.type === "entry"
+                        ? edge.zone.demandVehPerHour
+                        : 0}{" "}
+                      veh/h
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={MAX_DEMAND}
+                    step={50}
+                    value={
+                      edge.zone?.type === "entry"
+                        ? edge.zone.demandVehPerHour
+                        : 0
+                    }
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      setEntryDemand(edge.id, value);
+                      setDemand(edge.id, value);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </PanelSection>
+        )}
+
+        {destinations.length > 0 && (
+          <PanelSection title="Contracts">
+            <div className="flex flex-col gap-1.5">
+              {destinations.map((edge, i) => {
+                const status = contractsByEdge.get(edge.id);
+                const target =
+                  edge.zone?.type === "destination"
+                    ? edge.zone.targetSpeedMph
+                    : 0;
+                const ok = status?.meetsThreshold ?? false;
+                const hasData = (status?.sampleCount ?? 0) > 0;
+                return (
+                  <div
+                    key={edge.id}
+                    className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs"
                   >
-                    {hasData ? `${status!.actualSpeedMph.toFixed(0)} / ${target} mph` : `target ${target} mph`}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </PanelSection>
-      )}
+                    <span className="flex items-center gap-1.5 text-zinc-600">
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          !hasData
+                            ? "bg-zinc-400"
+                            : ok
+                              ? "bg-blue-500"
+                              : "bg-red-500"
+                        }`}
+                      />
+                      Destination {i + 1}
+                    </span>
+                    <span
+                      className={`font-medium tabular-nums ${
+                        !hasData
+                          ? "text-zinc-500"
+                          : ok
+                            ? "text-blue-600"
+                            : "text-red-600"
+                      }`}
+                    >
+                      {hasData
+                        ? `${status!.actualSpeedMph.toFixed(0)} / ${target} mph`
+                        : `target ${target} mph`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </PanelSection>
+        )}
 
-      <div className="border-t border-black/10 pt-2 text-[11px] text-zinc-500">
-        Total spawned: {metrics.spawnedTotal}
+        <div className="border-t border-black/10 pt-2 text-[11px] text-zinc-500">
+          Total spawned: {metrics.spawnedTotal}
+        </div>
       </div>
     </div>
   );
 }
 
-export default function InfoPanel({ sim }: { sim: UseTrafficSimulationReturn }) {
+export default function InfoPanel({
+  sim,
+}: {
+  sim: UseTrafficSimulationReturn;
+}) {
   const mode = useEditorStore((s) => s.mode);
 
   return (

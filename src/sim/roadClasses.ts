@@ -20,6 +20,10 @@ export interface RoadClassDef {
   /** Whether a two-way road of this class gets a painted/physical median gap. */
   divided: boolean;
   medianGapFt: number;
+  /** Theoretical capacity, vehicles/hour/lane, used for the v/c ratio and Level of Service grade. */
+  capacityVehPerHourPerLane: number;
+  /** Estimated maintenance cost, $ per linear foot per lane per hour of operation. */
+  upkeepPerFtPerLanePerHour: number;
 }
 
 export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
@@ -34,6 +38,8 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     costPerFtPerLane: 40,
     divided: false,
     medianGapFt: 0,
+    capacityVehPerHourPerLane: 900,
+    upkeepPerFtPerLanePerHour: 0.002,
   },
   street: {
     id: "street",
@@ -46,6 +52,8 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     costPerFtPerLane: 60,
     divided: false,
     medianGapFt: 0,
+    capacityVehPerHourPerLane: 1000,
+    upkeepPerFtPerLanePerHour: 0.003,
   },
   avenue: {
     id: "avenue",
@@ -58,6 +66,8 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     costPerFtPerLane: 85,
     divided: false,
     medianGapFt: 0,
+    capacityVehPerHourPerLane: 1400,
+    upkeepPerFtPerLanePerHour: 0.005,
   },
   highway: {
     id: "highway",
@@ -70,6 +80,8 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     costPerFtPerLane: 140,
     divided: true,
     medianGapFt: 12,
+    capacityVehPerHourPerLane: 2000,
+    upkeepPerFtPerLanePerHour: 0.008,
   },
   motorway: {
     id: "motorway",
@@ -82,8 +94,15 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     costPerFtPerLane: 190,
     divided: true,
     medianGapFt: 16,
+    capacityVehPerHourPerLane: 2200,
+    upkeepPerFtPerLanePerHour: 0.012,
   },
 };
+
+/** Estimated hourly maintenance cost, in dollars, for a road segment. */
+export function estimateEdgeUpkeepPerHour(roadClassId: RoadClassId, lengthFt: number, lanes: number): number {
+  return ROAD_CLASSES[roadClassId].upkeepPerFtPerLanePerHour * lanes * lengthFt;
+}
 
 export const ROAD_CLASS_LIST: RoadClassDef[] = [
   ROAD_CLASSES.lane,

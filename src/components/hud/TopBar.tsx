@@ -3,17 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
-import { downloadNetworkFile, parseNetworkFile } from "@/state/persistence";
+import { downloadNetworkFile, encodePayloadToShareHash, parseNetworkFile } from "@/state/persistence";
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
 import {
   IconDownload,
   IconHeatmap,
   IconHelp,
+  IconMoon,
   IconRedo,
   IconRoad,
+  IconShare,
   IconSpeakerOff,
   IconSpeakerOn,
+  IconSun,
   IconUndo,
   IconUpload,
 } from "./icons";
@@ -25,6 +28,8 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const setMode = useEditorStore((s) => s.setMode);
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const setHeatmapEnabled = useEditorStore((s) => s.setHeatmapEnabled);
+  const timeOfDay = useEditorStore((s) => s.timeOfDay);
+  const setTimeOfDay = useEditorStore((s) => s.setTimeOfDay);
   const [muted, setMutedState] = useState(false);
 
   useEffect(() => {
@@ -43,6 +48,7 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const importPayload = useEditorStore((s) => s.importPayload);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { speedMultiplier, setSpeedMultiplier } = sim;
+  const [shareState, setShareState] = useState<"idle" | "copied" | "error">("idle");
 
   const handleImportFile = async (file: File) => {
     const text = await file.text();
@@ -52,6 +58,18 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       return;
     }
     importPayload(payload);
+  };
+
+  const handleShare = async () => {
+    try {
+      const hash = await encodePayloadToShareHash(exportPayload());
+      const url = `${window.location.origin}${window.location.pathname}#data=${hash}`;
+      await navigator.clipboard.writeText(url);
+      setShareState("copied");
+    } catch {
+      setShareState("error");
+    }
+    setTimeout(() => setShareState("idle"), 2000);
   };
 
   return (
@@ -144,6 +162,15 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
                 e.target.value = "";
               }}
             />
+            <button
+              type="button"
+              onClick={() => void handleShare()}
+              title="Copy a shareable link to this layout"
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-bold text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+            >
+              <IconShare className="h-3.5 w-3.5" />
+              {shareState === "copied" ? "Link copied! 🔗" : shareState === "error" ? "Couldn't copy" : "Share"}
+            </button>
           </div>
         </>
       )}
@@ -184,6 +211,15 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
         </>
       )}
 
+      <div className="h-6 w-px bg-black/10" />
+      <button
+        type="button"
+        onClick={() => setTimeOfDay(timeOfDay === "day" ? "dusk" : "day")}
+        title={timeOfDay === "day" ? "Switch to dusk" : "Switch to day"}
+        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+      >
+        {timeOfDay === "day" ? <IconSun className="h-3.5 w-3.5" /> : <IconMoon className="h-3.5 w-3.5" />}
+      </button>
       <div className="h-6 w-px bg-black/10" />
       <button
         type="button"

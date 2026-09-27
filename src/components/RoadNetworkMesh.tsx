@@ -187,6 +187,36 @@ function ProblemMarker({ edge }: { edge: Edge3D }) {
   );
 }
 
+/** A pulsing red exclamation over a vehicle that's been near-stationary long enough to be flagged as gridlocked — it despawns for a throughput penalty shortly after this appears. */
+function GridlockMarker({ position }: { position: [number, number, number] }) {
+  return (
+    <Html
+      position={[position[0], position[1] + 8, position[2]]}
+      style={{ pointerEvents: "none" }}
+      zIndexRange={[15, 0]}
+      occlude={false}
+    >
+      <div
+        className="animate-warn-pulse"
+        style={{
+          transform: "translate(-50%, -130%)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 22,
+          height: 22,
+          borderRadius: 999,
+          background: "linear-gradient(180deg, #f87171, #dc2626)",
+          border: "2px solid #7f1d1d",
+        }}
+        title="Gridlocked — about to give up"
+      >
+        <IconWarning style={{ width: 13, height: 13 }} />
+      </div>
+    </Html>
+  );
+}
+
 function YieldMarker({ edge }: { edge: Edge3D }) {
   const p = edge.spline.getPointAt(1);
   const tangent = edge.spline.getTangentAt(1);
@@ -307,10 +337,12 @@ export default function RoadNetworkMesh({
   contracts,
   edgeSpeedRatios,
   problemEdgeIds,
+  gridlockMarkers,
 }: {
   contracts?: ContractStatus[];
   edgeSpeedRatios?: EdgeSpeedRatio[];
   problemEdgeIds?: string[];
+  gridlockMarkers?: [number, number, number][];
 }) {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
@@ -388,6 +420,11 @@ export default function RoadNetworkMesh({
           .map((edge) => (
             <ProblemMarker key={`problem-${edge.id}`} edge={edge} />
           ))}
+
+      {mode === "simulate" &&
+        (gridlockMarkers ?? []).map((position, i) => (
+          <GridlockMarker key={`gridlock-${i}`} position={position} />
+        ))}
     </group>
   );
 }
