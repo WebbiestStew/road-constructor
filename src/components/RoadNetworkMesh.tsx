@@ -6,16 +6,19 @@ import { Html, Line } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
+import { ROAD_CLASSES } from "@/sim/roadClasses";
 import { useEditorStore } from "@/state/editorStore";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import { IconWarning } from "./hud/icons";
 import {
   buildAsphaltRibbon,
+  buildCrosswalkBars,
   buildDashedStripe,
   buildJerseyBarrier,
   buildLaneArrows,
   buildSolidStripe,
+  buildStopBar,
   buildTaperedPierColumn,
   computePierDescriptors,
   type PierDescriptor,
@@ -60,6 +63,7 @@ interface EdgeGeometries {
   barriers: THREE.BufferGeometry[];
   piers: PierDescriptor[];
   pierColumnGeometries: THREE.BufferGeometry[];
+  markingMeshes: THREE.BufferGeometry[];
   startPoint: THREE.Vector3;
   endPoint: THREE.Vector3;
 }
@@ -69,9 +73,18 @@ const PIER_COLUMN_TOP_HALF_WIDTH_FT = 1.1;
 /** Half-width (ft) of a pier column at its footing — wider than the top, like a real tapered bent. */
 const PIER_COLUMN_BASE_HALF_WIDTH_FT = 1.7;
 
-function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
+/** Lateral half-gap (ft) between the two painted lines of a centerline, undivided two-way roads. */
+const CENTERLINE_GAP_FT = 0.3;
+/** Wider painted buffer (ft) for divided-class centerlines, reading as a neutral median rather than a plain double-yellow. */
+const DIVIDED_CENTERLINE_GAP_FT = 1.6;
+/** A lane-boundary offset this close to 0 is treated as landing on the centerline itself, so it's painted yellow (below) instead of getting a redundant white dash. */
+const CENTERLINE_EPSILON_FT = 0.05;
+
+function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolean, hasCrosswalk: boolean): EdgeGeometries {
   const pavedHalfWidth = (edge.lanes * edge.laneWidthFt) / 2;
   const ribbon = buildAsphaltRibbon(edge, SHOULDER_FT);
+  const roadClass = ROAD_CLASSES[edge.roadClassId];
+  const isCenterlineEdge = isTwoWay && !edge.isRoundaboutRing && !edge.isTexasTurnaround;
 
   const stripes: StripeSpec[] = [];
   stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5), color: WHITE_COLOR });
@@ -79,7 +92,18 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
 
   for (let k = 1; k < edge.lanes; k++) {
     const offset = (k - edge.lanes / 2) * edge.laneWidthFt;
+    // The boundary between a direction's own lanes can land exactly on the
+    // shared two-way centerline (offset 0) purely as an artifact of the
+    // symmetric lane-offset formula — paint that one yellow below instead of
+    // stacking a redundant white dash on top of it.
+    if (isCenterlineEdge && Math.abs(offset) < CENTERLINE_EPSILON_FT) continue;
     stripes.push({ geometry: buildDashedStripe(edge, offset), color: WHITE_COLOR });
+  }
+
+  if (isCenterlineEdge) {
+    const gap = roadClass.divided ? DIVIDED_CENTERLINE_GAP_FT : CENTERLINE_GAP_FT;
+    stripes.push({ geometry: buildSolidStripe(edge, -gap, 0.35), color: YELLOW_COLOR });
+    stripes.push({ geometry: buildSolidStripe(edge, gap, 0.35), color: YELLOW_COLOR });
   }
 
   if (edge.isFreeway) {
@@ -101,6 +125,11 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
     barriers.push(buildJerseyBarrier(edge, barrierOffset));
   }
 
+  const markingMeshes: THREE.BufferGeometry[] = [];
+  const canMarkJunction = !edge.isRoundaboutRing && edge.length > 25;
+  if (canMarkJunction && hasStopBar) markingMeshes.push(buildStopBar(edge));
+  if (canMarkJunction && hasCrosswalk) markingMeshes.push(...buildCrosswalkBars(edge));
+
   const piers = computePierDescriptors(edge);
   const pierColumnGeometries = piers.map((pier) =>
     buildTaperedPierColumn(PIER_COLUMN_TOP_HALF_WIDTH_FT, PIER_COLUMN_BASE_HALF_WIDTH_FT, pier.columnHeight)
@@ -108,7 +137,7 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
   const startPoint = edge.spline.getPointAt(0);
   const endPoint = edge.spline.getPointAt(1);
 
-  return { ribbon, stripes, barriers, piers, pierColumnGeometries, startPoint, endPoint };
+  return { ribbon, stripes, barriers, piers, pierColumnGeometries, markingMeshes, startPoint, endPoint };
 }
 
 function ZoneBadge({
@@ -307,6 +336,9 @@ function EdgeGroup({
   speedRatio,
   turnaroundHighlight,
   onTurnaroundHover,
+  isTwoWay,
+  hasStopBar,
+  hasCrosswalk,
 }: {
   edge: Edge3D;
   contract?: ContractStatus;
@@ -315,8 +347,14 @@ function EdgeGroup({
   speedRatio?: number;
   turnaroundHighlight?: boolean;
   onTurnaroundHover?: (edgeId: string | null, point: THREE.Vector3 | null) => void;
+  isTwoWay: boolean;
+  hasStopBar: boolean;
+  hasCrosswalk: boolean;
 }) {
-  const geometries = useMemo(() => buildEdgeGeometries(edge), [edge]);
+  const geometries = useMemo(
+    () => buildEdgeGeometries(edge, isTwoWay, hasStopBar, hasCrosswalk),
+    [edge, isTwoWay, hasStopBar, hasCrosswalk]
+  );
   const isSelected = useEditorStore(
     (s) => s.selection?.kind === "edge" && s.selection.id === edge.id
   );
@@ -398,6 +436,12 @@ function EdgeGroup({
             emissive={stripe.color}
             emissiveIntensity={0.12}
           />
+        </mesh>
+      ))}
+
+      {geometries.markingMeshes.map((geo, i) => (
+        <mesh key={i} geometry={geo} receiveShadow={false}>
+          <meshStandardMaterial color={WHITE_COLOR} roughness={0.5} emissive={WHITE_COLOR} emissiveIntensity={0.12} />
         </mesh>
       ))}
 
@@ -527,6 +571,41 @@ export default function RoadNetworkMesh({
     return map;
   }, [network]);
 
+  // A two-way pair is two edges running opposite directions between the
+  // same two nodes — used to decide which edges get a painted centerline
+  // instead of treating each direction as an isolated one-way ribbon.
+  const twoWayEdgeIdSet = useMemo(() => {
+    const forwardKeys = new Set(network.edges.map((e) => `${e.fromNodeId}→${e.toNodeId}`));
+    const set = new Set<string>();
+    for (const e of network.edges) {
+      if (forwardKeys.has(`${e.toNodeId}→${e.fromNodeId}`)) set.add(e.id);
+    }
+    return set;
+  }, [network]);
+
+  // Real junctions (2+ distinct connected neighbors) get a stop bar painted
+  // near their approach; signalized junctions also get a crosswalk.
+  const { stopBarEdgeIdSet, crosswalkEdgeIdSet } = useMemo(() => {
+    const neighborsByNode = new Map<string, Set<string>>();
+    for (const e of network.edges) {
+      if (!neighborsByNode.has(e.fromNodeId)) neighborsByNode.set(e.fromNodeId, new Set());
+      if (!neighborsByNode.has(e.toNodeId)) neighborsByNode.set(e.toNodeId, new Set());
+      neighborsByNode.get(e.fromNodeId)!.add(e.toNodeId);
+      neighborsByNode.get(e.toNodeId)!.add(e.fromNodeId);
+    }
+    const stopBars = new Set<string>();
+    const crosswalks = new Set<string>();
+    for (const e of network.edges) {
+      if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
+      const destNode = network.nodesById.get(e.toNodeId);
+      const isJunction = (neighborsByNode.get(e.toNodeId)?.size ?? 0) >= 2;
+      if (!destNode || !isJunction) continue;
+      stopBars.add(e.id);
+      if (destNode.control?.type === "signal") crosswalks.add(e.id);
+    }
+    return { stopBarEdgeIdSet: stopBars, crosswalkEdgeIdSet: crosswalks };
+  }, [network]);
+
   return (
     <group>
       {network.edges.map((edge) => (
@@ -542,6 +621,9 @@ export default function RoadNetworkMesh({
             (edge.id === effectiveHover?.edgeId || edge.id === turnaroundPlan?.targetEdgeId)
           }
           onTurnaroundHover={handleTurnaroundHover}
+          isTwoWay={twoWayEdgeIdSet.has(edge.id)}
+          hasStopBar={stopBarEdgeIdSet.has(edge.id)}
+          hasCrosswalk={crosswalkEdgeIdSet.has(edge.id)}
         />
       ))}
 

@@ -29,7 +29,9 @@ export function sweepProfileAlongCurve(
   centerlineOffsetFt: number,
   profile: ProfilePoint[],
   segments: number,
-  closed = false
+  closed = false,
+  tStart = 0,
+  tEnd = 1
 ): THREE.BufferGeometry {
   const tangentScratch = new THREE.Vector3();
   const rightScratch = new THREE.Vector3();
@@ -38,7 +40,7 @@ export function sweepProfileAlongCurve(
 
   const rings: THREE.Vector3[][] = [];
   for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
+    const t = tStart + (tEnd - tStart) * (i / segments);
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
     const railOrigin = pointScratch.clone().addScaledVector(rightScratch, centerlineOffsetFt);
@@ -97,13 +99,59 @@ export function buildSolidStripe(
   return sweepProfileAlongCurve(edge, lateralOffsetFt, profile, segmentsForLength(edge.length, 12));
 }
 
+/** Builds a solid stop-bar stripe spanning the full paved width, a short distance before the edge's end — the painted line drivers hold behind at a junction. */
+export function buildStopBar(
+  edge: Edge3D,
+  distanceBeforeEndFt = 4,
+  thicknessFt = 1.5,
+  verticalOffsetFt = 0.035
+): THREE.BufferGeometry {
+  const halfWidth = (edge.lanes * edge.laneWidthFt) / 2;
+  const profile: ProfilePoint[] = [
+    { x: -halfWidth, y: verticalOffsetFt },
+    { x: halfWidth, y: verticalOffsetFt },
+  ];
+  const distEnd = Math.max(thicknessFt, edge.length - distanceBeforeEndFt);
+  const distStart = Math.max(0, distEnd - thicknessFt);
+  const tStart = clamp01(distStart / edge.length);
+  const tEnd = clamp01(distEnd / edge.length);
+  return sweepProfileAlongCurve(edge, 0, profile, 2, false, tStart, tEnd);
+}
+
+/** Builds a "ladder" crosswalk: several longitudinal bars spread across the paved width, in a short band before the edge's end. */
+export function buildCrosswalkBars(
+  edge: Edge3D,
+  distanceBeforeEndFt = 18,
+  bandLengthFt = 10,
+  barWidthFt = 2,
+  gapFt = 2.2,
+  verticalOffsetFt = 0.035
+): THREE.BufferGeometry[] {
+  const halfWidth = (edge.lanes * edge.laneWidthFt) / 2;
+  const distEnd = Math.max(bandLengthFt, edge.length - distanceBeforeEndFt);
+  const distStart = Math.max(0, distEnd - bandLengthFt);
+  const tStart = clamp01(distStart / edge.length);
+  const tEnd = clamp01(distEnd / edge.length);
+
+  const bars: THREE.BufferGeometry[] = [];
+  const step = barWidthFt + gapFt;
+  for (let x = -halfWidth + barWidthFt / 2 + 0.5; x <= halfWidth - barWidthFt / 2 - 0.5; x += step) {
+    const profile: ProfilePoint[] = [
+      { x: -barWidthFt / 2, y: verticalOffsetFt },
+      { x: barWidthFt / 2, y: verticalOffsetFt },
+    ];
+    bars.push(sweepProfileAlongCurve(edge, x, profile, 2, false, tStart, tEnd));
+  }
+  return bars;
+}
+
 /** Builds a dashed stripe (lane separators) at a given lateral offset, merged into one geometry. */
 export function buildDashedStripe(
   edge: Edge3D,
   lateralOffsetFt: number,
   widthFt = 0.4,
   dashLenFt = 10,
-  gapLenFt = 20,
+  gapLenFt = 30,
   verticalOffsetFt = 0.03
 ): THREE.BufferGeometry {
   const totalLen = edge.length;
