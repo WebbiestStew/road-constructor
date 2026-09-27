@@ -15,8 +15,11 @@ import {
   buildAsphaltRibbon,
   buildCrosswalkBars,
   buildDashedStripe,
+  buildExpansionJoint,
+  buildGroundShadowRibbon,
   buildJerseyBarrier,
   buildLaneArrows,
+  buildParapet,
   buildSolidStripe,
   buildStopBar,
   buildTaperedPierColumn,
@@ -34,7 +37,12 @@ const WHITE_COLOR = "#f4f4f5";
 const YELLOW_COLOR = "#eab308";
 const BARRIER_COLOR = "#9a9aa0";
 const PIER_COLOR = "#75757c";
+const DECK_UNDERSIDE_COLOR = "#5a5a62";
+const JOINT_COLOR = "#232326";
+const ABUTMENT_COLOR = "#7d7d84";
 const SHOULDER_FT = 4;
+/** How far the paved slab is extruded downward for an elevated edge, so bridges read as a real structure instead of a floating plane. */
+const DECK_THICKNESS_FT = 2.5;
 
 // Blue -> amber -> red (never green) so the heatmap stays readable for
 // red-green colorblind players — see matching comment in sim/worker.ts.
@@ -57,13 +65,24 @@ interface StripeSpec {
   color: string;
 }
 
+interface AbutmentDescriptor {
+  position: [number, number, number];
+  rotationY: number;
+  halfWidth: number;
+  heightFt: number;
+}
+
 interface EdgeGeometries {
   ribbon: THREE.BufferGeometry;
   stripes: StripeSpec[];
   barriers: THREE.BufferGeometry[];
+  parapets: THREE.BufferGeometry[];
   piers: PierDescriptor[];
   pierColumnGeometries: THREE.BufferGeometry[];
   markingMeshes: THREE.BufferGeometry[];
+  groundShadow: THREE.BufferGeometry | null;
+  expansionJoints: THREE.BufferGeometry[];
+  abutments: AbutmentDescriptor[];
   startPoint: THREE.Vector3;
   endPoint: THREE.Vector3;
 }
@@ -82,7 +101,7 @@ const CENTERLINE_EPSILON_FT = 0.05;
 
 function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolean, hasCrosswalk: boolean): EdgeGeometries {
   const pavedHalfWidth = (edge.lanes * edge.laneWidthFt) / 2;
-  const ribbon = buildAsphaltRibbon(edge, SHOULDER_FT);
+  const ribbon = buildAsphaltRibbon(edge, SHOULDER_FT, edge.isElevated ? DECK_THICKNESS_FT : 0);
   const roadClass = ROAD_CLASSES[edge.roadClassId];
   const isCenterlineEdge = isTwoWay && !edge.isRoundaboutRing && !edge.isTexasTurnaround;
 
@@ -119,10 +138,19 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   }
 
   const barriers: THREE.BufferGeometry[] = [];
+  const parapets: THREE.BufferGeometry[] = [];
   if (edge.isFreeway) {
+    // Freeways keep the heavier F-shape Jersey barrier at grade or elevated.
     const barrierOffset = pavedHalfWidth + SHOULDER_FT - 0.5;
     barriers.push(buildJerseyBarrier(edge, -barrierOffset));
     barriers.push(buildJerseyBarrier(edge, barrierOffset));
+  } else if (edge.isElevated && !edge.isRoundaboutRing) {
+    // A raised non-freeway road (a Tier-1+ street/avenue) still has a real
+    // fall hazard along its exposed edge — give it a plainer concrete
+    // parapet rail instead of leaving the drop-off unguarded.
+    const parapetOffset = pavedHalfWidth + 0.5;
+    parapets.push(buildParapet(edge, -parapetOffset));
+    parapets.push(buildParapet(edge, parapetOffset));
   }
 
   const markingMeshes: THREE.BufferGeometry[] = [];
@@ -137,7 +165,55 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const startPoint = edge.spline.getPointAt(0);
   const endPoint = edge.spline.getPointAt(1);
 
-  return { ribbon, stripes, barriers, piers, pierColumnGeometries, markingMeshes, startPoint, endPoint };
+  const groundShadow = edge.isElevated ? buildGroundShadowRibbon(edge) : null;
+  // One expansion joint per pier — that's exactly where a real bridge deck
+  // is segmented, so reusing the pier spacing keeps the two in lockstep for
+  // free instead of computing a second, independent interval.
+  const expansionJoints = edge.isElevated ? piers.map((pier) => buildExpansionJoint(edge, pier.distanceFt)) : [];
+
+  const abutments: AbutmentDescriptor[] = [];
+  if (edge.isElevated && !edge.isRoundaboutRing) {
+    const abutmentHalfWidth = pavedHalfWidth + SHOULDER_FT;
+    if (startPoint.y > 2) {
+      // no abutment: this end continues from an already-elevated point
+      // (an interior joint of a longer elevated corridor — a pier belongs
+      // there, not a ground transition wall)
+    } else {
+      const tangent = edge.spline.getTangentAt(0);
+      const heightFt = Math.max(DECK_THICKNESS_FT + 1, edge.spline.getPointAt(0.02).y);
+      abutments.push({
+        position: [startPoint.x, heightFt / 2, startPoint.z],
+        rotationY: Math.atan2(tangent.x, tangent.z),
+        halfWidth: abutmentHalfWidth,
+        heightFt,
+      });
+    }
+    if (endPoint.y <= 2) {
+      const tangent = edge.spline.getTangentAt(1);
+      const heightFt = Math.max(DECK_THICKNESS_FT + 1, edge.spline.getPointAt(0.98).y);
+      abutments.push({
+        position: [endPoint.x, heightFt / 2, endPoint.z],
+        rotationY: Math.atan2(tangent.x, tangent.z),
+        halfWidth: abutmentHalfWidth,
+        heightFt,
+      });
+    }
+  }
+
+  return {
+    ribbon,
+    stripes,
+    barriers,
+    parapets,
+    piers,
+    pierColumnGeometries,
+    markingMeshes,
+    groundShadow,
+    expansionJoints,
+    abutments,
+    startPoint,
+    endPoint,
+  };
 }
 
 function ZoneBadge({
@@ -448,6 +524,37 @@ function EdgeGroup({
       {geometries.barriers.map((geo, i) => (
         <mesh key={i} geometry={geo} castShadow receiveShadow>
           <meshStandardMaterial color={BARRIER_COLOR} roughness={0.85} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+
+      {geometries.parapets.map((geo, i) => (
+        <mesh key={i} geometry={geo} castShadow receiveShadow>
+          <meshStandardMaterial color={BARRIER_COLOR} roughness={0.88} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+
+      {geometries.expansionJoints.map((geo, i) => (
+        <mesh key={i} geometry={geo}>
+          <meshStandardMaterial color={JOINT_COLOR} roughness={0.7} />
+        </mesh>
+      ))}
+
+      {geometries.groundShadow && (
+        <mesh geometry={geometries.groundShadow}>
+          <meshBasicMaterial color="#000000" transparent opacity={0.22} depthWrite={false} />
+        </mesh>
+      )}
+
+      {geometries.abutments.map((abutment, i) => (
+        <mesh
+          key={i}
+          position={abutment.position}
+          rotation={[0, abutment.rotationY, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[abutment.halfWidth * 2, abutment.heightFt, 3]} />
+          <meshStandardMaterial color={ABUTMENT_COLOR} roughness={0.9} />
         </mesh>
       ))}
 
