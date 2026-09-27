@@ -196,6 +196,18 @@ export function useTrafficSimulation() {
     } satisfies WorkerInMessage);
   }, []);
 
+  /** Re-sends the current network to the worker with the same fixed seed, restarting traffic from a clean slate without leaving Simulate mode. */
+  const resetTraffic = useCallback(() => {
+    const worker = workerRef.current;
+    if (!worker) return;
+    const snapshot = useEditorStore.getState().getSnapshot();
+    worker.postMessage({
+      type: "updateNetwork",
+      network: snapshot,
+      seed: DEFAULT_SEED,
+    } satisfies WorkerInMessage);
+  }, []);
+
   return {
     snapshotRef,
     metrics,
@@ -205,6 +217,7 @@ export function useTrafficSimulation() {
     setRunning,
     setSpeedMultiplier,
     setDemand,
+    resetTraffic,
   };
 }
 

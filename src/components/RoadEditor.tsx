@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
+import * as THREE from "three";
 import { useEditorStore } from "@/state/editorStore";
 import { ELEVATION_BY_ID, ROAD_CLASSES, ROAD_CLASS_LIST, estimateEdgeCost } from "@/sim/roadClasses";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
 import { playDrawWhoosh } from "@/lib/sound";
+import { buildAsphaltRibbon } from "./roadGeometry";
+import type { Edge3D } from "@/sim/types";
 
 /** Minimum drag distance, in feet, between successive draw-whoosh sound triggers. */
 const WHOOSH_DISTANCE_FT = 60;
@@ -29,9 +32,49 @@ export default function RoadEditor() {
   const selectedRoadClassId = useEditorStore((s) => s.selectedRoadClassId);
   const twoWay = useEditorStore((s) => s.twoWay);
   const selection = useEditorStore((s) => s.selection);
+  const budget = useEditorStore((s) => s.budget);
 
   const [hoverPoint, setHoverPoint] = useState<[number, number, number] | null>(null);
   const lastWhooshPointRef = useRef<[number, number, number] | null>(null);
+
+  const drawFromNode = drawFromNodeId ? nodes.find((n) => n.id === drawFromNodeId) : null;
+
+  // A semi-transparent 3D preview of the road segment that would be placed
+  // right now — snapped to the cursor, at the currently selected class and
+  // elevation, so a player sees exactly what they're about to commit to
+  // before clicking.
+  const ghostEdge = useMemo<Edge3D | null>(() => {
+    if (!drawFromNode || !hoverPoint || tool !== "draw") return null;
+    const curve = new THREE.CatmullRomCurve3(
+      [new THREE.Vector3(...drawFromNode.position), new THREE.Vector3(...hoverPoint)],
+      false,
+      "catmullrom",
+      0.5
+    );
+    const roadClass = ROAD_CLASSES[selectedRoadClassId];
+    return {
+      id: "__ghost__",
+      fromNodeId: "",
+      toNodeId: "",
+      spline: curve,
+      lanes: roadClass.lanesPerDirection,
+      laneWidthFt: roadClass.laneWidthFt,
+      speedLimitMph: roadClass.speedLimitMph,
+      length: curve.getLength(),
+      roadClassId: selectedRoadClassId,
+      elevationLevelId: selectedElevationId,
+      priority: roadClass.priority,
+      isFreeway: false,
+      isElevated: false,
+      isRoundaboutRing: false,
+      isTexasTurnaround: false,
+      nextEdgeIds: [],
+      divergeLaneRanges: null,
+      laneTurnBias: [],
+    };
+  }, [drawFromNode, hoverPoint, tool, selectedRoadClassId, selectedElevationId]);
+
+  const ghostGeometry = useMemo(() => (ghostEdge ? buildAsphaltRibbon(ghostEdge, 3) : null), [ghostEdge]);
 
   useEffect(() => {
     if (!drawFromNodeId) lastWhooshPointRef.current = null;
@@ -63,6 +106,26 @@ export default function RoadEditor() {
       }
       if (e.key.toLowerCase() === "e") {
         store.stepElevation(1);
+        return;
+      }
+      if (e.key.toLowerCase() === "d") {
+        store.setTool("draw");
+        return;
+      }
+      if (e.key.toLowerCase() === "z") {
+        store.setTool("zone");
+        return;
+      }
+      if (e.key.toLowerCase() === "i") {
+        store.setTool("inspect");
+        return;
+      }
+      if (e.key.toLowerCase() === "x") {
+        store.setTool("delete");
+        return;
+      }
+      if (e.key.toLowerCase() === "t") {
+        store.setTool("turnaround");
         return;
       }
       const idx = Number(e.key) - 1;
@@ -136,13 +199,12 @@ export default function RoadEditor() {
     }
   };
 
-  const drawFromNode = drawFromNodeId ? nodes.find((n) => n.id === drawFromNodeId) : null;
-
   let dragInfo: {
     midpoint: [number, number, number];
     lengthFt: number;
     costLabel: string;
     gradePercent: number;
+    overBudget: boolean;
   } | null = null;
   if (drawFromNode && hoverPoint) {
     const dx = hoverPoint[0] - drawFromNode.position[0];
@@ -161,6 +223,7 @@ export default function RoadEditor() {
       lengthFt,
       costLabel: `$${Math.round(totalCost).toLocaleString()}`,
       gradePercent: computeGradePercent(drawFromNode.position, hoverPoint),
+      overBudget: totalCost > budget,
     };
   }
 
@@ -206,7 +269,7 @@ export default function RoadEditor() {
             [drawFromNode.position[0], drawFromNode.position[1] + 3, drawFromNode.position[2]],
             [hoverPoint[0], hoverPoint[1] + 3, hoverPoint[2]],
           ]}
-          color="#38bdf8"
+          color={dragInfo?.overBudget ? "#ef4444" : "#38bdf8"}
           lineWidth={3}
           dashed
           dashScale={4}
@@ -215,30 +278,55 @@ export default function RoadEditor() {
         />
       )}
 
+      {ghostGeometry && (
+        <mesh geometry={ghostGeometry} position={[0, 0.15, 0]}>
+          <meshStandardMaterial
+            color={dragInfo?.overBudget ? "#ef4444" : "#38bdf8"}
+            transparent
+            opacity={0.4}
+            depthWrite={false}
+            emissive={dragInfo?.overBudget ? "#ef4444" : "#38bdf8"}
+            emissiveIntensity={0.25}
+          />
+        </mesh>
+      )}
+
       {dragInfo && (
         <Html position={dragInfo.midpoint} style={{ pointerEvents: "none" }} zIndexRange={[10, 0]}>
           <div
+            className="animate-pop"
             style={{
-              transform: "translate(-50%, -140%)",
-              background: "#1c1c20",
+              transform: "translate(-50%, -150%)",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: dragInfo.overBudget
+                ? "linear-gradient(180deg, #f87171, #dc2626)"
+                : "linear-gradient(180deg, #27272e, #1c1c20)",
               color: "#f4f4f5",
-              fontSize: 11,
-              fontWeight: 600,
-              padding: "4px 8px",
-              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 700,
+              padding: "6px 12px",
+              borderRadius: 999,
               whiteSpace: "nowrap",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+              boxShadow: "0 3px 10px rgba(0,0,0,0.4)",
+              border: dragInfo.overBudget ? "1.5px solid #7f1d1d" : "1.5px solid rgba(255,255,255,0.12)",
               fontFamily: "var(--font-sans)",
             }}
           >
-            {Math.round(dragInfo.lengthFt)} ft &middot; {dragInfo.costLabel}
+            <span className="tabular-nums">{Math.round(dragInfo.lengthFt)} ft</span>
+            <span style={{ opacity: 0.5 }}>&middot;</span>
+            <span className="tabular-nums">{dragInfo.costLabel}</span>
+            {dragInfo.overBudget && <span style={{ fontSize: 10 }}>⚠ OVER BUDGET</span>}
             {Math.abs(dragInfo.gradePercent) >= 0.5 && (
               <>
-                {" "}
-                &middot;{" "}
-                <span style={{ color: Math.abs(dragInfo.gradePercent) > MAX_GRADE_PERCENT ? "#f87171" : "#f4f4f5" }}>
+                <span style={{ opacity: 0.5 }}>&middot;</span>
+                <span
+                  className="tabular-nums"
+                  style={{ color: Math.abs(dragInfo.gradePercent) > MAX_GRADE_PERCENT ? "#fecaca" : "#f4f4f5" }}
+                >
                   {dragInfo.gradePercent > 0 ? "+" : ""}
-                  {dragInfo.gradePercent.toFixed(1)}% grade
+                  {dragInfo.gradePercent.toFixed(1)}%
                 </span>
               </>
             )}

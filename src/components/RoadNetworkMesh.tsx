@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Html } from "@react-three/drei";
+import { Html, Line } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
-import { assembleNetwork } from "@/sim/network";
+import { assembleNetwork, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { useEditorStore } from "@/state/editorStore";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio } from "@/sim/types";
@@ -265,6 +265,28 @@ function ClearanceWarningMarker({ violation }: { violation: ClearanceViolation }
   );
 }
 
+/** A translucent preview of the loop a Texas turnaround would create — shown while hovering an eligible frontage road with the Turnaround tool active. */
+function TurnaroundPreview({ plan }: { plan: TexasTurnaroundPlan }) {
+  const points: [number, number, number][] = [
+    plan.nodeAPoint,
+    plan.controlPoint1,
+    plan.controlPoint2,
+    plan.nodeBPoint,
+  ].map((p) => [p[0], p[1] + 1.5, p[2]] as [number, number, number]);
+
+  return (
+    <group>
+      <Line points={points} color="#e08a4f" lineWidth={4} dashed dashScale={3} transparent opacity={0.85} />
+      {[plan.nodeAPoint, plan.nodeBPoint].map((p, i) => (
+        <mesh key={i} position={[p[0], p[1] + 1.5, p[2]]}>
+          <sphereGeometry args={[3, 12, 12]} />
+          <meshStandardMaterial color="#e08a4f" emissive="#e08a4f" emissiveIntensity={0.5} transparent opacity={0.85} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 function YieldMarker({ edge }: { edge: Edge3D }) {
   const p = edge.spline.getPointAt(1);
   const tangent = edge.spline.getTangentAt(1);
@@ -283,12 +305,16 @@ function EdgeGroup({
   badgeIndex,
   typeIndex,
   speedRatio,
+  turnaroundHighlight,
+  onTurnaroundHover,
 }: {
   edge: Edge3D;
   contract?: ContractStatus;
   badgeIndex?: number;
   typeIndex?: number;
   speedRatio?: number;
+  turnaroundHighlight?: boolean;
+  onTurnaroundHover?: (edgeId: string | null, point: THREE.Vector3 | null) => void;
 }) {
   const geometries = useMemo(() => buildEdgeGeometries(edge), [edge]);
   const isSelected = useEditorStore(
@@ -321,9 +347,26 @@ function EdgeGroup({
     }
   };
 
+  const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
+    if (!onTurnaroundHover || useEditorStore.getState().tool !== "turnaround") return;
+    event.stopPropagation();
+    onTurnaroundHover(edge.id, event.point.clone());
+  };
+
+  const handlePointerOut = () => {
+    if (!onTurnaroundHover || useEditorStore.getState().tool !== "turnaround") return;
+    onTurnaroundHover(null, null);
+  };
+
   return (
     <group>
-      <mesh geometry={geometries.ribbon} receiveShadow onClick={handleClick}>
+      <mesh
+        geometry={geometries.ribbon}
+        receiveShadow
+        onClick={handleClick}
+        onPointerMove={handlePointerMove}
+        onPointerOut={handlePointerOut}
+      >
         <meshStandardMaterial
           color={
             edge.isRoundaboutRing
@@ -334,11 +377,13 @@ function EdgeGroup({
                 ? isSelected
                   ? TEXAS_TURNAROUND_SELECTED_COLOR
                   : TEXAS_TURNAROUND_COLOR
-                : showHeatmap
-                  ? heatmapColorHex(speedRatio!)
-                  : isSelected
-                    ? ASPHALT_SELECTED_COLOR
-                    : ASPHALT_COLOR
+                : turnaroundHighlight
+                  ? "#e08a4f"
+                  : showHeatmap
+                    ? heatmapColorHex(speedRatio!)
+                    : isSelected
+                      ? ASPHALT_SELECTED_COLOR
+                      : ASPHALT_COLOR
           }
           roughness={0.95}
           metalness={0.05}
@@ -406,8 +451,34 @@ export default function RoadNetworkMesh({
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const mode = useEditorStore((s) => s.mode);
+  const tool = useEditorStore((s) => s.tool);
 
   const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
+
+  const [turnaroundHover, setTurnaroundHover] = useState<{ edgeId: string; point: THREE.Vector3 } | null>(null);
+  const lastHoverPointRef = useRef<THREE.Vector3 | null>(null);
+
+  // Ignore stale hover state the instant the tool changes away from
+  // Turnaround, rather than clearing it via an effect — derived-at-render
+  // beats a synchronized setState for a value this cheap to recompute.
+  const effectiveHover = tool === "turnaround" ? turnaroundHover : null;
+
+  const handleTurnaroundHover = (edgeId: string | null, point: THREE.Vector3 | null) => {
+    if (!edgeId || !point) {
+      setTurnaroundHover(null);
+      lastHoverPointRef.current = null;
+      return;
+    }
+    const last = lastHoverPointRef.current;
+    if (last && last.distanceTo(point) < 15) return;
+    lastHoverPointRef.current = point;
+    setTurnaroundHover({ edgeId, point });
+  };
+
+  const turnaroundPlan = useMemo(
+    () => (effectiveHover ? planTexasTurnaround(network, effectiveHover.edgeId, effectiveHover.point) : null),
+    [network, effectiveHover]
+  );
 
   const contractsByEdgeId = useMemo(() => {
     const map = new Map<string, ContractStatus>();
@@ -466,8 +537,15 @@ export default function RoadNetworkMesh({
           badgeIndex={badgeIndexByEdgeId.get(edge.id)}
           typeIndex={typeIndexByEdgeId.get(edge.id)}
           speedRatio={speedRatioByEdgeId.get(edge.id)}
+          turnaroundHighlight={
+            tool === "turnaround" &&
+            (edge.id === effectiveHover?.edgeId || edge.id === turnaroundPlan?.targetEdgeId)
+          }
+          onTurnaroundHover={handleTurnaroundHover}
         />
       ))}
+
+      {turnaroundPlan && <TurnaroundPreview plan={turnaroundPlan} />}
 
       {network.edges
         .filter((edge) => !edge.isRoundaboutRing && ringNodeIds.has(edge.toNodeId))

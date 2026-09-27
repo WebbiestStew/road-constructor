@@ -7,12 +7,16 @@ import { downloadNetworkFile, encodePayloadToShareHash, parseNetworkFile } from 
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
 import {
+  IconArrowLeft,
   IconDownload,
   IconHeatmap,
   IconHelp,
   IconMoon,
   IconNight,
+  IconPause,
+  IconPlay,
   IconRedo,
+  IconReset,
   IconRoad,
   IconShare,
   IconSpeakerOff,
@@ -54,7 +58,7 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const exportPayload = useEditorStore((s) => s.exportPayload);
   const importPayload = useEditorStore((s) => s.importPayload);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { speedMultiplier, setSpeedMultiplier } = sim;
+  const { speedMultiplier, setSpeedMultiplier, running, setRunning, resetTraffic } = sim;
   const [shareState, setShareState] = useState<"idle" | "copied" | "error">("idle");
 
   const handleImportFile = async (file: File) => {
@@ -92,30 +96,73 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
 
       <div className="h-6 w-px bg-black/10" />
 
-      <div className="flex items-center gap-1 rounded-full bg-black/5 p-1">
-        <button
-          type="button"
-          onClick={() => setMode("build")}
-          className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
-            mode === "build"
-              ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow"
-              : "text-zinc-600 hover:text-zinc-900"
-          }`}
-        >
-          Build
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("simulate")}
-          className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
-            mode === "simulate"
-              ? "bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow"
-              : "text-zinc-600 hover:text-zinc-900"
-          }`}
-        >
-          Open to Traffic 🚦
-        </button>
-      </div>
+      {mode === "build" ? (
+        <div className="flex items-center gap-1 rounded-full bg-black/5 p-1">
+          <button
+            type="button"
+            onClick={() => setMode("build")}
+            className="rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 px-3.5 py-1.5 text-xs font-bold text-white shadow"
+          >
+            Build
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("simulate")}
+            title="Open the network to simulated traffic"
+            className="rounded-full px-3.5 py-1.5 text-xs font-bold text-zinc-600 transition hover:text-zinc-900"
+          >
+            Open to Traffic 🚦
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 rounded-full bg-gradient-to-br from-emerald-50 to-teal-50 p-1 ring-1 ring-inset ring-emerald-200">
+          <button
+            type="button"
+            onClick={() => setMode("build")}
+            title="Back to Build"
+            className="flex items-center gap-1 rounded-full px-2.5 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-white/70"
+          >
+            <IconArrowLeft className="h-3.5 w-3.5" />
+            Build
+          </button>
+          <div className="h-6 w-px bg-emerald-900/10" />
+          <button
+            type="button"
+            onClick={() => setRunning(!running)}
+            title={running ? "Pause simulation (Space)" : "Play simulation (Space)"}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow"
+          >
+            {running ? <IconPause className="h-3.5 w-3.5" /> : <IconPlay className="h-3.5 w-3.5" />}
+          </button>
+          <div className="flex items-center gap-0.5 rounded-full bg-white/60 p-0.5">
+            {SPEED_OPTIONS.map((mult) => (
+              <button
+                key={mult}
+                type="button"
+                onClick={() => setSpeedMultiplier(mult)}
+                title={`${mult}× speed`}
+                className={`rounded-full px-2 py-1 text-[11px] font-bold tabular-nums transition ${
+                  speedMultiplier === mult
+                    ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white"
+                    : "text-zinc-600 hover:text-zinc-900"
+                }`}
+              >
+                {mult}×
+              </button>
+            ))}
+          </div>
+          <div className="h-6 w-px bg-emerald-900/10" />
+          <button
+            type="button"
+            onClick={resetTraffic}
+            title="Reset traffic to a clean slate"
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-white/70"
+          >
+            <IconReset className="h-3.5 w-3.5" />
+            Reset Traffic
+          </button>
+        </div>
+      )}
 
       {mode === "build" && (
         <>
@@ -184,23 +231,6 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
 
       {mode === "simulate" && (
         <>
-          <div className="h-6 w-px bg-black/10" />
-          <div className="flex items-center gap-0.5 rounded-full bg-black/5 p-1">
-            {SPEED_OPTIONS.map((mult) => (
-              <button
-                key={mult}
-                type="button"
-                onClick={() => setSpeedMultiplier(mult)}
-                className={`rounded-full px-2.5 py-1.5 text-[11px] font-bold tabular-nums transition ${
-                  speedMultiplier === mult
-                    ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white"
-                    : "text-zinc-600 hover:text-zinc-900"
-                }`}
-              >
-                {mult}×
-              </button>
-            ))}
-          </div>
           <div className="h-6 w-px bg-black/10" />
           <button
             type="button"

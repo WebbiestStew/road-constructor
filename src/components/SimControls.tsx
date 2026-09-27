@@ -8,7 +8,9 @@ import Confetti from "./hud/Confetti";
 import GridlockHonk from "./hud/GridlockHonk";
 import HintBar from "./hud/HintBar";
 import InfoPanel from "./hud/InfoPanel";
+import MobileBlockerModal from "./hud/MobileBlockerModal";
 import Minimap from "./hud/Minimap";
+import OnboardingChecklist from "./hud/OnboardingChecklist";
 import PlayButton from "./hud/PlayButton";
 import ScenarioHud from "./hud/ScenarioHud";
 import ToolDock from "./hud/ToolDock";
@@ -24,11 +26,13 @@ export default function SimControls({
 }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
+      <MobileBlockerModal />
       <TopBar sim={sim} />
       <BudgetBar />
       <PlayButton sim={sim} />
       <ToolDock />
       <InfoPanel sim={sim} />
+      <OnboardingChecklist />
       <HintBar />
       <BuildWarningToast />
       <Minimap />

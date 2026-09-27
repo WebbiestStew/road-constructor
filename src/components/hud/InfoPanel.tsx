@@ -6,7 +6,7 @@ import {
   estimateEdgeCost,
   estimateEdgeUpkeepPerHour,
 } from "@/sim/roadClasses";
-import { LOS_COLOR, LOS_DESCRIPTIONS } from "@/sim/los";
+import { LOS_COLOR, LOS_DESCRIPTIONS, type LOSGrade } from "@/sim/los";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
 import { assembleNetwork } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
@@ -31,23 +31,40 @@ function formatSimTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+const LOS_ORDER: LOSGrade[] = ["A", "B", "C", "D", "E", "F"];
+
+/** Worst-case LOS grade among edges currently carrying traffic, or null if the network is empty. */
+function computeNetworkLOS(stats: { vehicleCount: number; los: LOSGrade }[]): LOSGrade | null {
+  let worst: LOSGrade | null = null;
+  for (const s of stats) {
+    if (s.vehicleCount <= 0) continue;
+    if (!worst || LOS_ORDER.indexOf(s.los) > LOS_ORDER.indexOf(worst)) worst = s.los;
+  }
+  return worst;
+}
+
 function StatCard({
   icon: Icon,
   label,
   value,
   unit,
   gradient,
+  color,
 }: {
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   label: string;
   value: string;
   unit?: string;
-  gradient: string;
+  gradient?: string;
+  color?: string;
 }) {
   return (
     <div className="flex items-center gap-2.5 rounded-xl bg-black/[0.03] px-3 py-2.5">
       <span
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-sm ${gradient}`}
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white shadow-sm ${
+          color ? "" : `bg-gradient-to-br ${gradient}`
+        }`}
+        style={color ? { backgroundColor: color } : undefined}
       >
         <Icon className="h-3.5 w-3.5" />
       </span>
@@ -431,6 +448,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const entries = edges.filter((e) => e.zone?.type === "entry");
   const destinations = edges.filter((e) => e.zone?.type === "destination");
   const contractsByEdge = new Map(metrics.contracts.map((c) => [c.edgeId, c]));
+  const networkLOS = computeNetworkLOS(metrics.edgeTrafficStats);
 
   return (
     <div className="flex w-80 flex-col gap-3">
@@ -450,6 +468,20 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
             value={metrics.avgSpeedMph.toFixed(0)}
             unit="mph"
             gradient="from-emerald-400 to-teal-500"
+          />
+          <StatCard
+            icon={IconSignal}
+            label="Network LOS"
+            value={networkLOS ?? "—"}
+            color={networkLOS ? LOS_COLOR[networkLOS] : undefined}
+            gradient="from-zinc-400 to-zinc-500"
+          />
+          <StatCard
+            icon={IconFlag}
+            label="Flow rate"
+            value={Math.round(metrics.throughputPerMinute * 60).toString()}
+            unit="veh/h"
+            gradient="from-orange-400 to-amber-500"
           />
           <StatCard
             icon={IconFlag}

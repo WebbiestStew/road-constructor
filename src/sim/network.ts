@@ -1,5 +1,11 @@
 import * as THREE from "three";
-import { ROAD_CLASSES, ROUNDABOUT_PRIORITY, TEXAS_TURNAROUND_PRIORITY } from "./roadClasses";
+import {
+  ROAD_CLASSES,
+  ROUNDABOUT_PRIORITY,
+  TEXAS_TURNAROUND_MIN_RADIUS_FT,
+  TEXAS_TURNAROUND_PRIORITY,
+  TEXAS_TURNAROUND_SEARCH_RADIUS_FT,
+} from "./roadClasses";
 import { mphToFtps } from "./types";
 import type {
   Edge3D,
@@ -279,6 +285,99 @@ export function findClosestPointOnEdge(edge: Edge3D, point: THREE.Vector3, coars
   const point3 = new THREE.Vector3();
   edge.spline.getPointAt(bestT, point3);
   return { t: bestT, point: point3, distSq: bestDistSq };
+}
+
+export interface TexasTurnaroundPlan {
+  /** The opposing (roughly anti-parallel) edge the loop merges back into. */
+  targetEdgeId: string;
+  nodeAPoint: [number, number, number];
+  nodeBPoint: [number, number, number];
+  controlPoint1: [number, number, number];
+  controlPoint2: [number, number, number];
+  lengthFt: number;
+}
+
+const _turnaroundUp = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Pure geometry planner shared by the live hover preview and the actual
+ * Texas turnaround build action: given a clicked/hovered edge and an anchor
+ * point on it, finds the nearest opposing (anti-parallel) frontage edge
+ * within range and computes the looped slip-lane path connecting them.
+ * Returns null if no suitable opposing edge exists nearby — never mutates
+ * anything.
+ */
+export function planTexasTurnaround(
+  network: RoadNetwork,
+  edgeId: string,
+  anchorPoint: THREE.Vector3
+): TexasTurnaroundPlan | null {
+  const edgeA = network.edgesById.get(edgeId);
+  if (!edgeA) return null;
+
+  const hitA = findClosestPointOnEdge(edgeA, anchorPoint);
+  const dirA = edgeA.spline.getTangentAt(hitA.t);
+  const right = new THREE.Vector3().crossVectors(dirA, _turnaroundUp).normalize();
+
+  let best: { edgeId: string; point: THREE.Vector3; dir: THREE.Vector3; distSq: number } | null = null;
+  for (const candidate of network.edges) {
+    if (candidate.id === edgeA.id) continue;
+    if (candidate.isRoundaboutRing || candidate.isTexasTurnaround) continue;
+    if (
+      candidate.fromNodeId === edgeA.fromNodeId ||
+      candidate.fromNodeId === edgeA.toNodeId ||
+      candidate.toNodeId === edgeA.fromNodeId ||
+      candidate.toNodeId === edgeA.toNodeId
+    ) {
+      continue; // already meets edge A at a shared node — not a separate frontage road
+    }
+    const hit = findClosestPointOnEdge(candidate, hitA.point);
+    if (hit.distSq > TEXAS_TURNAROUND_SEARCH_RADIUS_FT * TEXAS_TURNAROUND_SEARCH_RADIUS_FT) continue;
+    const candidateDir = candidate.spline.getTangentAt(hit.t);
+    if (dirA.dot(candidateDir) > -0.7) continue; // must run roughly the opposite direction
+    if (!best || hit.distSq < best.distSq) {
+      best = { edgeId: candidate.id, point: hit.point, dir: candidateDir, distSq: hit.distSq };
+    }
+  }
+
+  if (!best) return null;
+
+  const dirB = best.dir;
+  const nodeAPos = hitA.point;
+  const nodeBPos = best.point;
+
+  const lateralGapFt = Math.hypot(nodeBPos.x - nodeAPos.x, nodeBPos.z - nodeAPos.z);
+  const loopRadiusFt = Math.max(TEXAS_TURNAROUND_MIN_RADIUS_FT, lateralGapFt / 2 + 10);
+  const lateralSign =
+    Math.sign((nodeBPos.x - nodeAPos.x) * right.x + (nodeBPos.z - nodeAPos.z) * right.z) || 1;
+
+  const controlPoint1: [number, number, number] = [
+    nodeAPos.x + dirA.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
+    nodeAPos.y,
+    nodeAPos.z + dirA.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
+  ];
+  const controlPoint2: [number, number, number] = [
+    nodeBPos.x - dirB.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
+    nodeBPos.y,
+    nodeBPos.z - dirB.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
+  ];
+
+  const points = [
+    new THREE.Vector3(nodeAPos.x, nodeAPos.y, nodeAPos.z),
+    new THREE.Vector3(...controlPoint1),
+    new THREE.Vector3(...controlPoint2),
+    new THREE.Vector3(nodeBPos.x, nodeBPos.y, nodeBPos.z),
+  ];
+  const lengthFt = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5).getLength();
+
+  return {
+    targetEdgeId: best.edgeId,
+    nodeAPoint: [nodeAPos.x, nodeAPos.y, nodeAPos.z],
+    nodeBPoint: [nodeBPos.x, nodeBPos.y, nodeBPos.z],
+    controlPoint1,
+    controlPoint2,
+    lengthFt,
+  };
 }
 
 function angleDiff(a: number, b: number): number {

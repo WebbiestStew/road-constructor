@@ -2,7 +2,7 @@
 
 import * as THREE from "three";
 import { create } from "zustand";
-import { assembleNetwork, computeSignalPhaseGroups, findClosestPointOnEdge } from "@/sim/network";
+import { assembleNetwork, computeSignalPhaseGroups, planTexasTurnaround } from "@/sim/network";
 import { findClearanceViolations } from "@/sim/clearance";
 import {
   DEMOLISH_REFUND_FRACTION,
@@ -883,75 +883,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   createTexasTurnaround: (edgeId, clickPoint) => {
     const state = get();
     const network = assembleNetwork({ nodes: state.nodes, edges: state.edges });
-    const edgeA = network.edgesById.get(edgeId);
-    if (!edgeA) return;
+    const plan = planTexasTurnaround(network, edgeId, new THREE.Vector3(...clickPoint));
 
-    const clickVec = new THREE.Vector3(...clickPoint);
-    const hitA = findClosestPointOnEdge(edgeA, clickVec);
-    const dirA = edgeA.spline.getTangentAt(hitA.t);
-    const up = new THREE.Vector3(0, 1, 0);
-    const right = new THREE.Vector3().crossVectors(dirA, up).normalize();
-
-    let best: { edgeId: string; t: number; point: THREE.Vector3; dir: THREE.Vector3; distSq: number } | null = null;
-    for (const candidate of network.edges) {
-      if (candidate.id === edgeA.id) continue;
-      if (candidate.isRoundaboutRing || candidate.isTexasTurnaround) continue;
-      if (
-        candidate.fromNodeId === edgeA.fromNodeId ||
-        candidate.fromNodeId === edgeA.toNodeId ||
-        candidate.toNodeId === edgeA.fromNodeId ||
-        candidate.toNodeId === edgeA.toNodeId
-      ) {
-        continue; // already meets edge A at a shared node — not a separate frontage road
-      }
-      const hit = findClosestPointOnEdge(candidate, hitA.point);
-      if (hit.distSq > TEXAS_TURNAROUND_SEARCH_RADIUS_FT * TEXAS_TURNAROUND_SEARCH_RADIUS_FT) continue;
-      const candidateDir = candidate.spline.getTangentAt(hit.t);
-      if (dirA.dot(candidateDir) > -0.7) continue; // must run roughly the opposite direction
-      if (!best || hit.distSq < best.distSq) {
-        best = { edgeId: candidate.id, t: hit.t, point: hit.point, dir: candidateDir, distSq: hit.distSq };
-      }
-    }
-
-    if (!best) {
+    if (!plan) {
       get().setBuildWarning(
         `No opposing frontage road found within ${TEXAS_TURNAROUND_SEARCH_RADIUS_FT} ft — build one running the opposite direction nearby.`
       );
       return;
     }
 
-    const dirB = best.dir;
-    const nodeAId = get().splitEdgeAt(edgeId, [hitA.point.x, hitA.point.y, hitA.point.z]);
-    const nodeBId = get().splitEdgeAt(best.edgeId, [best.point.x, best.point.y, best.point.z]);
-    const nodeA = get().nodesById.get(nodeAId);
-    const nodeB = get().nodesById.get(nodeBId);
-    if (!nodeA || !nodeB) return;
+    const nodeAId = get().splitEdgeAt(edgeId, plan.nodeAPoint);
+    const nodeBId = get().splitEdgeAt(plan.targetEdgeId, plan.nodeBPoint);
 
-    const lateralGapFt = Math.hypot(
-      nodeB.position[0] - nodeA.position[0],
-      nodeB.position[2] - nodeA.position[2]
-    );
-    const loopRadiusFt = Math.max(TEXAS_TURNAROUND_MIN_RADIUS_FT, lateralGapFt / 2 + 10);
-    const lateralSign = Math.sign(
-      (nodeB.position[0] - nodeA.position[0]) * right.x + (nodeB.position[2] - nodeA.position[2]) * right.z
-    ) || 1;
-
-    const controlPoint1: [number, number, number] = [
-      nodeA.position[0] + dirA.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
-      nodeA.position[1],
-      nodeA.position[2] + dirA.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
-    ];
-    const controlPoint2: [number, number, number] = [
-      nodeB.position[0] - dirB.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
-      nodeB.position[1],
-      nodeB.position[2] - dirB.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
-    ];
-
-    const interiorPoints = [controlPoint1, controlPoint2];
-    const lengthFt = edgeLengthFt(nodeA.position, nodeB.position, interiorPoints);
-    const cost = Math.round(
-      ROAD_CLASSES.lane.costPerFtPerLane * lengthFt * TEXAS_TURNAROUND_COST_MULTIPLIER
-    );
+    const interiorPoints = [plan.controlPoint1, plan.controlPoint2];
+    const cost = Math.round(ROAD_CLASSES.lane.costPerFtPerLane * plan.lengthFt * TEXAS_TURNAROUND_COST_MULTIPLIER);
 
     const turnaroundEdge: EdgeSpec = {
       id: `e${get().nextEdgeSeq}`,

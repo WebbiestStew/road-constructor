@@ -73,6 +73,24 @@ export function IconPause(props: IconProps) {
   );
 }
 
+export function IconArrowLeft(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M19 12H5" />
+      <path d="M11 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
+export function IconReset(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 12a8 8 0 1 1 2.6 5.9" />
+      <path d="M4 19v-5h5" />
+    </svg>
+  );
+}
+
 export function IconCoin(props: IconProps) {
   return (
     <svg {...base} {...props}>
@@ -150,6 +168,14 @@ export function IconRoundabout(props: IconProps) {
       <path d="M12 2.5v3.4M12 18.1v3.4M2.5 12h3.4M18.1 12h3.4" opacity={0.35} />
       <path d="M17.3 8.2a7.5 7.5 0 1 1-2.6-2.9" />
       <path d="M17.8 4.2l.6 3.8-3.8-.4" />
+    </svg>
+  );
+}
+
+export function IconCheck(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 12.5l4.5 4.5L19 7" />
     </svg>
   );
 }
