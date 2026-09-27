@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, OrthographicCamera } from "@react-three/drei";
-import { Bloom, EffectComposer } from "@react-three/postprocessing";
+import { Bloom, EffectComposer, SSAO, ToneMapping, Vignette } from "@react-three/postprocessing";
+import { BlendFunction, ToneMappingMode } from "postprocessing";
 import * as THREE from "three";
 import RoadNetworkMesh from "@/components/RoadNetworkMesh";
 import RoadEditor from "@/components/RoadEditor";
@@ -220,16 +221,35 @@ export default function Play() {
           }}
         />
 
-        {timeOfDay !== "day" && (
-          <EffectComposer>
-            <Bloom
-              mipmapBlur
-              luminanceThreshold={0.35}
-              luminanceSmoothing={0.2}
-              intensity={timeOfDay === "night" ? 1.1 : 0.75}
-            />
-          </EffectComposer>
-        )}
+        {/*
+          Always-on pipeline (not gated by timeOfDay) so exposure and color
+          response stay consistent across Day/Dusk/Night instead of Day
+          rendering raw and the other two suddenly gaining a tone curve.
+          Order matters: AO reads the un-tonemapped depth/normal buffers,
+          bloom blooms the pre-tonemapped HDR-ish highlights, tone mapping
+          compresses to display range last, vignette works on the final image.
+        */}
+        <EffectComposer multisampling={4} enableNormalPass>
+          <SSAO
+            blendFunction={BlendFunction.MULTIPLY}
+            samples={8}
+            rings={4}
+            radius={0.15}
+            intensity={1.2}
+            luminanceInfluence={0.6}
+            bias={0.03}
+            fade={0.02}
+            resolutionScale={0.5}
+          />
+          <Bloom
+            mipmapBlur
+            luminanceThreshold={0.35}
+            luminanceSmoothing={0.2}
+            intensity={timeOfDay === "night" ? 1.1 : timeOfDay === "dusk" ? 0.75 : 0.12}
+          />
+          <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+          <Vignette offset={0.35} darkness={timeOfDay === "night" ? 0.45 : 0.3} />
+        </EffectComposer>
       </Canvas>
 
       <SimControls sim={sim} scenarioRunner={scenarioRunner} />
