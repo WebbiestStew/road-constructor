@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType, type SVGProps } from "react";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { downloadNetworkFile, encodePayloadToShareHash, parseNetworkFile } from "@/state/persistence";
@@ -11,6 +11,7 @@ import {
   IconHeatmap,
   IconHelp,
   IconMoon,
+  IconNight,
   IconRedo,
   IconRoad,
   IconShare,
@@ -20,6 +21,12 @@ import {
   IconUndo,
   IconUpload,
 } from "./icons";
+
+const TIME_OF_DAY_OPTIONS: { id: "day" | "dusk" | "night"; icon: ComponentType<SVGProps<SVGSVGElement>>; label: string }[] = [
+  { id: "day", icon: IconSun, label: "Day" },
+  { id: "dusk", icon: IconMoon, label: "Dusk" },
+  { id: "night", icon: IconNight, label: "Night" },
+];
 
 const SPEED_OPTIONS = [1, 2, 5, 10];
 
@@ -212,14 +219,27 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       )}
 
       <div className="h-6 w-px bg-black/10" />
-      <button
-        type="button"
-        onClick={() => setTimeOfDay(timeOfDay === "day" ? "dusk" : "day")}
-        title={timeOfDay === "day" ? "Switch to dusk" : "Switch to day"}
-        className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
-      >
-        {timeOfDay === "day" ? <IconSun className="h-3.5 w-3.5" /> : <IconMoon className="h-3.5 w-3.5" />}
-      </button>
+      <div className="flex items-center gap-0.5 rounded-full bg-black/5 p-1">
+        {TIME_OF_DAY_OPTIONS.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setTimeOfDay(opt.id)}
+            title={opt.label}
+            className={`flex h-6 w-6 items-center justify-center rounded-full transition ${
+              timeOfDay === opt.id
+                ? opt.id === "day"
+                  ? "bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow"
+                  : opt.id === "dusk"
+                    ? "bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow"
+                    : "bg-gradient-to-br from-slate-700 to-slate-900 text-white shadow"
+                : "text-zinc-600 hover:text-zinc-900"
+            }`}
+          >
+            <opt.icon className="h-3.5 w-3.5" />
+          </button>
+        ))}
+      </div>
       <div className="h-6 w-px bg-black/10" />
       <button
         type="button"

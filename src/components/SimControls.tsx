@@ -3,6 +3,7 @@
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import BudgetBar from "./hud/BudgetBar";
+import BuildWarningToast from "./hud/BuildWarningToast";
 import Confetti from "./hud/Confetti";
 import GridlockHonk from "./hud/GridlockHonk";
 import HintBar from "./hud/HintBar";
@@ -29,6 +30,7 @@ export default function SimControls({
       <ToolDock />
       <InfoPanel sim={sim} />
       <HintBar />
+      <BuildWarningToast />
       <Minimap />
       <Confetti sim={sim} />
       <GridlockHonk sim={sim} />

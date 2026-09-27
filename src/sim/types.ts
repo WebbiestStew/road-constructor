@@ -79,6 +79,8 @@ export interface EdgeSpec {
   zone?: ZoneSpec;
   /** True for the auto-generated ring segments of a roundabout — always outranks any road class at a junction. */
   isRoundaboutRing?: boolean;
+  /** True for an auto-generated Texas turnaround slip lane — always yields at its merge, below any real road class's priority. */
+  isTexasTurnaround?: boolean;
 }
 
 /** The editable network as plain, structured-cloneable data. */
@@ -112,6 +114,7 @@ export interface Edge3D {
   isElevated: boolean;
   zone?: ZoneSpec;
   isRoundaboutRing: boolean;
+  isTexasTurnaround: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
   /**
@@ -166,6 +169,10 @@ export interface VehicleState {
   spawnTime: number;
   /** Consecutive sim-seconds spent at near-zero speed — drives gridlock detection/despawn. */
   stuckTimeS: number;
+  /** True for the 15% of vehicles simulated as 18-wheeler semis rather than passenger sedans. */
+  isTruck: boolean;
+  /** Weight-to-power ratio, lb/hp — drives how hard road grade hits this vehicle's climbing speed. */
+  weightToPowerLbPerHp: number;
 }
 
 // ---------------------------------------------------------------------------

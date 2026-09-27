@@ -2,12 +2,19 @@
 
 import * as THREE from "three";
 import { create } from "zustand";
-import { computeSignalPhaseGroups } from "@/sim/network";
+import { assembleNetwork, computeSignalPhaseGroups, findClosestPointOnEdge } from "@/sim/network";
+import { findClearanceViolations } from "@/sim/clearance";
 import {
   DEMOLISH_REFUND_FRACTION,
+  HOTKEY_TIER_IDS,
   ROAD_CLASSES,
   ROUNDABOUT_LANE_WIDTH_FT,
   ROUNDABOUT_SPEED_MPH,
+  TEXAS_TURNAROUND_COST_MULTIPLIER,
+  TEXAS_TURNAROUND_LANE_WIDTH_FT,
+  TEXAS_TURNAROUND_MIN_RADIUS_FT,
+  TEXAS_TURNAROUND_SEARCH_RADIUS_FT,
+  TEXAS_TURNAROUND_SPEED_MPH,
   type ElevationLevelId,
   type RoadClassId,
   estimateEdgeCost,
@@ -28,7 +35,7 @@ import { playDemolish, playPlaceRoad } from "@/lib/sound";
 import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
-export type EditorTool = "draw" | "delete" | "inspect" | "zone";
+export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround";
 
 export type Selection =
   | { kind: "node"; id: string }
@@ -75,8 +82,19 @@ interface EditorState {
   twoWay: boolean;
   heatmapEnabled: boolean;
   setHeatmapEnabled: (v: boolean) => void;
-  timeOfDay: "day" | "dusk";
-  setTimeOfDay: (v: "day" | "dusk") => void;
+  timeOfDay: "day" | "dusk" | "night";
+  setTimeOfDay: (v: "day" | "dusk" | "night") => void;
+
+  /** Transient user-facing message (e.g. a rejected clearance-violating road) — cleared automatically after a few seconds. */
+  buildWarning: string | null;
+  setBuildWarning: (message: string | null) => void;
+
+  /** A one-shot request for the in-canvas camera controller to recenter on a network's bounding box center (e.g. right after loading a shared layout). */
+  pendingCameraFit: { centerX: number; centerZ: number } | null;
+  requestCameraFit: (bounds: { centerX: number; centerZ: number }) => void;
+  clearPendingCameraFit: () => void;
+  /** Steps the currently-selected elevation up/down the At-Grade -> Tier 3 ladder by one 20ft rung (the Q/E hotkeys). Has no effect while Tunnel/Cutting is selected. */
+  stepElevation: (direction: -1 | 1) => void;
 
   nodes: NodeSpec[];
   edges: EdgeSpec[];
@@ -142,6 +160,14 @@ interface EditorState {
   /** Replaces a junction node with an auto-generated roundabout ring, re-pointing its existing approach roads to the ring. */
   convertNodeToRoundabout: (nodeId: string, radiusFt?: number) => void;
 
+  /**
+   * Splits the clicked edge and the nearest opposing (roughly anti-parallel)
+   * frontage edge within range, then connects the two split points with a
+   * one-way 180° slip-lane loop — a Texas turnaround. Sets `buildWarning`
+   * and does nothing if no suitable opposing frontage road is nearby.
+   */
+  createTexasTurnaround: (edgeId: string, clickPoint: [number, number, number]) => void;
+
   clearNetwork: () => void;
   getSnapshot: () => NetworkSnapshot;
   exportPayload: () => PersistedPayload;
@@ -175,6 +201,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setHeatmapEnabled: (v) => set({ heatmapEnabled: v }),
   timeOfDay: "day",
   setTimeOfDay: (v) => set({ timeOfDay: v }),
+
+  buildWarning: null,
+  setBuildWarning: (message) => set({ buildWarning: message }),
+
+  pendingCameraFit: null,
+  requestCameraFit: (bounds) => set({ pendingCameraFit: bounds }),
+  clearPendingCameraFit: () => set({ pendingCameraFit: null }),
+  stepElevation: (direction) => {
+    const current = get().selectedElevationId;
+    const idx = HOTKEY_TIER_IDS.indexOf(current);
+    if (idx === -1) return; // Tunnel/Cutting aren't on the hotkey ladder
+    const nextIdx = Math.max(0, Math.min(HOTKEY_TIER_IDS.length - 1, idx + direction));
+    set({ selectedElevationId: HOTKEY_TIER_IDS[nextIdx] });
+  },
 
   nodes: autosaved?.network.nodes ?? [],
   edges: autosaved?.network.edges ?? [],
@@ -305,6 +345,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const fromNode = state.nodesById.get(fromNodeId);
     if (!fromNode) return fromNodeId;
 
+    const targetPosition = toNodeId ? state.nodesById.get(toNodeId)!.position : toPosition;
+    const roadClass = ROAD_CLASSES[state.selectedRoadClassId];
+
+    // Check clearance against the *existing* network before touching any
+    // state — a rejected road shouldn't leave a dangling orphan node behind.
+    const candidateNodeId = toNodeId ?? "__candidate__";
+    const candidateForwardId = "__candidate_fwd__";
+    const candidateBackwardId = "__candidate_bwd__";
+    const candidateNodes: NodeSpec[] = toNodeId
+      ? state.nodes
+      : [...state.nodes, { id: candidateNodeId, position: toPosition }];
+    const candidateEdges: EdgeSpec[] = [
+      ...state.edges,
+      {
+        id: candidateForwardId,
+        fromNodeId,
+        toNodeId: candidateNodeId,
+        interiorPoints: [],
+        roadClassId: state.selectedRoadClassId,
+        elevationLevelId: state.selectedElevationId,
+        lanes: roadClass.lanesPerDirection,
+        laneWidthFt: roadClass.laneWidthFt,
+        speedLimitMph: roadClass.speedLimitMph,
+      },
+      ...(state.twoWay
+        ? [
+            {
+              id: candidateBackwardId,
+              fromNodeId: candidateNodeId,
+              toNodeId: fromNodeId,
+              interiorPoints: [],
+              roadClassId: state.selectedRoadClassId,
+              elevationLevelId: state.selectedElevationId,
+              lanes: roadClass.lanesPerDirection,
+              laneWidthFt: roadClass.laneWidthFt,
+              speedLimitMph: roadClass.speedLimitMph,
+            } satisfies EdgeSpec,
+          ]
+        : []),
+    ];
+    const candidateNetwork = assembleNetwork({ nodes: candidateNodes, edges: candidateEdges });
+    const newViolation = findClearanceViolations(candidateNetwork).find(
+      (v) => v.edgeAId === candidateForwardId || v.edgeBId === candidateForwardId
+    );
+    if (newViolation) {
+      get().setBuildWarning(
+        `Blocked: only ${newViolation.clearanceFt.toFixed(1)} ft clearance over the road below — needs 16.5 ft.`
+      );
+      return fromNodeId;
+    }
+
     let targetNodeId: string;
     if (toNodeId) {
       get().pushHistoryEntry();
@@ -314,7 +405,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     const targetNode = get().nodesById.get(targetNodeId)!;
 
-    const roadClass = ROAD_CLASSES[state.selectedRoadClassId];
     const lengthFt = edgeLengthFt(fromNode.position, targetNode.position, []);
     const cost = estimateEdgeCost(
       state.selectedRoadClassId,
@@ -788,6 +878,108 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         selection: null,
       };
     });
+  },
+
+  createTexasTurnaround: (edgeId, clickPoint) => {
+    const state = get();
+    const network = assembleNetwork({ nodes: state.nodes, edges: state.edges });
+    const edgeA = network.edgesById.get(edgeId);
+    if (!edgeA) return;
+
+    const clickVec = new THREE.Vector3(...clickPoint);
+    const hitA = findClosestPointOnEdge(edgeA, clickVec);
+    const dirA = edgeA.spline.getTangentAt(hitA.t);
+    const up = new THREE.Vector3(0, 1, 0);
+    const right = new THREE.Vector3().crossVectors(dirA, up).normalize();
+
+    let best: { edgeId: string; t: number; point: THREE.Vector3; dir: THREE.Vector3; distSq: number } | null = null;
+    for (const candidate of network.edges) {
+      if (candidate.id === edgeA.id) continue;
+      if (candidate.isRoundaboutRing || candidate.isTexasTurnaround) continue;
+      if (
+        candidate.fromNodeId === edgeA.fromNodeId ||
+        candidate.fromNodeId === edgeA.toNodeId ||
+        candidate.toNodeId === edgeA.fromNodeId ||
+        candidate.toNodeId === edgeA.toNodeId
+      ) {
+        continue; // already meets edge A at a shared node — not a separate frontage road
+      }
+      const hit = findClosestPointOnEdge(candidate, hitA.point);
+      if (hit.distSq > TEXAS_TURNAROUND_SEARCH_RADIUS_FT * TEXAS_TURNAROUND_SEARCH_RADIUS_FT) continue;
+      const candidateDir = candidate.spline.getTangentAt(hit.t);
+      if (dirA.dot(candidateDir) > -0.7) continue; // must run roughly the opposite direction
+      if (!best || hit.distSq < best.distSq) {
+        best = { edgeId: candidate.id, t: hit.t, point: hit.point, dir: candidateDir, distSq: hit.distSq };
+      }
+    }
+
+    if (!best) {
+      get().setBuildWarning(
+        `No opposing frontage road found within ${TEXAS_TURNAROUND_SEARCH_RADIUS_FT} ft — build one running the opposite direction nearby.`
+      );
+      return;
+    }
+
+    const dirB = best.dir;
+    const nodeAId = get().splitEdgeAt(edgeId, [hitA.point.x, hitA.point.y, hitA.point.z]);
+    const nodeBId = get().splitEdgeAt(best.edgeId, [best.point.x, best.point.y, best.point.z]);
+    const nodeA = get().nodesById.get(nodeAId);
+    const nodeB = get().nodesById.get(nodeBId);
+    if (!nodeA || !nodeB) return;
+
+    const lateralGapFt = Math.hypot(
+      nodeB.position[0] - nodeA.position[0],
+      nodeB.position[2] - nodeA.position[2]
+    );
+    const loopRadiusFt = Math.max(TEXAS_TURNAROUND_MIN_RADIUS_FT, lateralGapFt / 2 + 10);
+    const lateralSign = Math.sign(
+      (nodeB.position[0] - nodeA.position[0]) * right.x + (nodeB.position[2] - nodeA.position[2]) * right.z
+    ) || 1;
+
+    const controlPoint1: [number, number, number] = [
+      nodeA.position[0] + dirA.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
+      nodeA.position[1],
+      nodeA.position[2] + dirA.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
+    ];
+    const controlPoint2: [number, number, number] = [
+      nodeB.position[0] - dirB.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
+      nodeB.position[1],
+      nodeB.position[2] - dirB.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
+    ];
+
+    const interiorPoints = [controlPoint1, controlPoint2];
+    const lengthFt = edgeLengthFt(nodeA.position, nodeB.position, interiorPoints);
+    const cost = Math.round(
+      ROAD_CLASSES.lane.costPerFtPerLane * lengthFt * TEXAS_TURNAROUND_COST_MULTIPLIER
+    );
+
+    const turnaroundEdge: EdgeSpec = {
+      id: `e${get().nextEdgeSeq}`,
+      fromNodeId: nodeAId,
+      toNodeId: nodeBId,
+      interiorPoints,
+      roadClassId: "lane",
+      elevationLevelId: "ground",
+      lanes: 1,
+      laneWidthFt: TEXAS_TURNAROUND_LANE_WIDTH_FT,
+      speedLimitMph: TEXAS_TURNAROUND_SPEED_MPH,
+      isTexasTurnaround: true,
+    };
+
+    set((s) => {
+      const edges = [...s.edges, turnaroundEdge];
+      const edgesById = new Map(s.edgesById);
+      edgesById.set(turnaroundEdge.id, turnaroundEdge);
+      return {
+        edges,
+        edgesById,
+        nextEdgeSeq: s.nextEdgeSeq + 1,
+        budget: s.budget - cost,
+        selection: null,
+      };
+    });
+
+    playPlaceRoad();
   },
 
   clearNetwork: () => {

@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { Html } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork } from "@/sim/network";
+import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { useEditorStore } from "@/state/editorStore";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
@@ -15,6 +16,7 @@ import {
   buildJerseyBarrier,
   buildLaneArrows,
   buildSolidStripe,
+  buildTaperedPierColumn,
   computePierDescriptors,
   type PierDescriptor,
 } from "./roadGeometry";
@@ -23,6 +25,8 @@ const ASPHALT_COLOR = "#3a4155";
 const ASPHALT_SELECTED_COLOR = "#4a6a8f";
 const ROUNDABOUT_COLOR = "#434b60";
 const ROUNDABOUT_SELECTED_COLOR = "#4e6f92";
+const TEXAS_TURNAROUND_COLOR = "#8a4a2f";
+const TEXAS_TURNAROUND_SELECTED_COLOR = "#a85a3a";
 const WHITE_COLOR = "#f4f4f5";
 const YELLOW_COLOR = "#eab308";
 const BARRIER_COLOR = "#9a9aa0";
@@ -55,9 +59,15 @@ interface EdgeGeometries {
   stripes: StripeSpec[];
   barriers: THREE.BufferGeometry[];
   piers: PierDescriptor[];
+  pierColumnGeometries: THREE.BufferGeometry[];
   startPoint: THREE.Vector3;
   endPoint: THREE.Vector3;
 }
+
+/** Half-width (ft) of a pier column just under the cap beam. */
+const PIER_COLUMN_TOP_HALF_WIDTH_FT = 1.1;
+/** Half-width (ft) of a pier column at its footing — wider than the top, like a real tapered bent. */
+const PIER_COLUMN_BASE_HALF_WIDTH_FT = 1.7;
 
 function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
   const pavedHalfWidth = (edge.lanes * edge.laneWidthFt) / 2;
@@ -92,10 +102,13 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
   }
 
   const piers = computePierDescriptors(edge);
+  const pierColumnGeometries = piers.map((pier) =>
+    buildTaperedPierColumn(PIER_COLUMN_TOP_HALF_WIDTH_FT, PIER_COLUMN_BASE_HALF_WIDTH_FT, pier.columnHeight)
+  );
   const startPoint = edge.spline.getPointAt(0);
   const endPoint = edge.spline.getPointAt(1);
 
-  return { ribbon, stripes, barriers, piers, startPoint, endPoint };
+  return { ribbon, stripes, barriers, piers, pierColumnGeometries, startPoint, endPoint };
 }
 
 function ZoneBadge({
@@ -217,6 +230,41 @@ function GridlockMarker({ position }: { position: [number, number, number] }) {
   );
 }
 
+/** Flags a plan-view road crossing that doesn't clear TxDOT's 16.5 ft minimum bridge clearance. */
+function ClearanceWarningMarker({ violation }: { violation: ClearanceViolation }) {
+  return (
+    <Html
+      position={violation.position}
+      style={{ pointerEvents: "none" }}
+      zIndexRange={[16, 0]}
+      occlude={false}
+    >
+      <div
+        className="animate-warn-pulse"
+        style={{
+          transform: "translate(-50%, -130%)",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "3px 8px",
+          borderRadius: 999,
+          background: "linear-gradient(180deg, #fbbf24, #b45309)",
+          border: "2px solid #78350f",
+          color: "#fff",
+          fontSize: 10,
+          fontWeight: 800,
+          whiteSpace: "nowrap",
+          fontFamily: "var(--font-sans)",
+        }}
+        title={`Only ${violation.clearanceFt.toFixed(1)} ft clearance — needs ${MIN_BRIDGE_CLEARANCE_FT} ft`}
+      >
+        <IconWarning style={{ width: 12, height: 12 }} />
+        {violation.clearanceFt.toFixed(1)} ft clearance
+      </div>
+    </Html>
+  );
+}
+
 function YieldMarker({ edge }: { edge: Edge3D }) {
   const p = edge.spline.getPointAt(1);
   const tangent = edge.spline.getTangentAt(1);
@@ -261,6 +309,8 @@ function EdgeGroup({
       store.setSelection({ kind: "edge", id: edge.id });
     } else if (store.tool === "zone") {
       store.cycleEdgeZone(edge.id);
+    } else if (store.tool === "turnaround") {
+      store.createTexasTurnaround(edge.id, point);
     } else if (store.tool === "draw") {
       const splitNodeId = store.splitEdgeAt(edge.id, point);
       if (store.drawFromNodeId) {
@@ -280,11 +330,15 @@ function EdgeGroup({
               ? isSelected
                 ? ROUNDABOUT_SELECTED_COLOR
                 : ROUNDABOUT_COLOR
-              : showHeatmap
-                ? heatmapColorHex(speedRatio!)
-                : isSelected
-                  ? ASPHALT_SELECTED_COLOR
-                  : ASPHALT_COLOR
+              : edge.isTexasTurnaround
+                ? isSelected
+                  ? TEXAS_TURNAROUND_SELECTED_COLOR
+                  : TEXAS_TURNAROUND_COLOR
+                : showHeatmap
+                  ? heatmapColorHex(speedRatio!)
+                  : isSelected
+                    ? ASPHALT_SELECTED_COLOR
+                    : ASPHALT_COLOR
           }
           roughness={0.95}
           metalness={0.05}
@@ -317,8 +371,13 @@ function EdgeGroup({
               <meshStandardMaterial color={PIER_COLOR} roughness={0.92} />
             </mesh>
             {pier.columnOffsets.map((offset, ci) => (
-              <mesh key={ci} castShadow receiveShadow position={[offset, -(columnTopY / 2 + 1), 0]}>
-                <cylinderGeometry args={[1.3, 1.4, columnTopY, 16]} />
+              <mesh
+                key={ci}
+                castShadow
+                receiveShadow
+                position={[offset, -(columnTopY / 2 + 1), 0]}
+                geometry={geometries.pierColumnGeometries[i]}
+              >
                 <meshStandardMaterial color={PIER_COLOR} roughness={0.92} />
               </mesh>
             ))}
@@ -363,6 +422,8 @@ export default function RoadNetworkMesh({
   }, [edgeSpeedRatios]);
 
   const problemEdgeIdSet = useMemo(() => new Set(problemEdgeIds ?? []), [problemEdgeIds]);
+
+  const clearanceViolations = useMemo(() => findClearanceViolations(network), [network]);
 
   const ringNodeIds = useMemo(() => {
     const set = new Set<string>();
@@ -425,6 +486,10 @@ export default function RoadNetworkMesh({
         (gridlockMarkers ?? []).map((position, i) => (
           <GridlockMarker key={`gridlock-${i}`} position={position} />
         ))}
+
+      {clearanceViolations.map((violation, i) => (
+        <ClearanceWarningMarker key={`clearance-${violation.edgeAId}-${violation.edgeBId}-${i}`} violation={violation} />
+      ))}
     </group>
   );
 }

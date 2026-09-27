@@ -228,6 +228,20 @@ export function buildJerseyBarrier(edge: Edge3D, lateralOffsetFt: number): THREE
   return sweepProfileAlongCurve(edge, lateralOffsetFt, JERSEY_PROFILE, segmentsForLength(edge.length, 12), true);
 }
 
+/**
+ * A tapered rectangular concrete bent column — wider at the footing than
+ * under the cap beam, like a real bridge pier. Built as a 4-sided prism
+ * (a "cylinder" with 4 radial segments is just a square prism) rotated 45°
+ * so its flat faces line up with the cap beam's axes instead of a diamond.
+ * The `radius` of an N=4 cylinder is measured to its corner, so half-widths
+ * are scaled by sqrt(2) to land the flat faces at the requested width.
+ */
+export function buildTaperedPierColumn(topHalfWidthFt: number, baseHalfWidthFt: number, heightFt: number): THREE.BufferGeometry {
+  const geo = new THREE.CylinderGeometry(topHalfWidthFt * Math.SQRT2, baseHalfWidthFt * Math.SQRT2, heightFt, 4, 1);
+  geo.rotateY(Math.PI / 4);
+  return geo;
+}
+
 export interface PierDescriptor {
   /** World-space position of the pier cap beam center, feet. */
   capPosition: [number, number, number];

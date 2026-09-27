@@ -7,6 +7,7 @@ const HINTS: Record<EditorTool, string> = {
   delete: "💣 Click a road or junction to blow it up (50% refund, no hard feelings).",
   inspect: "🔍 Click a road or junction to fiddle with its lanes, direction, class, or signals.",
   zone: "🚩 Click a road to cycle it: none → Entry → Destination → none.",
+  turnaround: "🔁 Click a frontage road — we'll loop a one-way Texas turnaround to the nearest opposing road within 220 ft.",
 };
 
 export default function HintBar() {

@@ -57,6 +57,14 @@ export default function RoadEditor() {
         store.redo();
         return;
       }
+      if (e.key.toLowerCase() === "q") {
+        store.stepElevation(-1);
+        return;
+      }
+      if (e.key.toLowerCase() === "e") {
+        store.stepElevation(1);
+        return;
+      }
       const idx = Number(e.key) - 1;
       if (Number.isInteger(idx) && idx >= 0 && idx < ROAD_CLASS_LIST.length) {
         store.setRoadClass(ROAD_CLASS_LIST[idx].id);

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { ROAD_CLASSES, ROUNDABOUT_PRIORITY } from "./roadClasses";
+import { ROAD_CLASSES, ROUNDABOUT_PRIORITY, TEXAS_TURNAROUND_PRIORITY } from "./roadClasses";
 import { mphToFtps } from "./types";
 import type {
   Edge3D,
@@ -17,15 +17,44 @@ export function createEmptyNetworkSnapshot(): NetworkSnapshot {
   return { nodes: [], edges: [] };
 }
 
+/** Points a plain node-to-node ramp is subdivided into so its elevation can ease in/out instead of jumping to a new grade in one straight line. */
+const VERTICAL_CURVE_STEPS = 6;
+/** Elevation delta (ft) below which a straight segment reads as flat enough that a vertical curve would be pointless. */
+const VERTICAL_CURVE_THRESHOLD_FT = 0.5;
+
 function buildSpline(spec: EdgeSpec, nodesById: Map<string, NodeSpec>): THREE.CatmullRomCurve3 {
   const fromNode = nodesById.get(spec.fromNodeId);
   const toNode = nodesById.get(spec.toNodeId);
   if (!fromNode || !toNode) {
     throw new Error(`Edge ${spec.id} references unknown node`);
   }
-  const points: THREE.Vector3[] = [new THREE.Vector3(...fromNode.position)];
+  const from = fromNode.position;
+  const to = toNode.position;
+
+  // A plain node-to-node ramp with a real elevation change gets a smooth
+  // (ease-in/out) vertical curve instead of one straight linear grade line,
+  // so the deck doesn't kink where it meets a flat approach at either end —
+  // the "sharp kink" a real vertical curve (PVC/PVT) is designed to remove.
+  // Edges with player-placed interior points keep their authored shape.
+  if (spec.interiorPoints.length === 0 && Math.abs(to[1] - from[1]) > VERTICAL_CURVE_THRESHOLD_FT) {
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i <= VERTICAL_CURVE_STEPS; i++) {
+      const t = i / VERTICAL_CURVE_STEPS;
+      const eased = t * t * (3 - 2 * t); // smoothstep: zero slope at both ends
+      points.push(
+        new THREE.Vector3(
+          from[0] + (to[0] - from[0]) * t,
+          from[1] + (to[1] - from[1]) * eased,
+          from[2] + (to[2] - from[2]) * t
+        )
+      );
+    }
+    return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
+  }
+
+  const points: THREE.Vector3[] = [new THREE.Vector3(...from)];
   for (const p of spec.interiorPoints) points.push(new THREE.Vector3(...p));
-  points.push(new THREE.Vector3(...toNode.position));
+  points.push(new THREE.Vector3(...to));
   return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
 }
 
@@ -63,11 +92,16 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       length,
       roadClassId: spec.roadClassId,
       elevationLevelId: spec.elevationLevelId,
-      priority: spec.isRoundaboutRing ? ROUNDABOUT_PRIORITY : roadClass.priority,
+      priority: spec.isRoundaboutRing
+        ? ROUNDABOUT_PRIORITY
+        : spec.isTexasTurnaround
+          ? TEXAS_TURNAROUND_PRIORITY
+          : roadClass.priority,
       isFreeway: spec.roadClassId === "highway" || spec.roadClassId === "motorway",
       isElevated: computeIsElevated(spline),
       zone: spec.zone,
       isRoundaboutRing: spec.isRoundaboutRing ?? false,
+      isTexasTurnaround: spec.isTexasTurnaround ?? false,
       nextEdgeIds: [],
       divergeLaneRanges: null,
       laneTurnBias: new Array(spec.lanes).fill(0),
@@ -196,6 +230,55 @@ export function computeRoute(
   }
   path.reverse();
   return path;
+}
+
+export interface EdgePointHit {
+  t: number;
+  point: THREE.Vector3;
+  distSq: number;
+}
+
+/**
+ * Finds the closest point on an edge's centerline to a given world point via
+ * coarse-then-fine sampling. One-off editor interaction (e.g. clicking a
+ * road to anchor a Texas turnaround) — never called in the simulation's
+ * per-tick hot path, so a few dozen curve samples is a fine cost.
+ */
+export function findClosestPointOnEdge(edge: Edge3D, point: THREE.Vector3, coarseSteps = 40): EdgePointHit {
+  let bestT = 0;
+  let bestDistSq = Infinity;
+  const p = new THREE.Vector3();
+  for (let i = 0; i <= coarseSteps; i++) {
+    const t = i / coarseSteps;
+    edge.spline.getPointAt(t, p);
+    const d = p.distanceToSquared(point);
+    if (d < bestDistSq) {
+      bestDistSq = d;
+      bestT = t;
+    }
+  }
+
+  let lo = Math.max(0, bestT - 1 / coarseSteps);
+  let hi = Math.min(1, bestT + 1 / coarseSteps);
+  const fineSteps = 10;
+  for (let iter = 0; iter < 3; iter++) {
+    for (let i = 0; i <= fineSteps; i++) {
+      const t = lo + ((hi - lo) * i) / fineSteps;
+      edge.spline.getPointAt(t, p);
+      const d = p.distanceToSquared(point);
+      if (d < bestDistSq) {
+        bestDistSq = d;
+        bestT = t;
+      }
+    }
+    const newSpan = (hi - lo) / fineSteps;
+    lo = Math.max(0, bestT - newSpan);
+    hi = Math.min(1, bestT + newSpan);
+  }
+
+  const point3 = new THREE.Vector3();
+  edge.spline.getPointAt(bestT, point3);
+  return { t: bestT, point: point3, distSq: bestDistSq };
 }
 
 function angleDiff(a: number, b: number): number {

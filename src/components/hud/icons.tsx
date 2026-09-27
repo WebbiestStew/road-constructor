@@ -284,6 +284,15 @@ export function IconSun(props: IconProps) {
   );
 }
 
+export function IconTurnaround(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M10 5v9a5.5 5.5 0 0 0 11 0v-2" />
+      <path d="M5.5 9L10 4.5 14.5 9" />
+    </svg>
+  );
+}
+
 export function IconStar(props: IconProps) {
   return (
     <svg {...base} {...props} fill="currentColor" stroke="none">
@@ -307,6 +316,15 @@ export function IconMoon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M20 14.2A8.2 8.2 0 1 1 9.8 4a6.7 6.7 0 0 0 10.2 10.2z" />
+    </svg>
+  );
+}
+
+export function IconNight(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M19 13.6A7.4 7.4 0 1 1 10.4 5a6 6 0 0 0 8.6 8.6z" />
+      <path d="M18.5 3.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7z" fill="currentColor" stroke="none" />
     </svg>
   );
 }

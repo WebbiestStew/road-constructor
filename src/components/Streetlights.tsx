@@ -41,7 +41,7 @@ function computeLampBases(network: ReturnType<typeof assembleNetwork>): [number,
   return bases;
 }
 
-/** Procedural lamp posts along every road, glowing only at dusk — no light-emitting geometry rendered during the day. */
+/** Procedural lamp posts along every road, glowing at dusk and night — no light-emitting geometry rendered during the day. */
 export default function Streetlights() {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
@@ -69,7 +69,7 @@ export default function Streetlights() {
     bulb.instanceMatrix.needsUpdate = true;
   }, [lampBases]);
 
-  if (timeOfDay !== "dusk" || lampBases.length === 0) return null;
+  if (timeOfDay === "day" || lampBases.length === 0) return null;
 
   return (
     <group>

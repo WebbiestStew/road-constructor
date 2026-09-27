@@ -174,3 +174,40 @@ export function mobilEvaluate(
 export function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
+
+// ---------------------------------------------------------------------------
+// Road-grade resistance / assist
+// ---------------------------------------------------------------------------
+
+/** Standard gravitational acceleration, ft/s^2. */
+export const GRAVITY_FTPS2 = 32.2;
+
+/**
+ * Longitudinal grade acceleration a vehicle feels from gravity:
+ * `a_grade = -g * sin(theta)`, where theta is the road's slope angle
+ * (positive = climbing). For a *unit* tangent vector along the road's
+ * centerline, the y-component already equals sin(atan(dy/dx)) — i.e.
+ * `sinTheta` here is just that tangent's y-component, so callers don't need
+ * to round-trip through atan/sin themselves.
+ *
+ * Going downhill (`sinTheta < 0`), gravity assists every vehicle equally —
+ * it doesn't care how much horsepower you have. Going uphill, only some of
+ * that resistance actually reaches the driver's felt deceleration: a car
+ * with power to spare just opens the throttle further, while a vehicle
+ * with little power reserve relative to its weight can't compensate and
+ * feels close to the full resistance. `climbSensitivity` (see
+ * `climbSensitivityFromWeightToPower`) stands in for that reserve.
+ */
+export function gradeAccelFtps2(sinTheta: number, climbSensitivity: number): number {
+  return sinTheta > 0 ? -GRAVITY_FTPS2 * sinTheta * climbSensitivity : -GRAVITY_FTPS2 * sinTheta;
+}
+
+/**
+ * Maps a weight-to-power ratio (lb/hp) to the `climbSensitivity` multiplier
+ * consumed by `gradeAccelFtps2`, calibrated so a ~25 lb/hp sedan barely
+ * notices a 6% grade (matches TxDOT's standard max grade) while a
+ * ~300 lb/hp loaded semi crawls on anything steeper.
+ */
+export function climbSensitivityFromWeightToPower(weightToPowerLbPerHp: number): number {
+  return weightToPowerLbPerHp / 100;
+}

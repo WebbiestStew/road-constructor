@@ -6,6 +6,8 @@ import {
   MOBIL_DEFAULTS,
   NO_LEADER_GAP,
   clamp,
+  climbSensitivityFromWeightToPower,
+  gradeAccelFtps2,
   idmAccel,
   mobilEvaluate,
   type MobilInputs,
@@ -125,6 +127,7 @@ const _color = new THREE.Color();
 const FORWARD_AXIS = new THREE.Vector3(0, 0, 1);
 const _curveTangentA = new THREE.Vector3();
 const _curveTangentB = new THREE.Vector3();
+const _gradeTangent = new THREE.Vector3();
 
 // Blue -> amber -> red (never green) so free-flow vs. stopped traffic reads
 // correctly for red-green colorblind players, who lose the green/red contrast
@@ -182,6 +185,8 @@ function acquireVehicle(): VehicleState {
     destinationEdgeId: "",
     spawnTime: 0,
     stuckTimeS: 0,
+    isTruck: false,
+    weightToPowerLbPerHp: 25,
   };
 }
 
@@ -316,8 +321,12 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.routeIndex = 0;
   v.destinationEdgeId = destinationEdgeId;
 
-  // 15% semi-trucks, 85% passenger sedans, each with distinct accel/braking physics.
+  // 15% semi-trucks, 85% passenger sedans, each with distinct accel/braking
+  // physics and a distinct weight-to-power ratio driving how badly road
+  // grade hits them (see idmAccelForVehicle / gradeAccelFtps2).
   const isTruck = rng() < 0.15;
+  v.isTruck = isTruck;
+  v.weightToPowerLbPerHp = isTruck ? randRange(260, 340) : randRange(18, 32);
   v.length = isTruck ? randRange(32, 42) : randRange(13, 19);
   v.maxAccel = isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
   v.comfortBrake = isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
@@ -528,6 +537,18 @@ function curvatureSpeedCapFtps(edge: Edge3D, distanceAlongEdge: number): number 
   return Math.sqrt(turnRadiusFt * COMFORTABLE_LATERAL_ACCEL_FTPS2);
 }
 
+/**
+ * Sine of the road's slope angle at a point along an edge, positive =
+ * climbing in the vehicle's direction of travel. A unit tangent vector's
+ * y-component is exactly sin(theta) for theta = atan(rise/run), so this is
+ * a direct sample rather than a separate atan/sin computation.
+ */
+function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
+  const t = distanceToT(edge, clamp(distanceAlongEdge, 0, edge.length));
+  edge.spline.getTangentAt(t, _gradeTangent);
+  return _gradeTangent.y;
+}
+
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
   const v0 = Math.min(
     mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05),
@@ -542,7 +563,11 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
     v0,
     delta: IDM_DEFAULTS.delta,
   };
-  return clamp(idmAccel(v.speed, gapInfo.gap, deltaV, v0, params), -20, params.a);
+  const gradeAccel = gradeAccelFtps2(
+    edgeSinThetaAt(edge, v.distanceAlongEdge),
+    climbSensitivityFromWeightToPower(v.weightToPowerLbPerHp)
+  );
+  return clamp(idmAccel(v.speed, gapInfo.gap, deltaV, v0, params) + gradeAccel, -20, params.a);
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +590,11 @@ function pairAccel(followerV: VehicleState, followerDist: number, leader: Vehicl
     v0,
     delta: IDM_DEFAULTS.delta,
   };
-  return clamp(idmAccel(followerV.speed, gap, followerV.speed - leaderSpeed, v0, params), -20, params.a);
+  const gradeAccel = gradeAccelFtps2(
+    edgeSinThetaAt(edge, followerDist),
+    climbSensitivityFromWeightToPower(followerV.weightToPowerLbPerHp)
+  );
+  return clamp(idmAccel(followerV.speed, gap, followerV.speed - leaderSpeed, v0, params) + gradeAccel, -20, params.a);
 }
 
 function tryLaneChange(v: VehicleState, edge: Edge3D) {
@@ -595,6 +624,13 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
       mergeUrgency = clamp(1 - distanceToNode / 500, 0, 1);
     }
   }
+
+  // A sedan stuck behind a truck that's crawling well under the sedan's own
+  // desired speed (typically a heavy semi losing the fight against a steep
+  // grade) gets an extra shove toward overtaking, on top of whatever
+  // incentive MOBIL's own acceleration-gain math already produces.
+  const followerV0 = mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05);
+  const truckOvertakeBias = !v.isTruck && oldLeader?.isTruck && oldLeader.speed < followerV0 * 0.6 ? 6 : 0;
 
   let bestLane = -1;
   let bestIncentive = -Infinity;
@@ -627,7 +663,9 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
     const oldFollowerAccelAfter = oldFollower ? pairAccel(oldFollower, oldFollower.distanceAlongEdge, oldLeader, edge) : 0;
 
     const candidateDirection = candidateLane > v.laneIndex ? 1 : -1;
-    const extraBias = requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * 8 : 0;
+    const extraBias =
+      (requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * 8 : 0) +
+      truckOvertakeBias;
 
     const inputs: MobilInputs = {
       currentAccel: v.accel,

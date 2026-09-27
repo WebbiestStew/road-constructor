@@ -112,7 +112,7 @@ export const ROAD_CLASS_LIST: RoadClassDef[] = [
   ROAD_CLASSES.motorway,
 ];
 
-export type ElevationLevelId = "tunnel" | "cutting" | "ground" | "bridge" | "viaduct";
+export type ElevationLevelId = "tunnel" | "cutting" | "ground" | "tier1" | "tier2" | "tier3";
 
 export interface ElevationLevelDef {
   id: ElevationLevelId;
@@ -121,21 +121,32 @@ export interface ElevationLevelDef {
   costMultiplier: number;
 }
 
+/**
+ * Discrete vertical tiers a node can sit at. At-Grade through Tier 3 step in
+ * a flat +20 ft increment (matching the Q/E draw-time hotkeys, which just
+ * move up/down this same list); Tunnel/Cutting are separate below-grade
+ * options only reachable via the elevation picker, not the hotkeys.
+ */
 export const ELEVATION_LEVELS: ElevationLevelDef[] = [
   { id: "tunnel", label: "Tunnel", elevationFt: -35, costMultiplier: 4.5 },
   { id: "cutting", label: "Cutting", elevationFt: -12, costMultiplier: 1.6 },
-  { id: "ground", label: "Ground", elevationFt: 0, costMultiplier: 1 },
-  { id: "bridge", label: "Bridge", elevationFt: 24, costMultiplier: 2.2 },
-  { id: "viaduct", label: "Viaduct", elevationFt: 42, costMultiplier: 3.2 },
+  { id: "ground", label: "At-Grade", elevationFt: 0, costMultiplier: 1 },
+  { id: "tier1", label: "Tier 1", elevationFt: 20, costMultiplier: 2.0 },
+  { id: "tier2", label: "Tier 2", elevationFt: 40, costMultiplier: 3.0 },
+  { id: "tier3", label: "Tier 3", elevationFt: 60, costMultiplier: 4.0 },
 ];
 
 export const ELEVATION_BY_ID: Record<ElevationLevelId, ElevationLevelDef> = {
   tunnel: ELEVATION_LEVELS[0],
   cutting: ELEVATION_LEVELS[1],
   ground: ELEVATION_LEVELS[2],
-  bridge: ELEVATION_LEVELS[3],
-  viaduct: ELEVATION_LEVELS[4],
+  tier1: ELEVATION_LEVELS[3],
+  tier2: ELEVATION_LEVELS[4],
+  tier3: ELEVATION_LEVELS[5],
 };
+
+/** The subset of tiers Q/E steps through during drawing — a simple +/-20ft ladder, ground through Tier 3. */
+export const HOTKEY_TIER_IDS: ElevationLevelId[] = ["ground", "tier1", "tier2", "tier3"];
 
 /** Estimated construction cost, in dollars, for a road segment. */
 export function estimateEdgeCost(
@@ -161,3 +172,20 @@ export const ROUNDABOUT_PRIORITY = 99;
 
 export const ROUNDABOUT_SPEED_MPH = 20;
 export const ROUNDABOUT_LANE_WIDTH_FT = 14;
+
+/**
+ * Priority rank given to a Texas turnaround's slip lane — below every real
+ * road class (min 1), so a vehicle looping through it always yields at the
+ * merge to whatever frontage traffic it's rejoining, never the other way
+ * around.
+ */
+export const TEXAS_TURNAROUND_PRIORITY = 0;
+
+export const TEXAS_TURNAROUND_SPEED_MPH = 25;
+export const TEXAS_TURNAROUND_LANE_WIDTH_FT = 12;
+/** TxDOT-style minimum inner radius for a continuous slip-lane U-turn, feet. */
+export const TEXAS_TURNAROUND_MIN_RADIUS_FT = 30;
+/** Construction cost multiplier over a plain lane's per-ft rate — reflects the specialized loop structure. */
+export const TEXAS_TURNAROUND_COST_MULTIPLIER = 2.4;
+/** How far from the clicked point to search for a same-corridor opposing frontage road to loop back onto, feet. */
+export const TEXAS_TURNAROUND_SEARCH_RADIUS_FT = 220;

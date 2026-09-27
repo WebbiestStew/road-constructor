@@ -3,13 +3,14 @@
 import type { ComponentType, SVGProps } from "react";
 import { ELEVATION_LEVELS, ROAD_CLASS_LIST } from "@/sim/roadClasses";
 import { useEditorStore, type EditorTool } from "@/state/editorStore";
-import { IconDelete, IconDraw, IconInspect, IconZone } from "./icons";
+import { IconDelete, IconDraw, IconInspect, IconTurnaround, IconZone } from "./icons";
 
 const TOOLS: { id: EditorTool; icon: ComponentType<SVGProps<SVGSVGElement>>; label: string }[] = [
   { id: "draw", icon: IconDraw, label: "Draw" },
   { id: "delete", icon: IconDelete, label: "Delete" },
   { id: "inspect", icon: IconInspect, label: "Inspect" },
   { id: "zone", icon: IconZone, label: "Zone" },
+  { id: "turnaround", icon: IconTurnaround, label: "Turnaround" },
 ];
 
 function DockButton({
@@ -78,6 +79,9 @@ function RoadClassPanel() {
   );
 }
 
+/** Below-grade (cut/tunnel) vs at-or-above-grade (fill/elevated) — civil-engineering color coding: excavation is warm concrete-brown, structure is cool concrete-slate. */
+const BELOW_GRADE_IDS = new Set(["tunnel", "cutting"]);
+
 function ElevationPanel() {
   const selectedElevationId = useEditorStore((s) => s.selectedElevationId);
   const setElevation = useEditorStore((s) => s.setElevation);
@@ -88,27 +92,38 @@ function ElevationPanel() {
 
   return (
     <div className="hud-panel flex flex-col gap-2 rounded-2xl p-2.5">
+      <span className="text-center text-[9.5px] font-bold uppercase tracking-wider text-zinc-400">Elevation</span>
       <div className="flex items-stretch gap-1">
-        {ELEVATION_LEVELS.map((lvl) => (
-          <button
-            key={lvl.id}
-            type="button"
-            onClick={() => setElevation(lvl.id)}
-            title={`${lvl.label} (${lvl.elevationFt >= 0 ? "+" : ""}${lvl.elevationFt} ft)`}
-            className={`flex w-12 flex-col items-center gap-1 rounded-lg py-1.5 text-[8px] font-medium leading-none transition active:scale-95 ${
-              selectedElevationId === lvl.id
-                ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm"
-                : "text-zinc-600 hover:bg-black/5"
-            }`}
-          >
-            <span
-              className="w-1.5 rounded-full bg-current"
-              style={{ height: 4 + ((lvl.elevationFt + 35) / 77) * 16 }}
-            />
-            {lvl.label}
-          </button>
-        ))}
+        {ELEVATION_LEVELS.map((lvl, i) => {
+          const active = selectedElevationId === lvl.id;
+          const belowGrade = BELOW_GRADE_IDS.has(lvl.id);
+          const isDividerBoundary = i > 0 && belowGrade !== BELOW_GRADE_IDS.has(ELEVATION_LEVELS[i - 1].id);
+          return (
+            <div key={lvl.id} className="flex items-stretch gap-1">
+              {isDividerBoundary && <div className="w-px self-stretch bg-black/10" />}
+              <button
+                type="button"
+                onClick={() => setElevation(lvl.id)}
+                title={`${lvl.label} (${lvl.elevationFt >= 0 ? "+" : ""}${lvl.elevationFt} ft)`}
+                className={`flex w-11 flex-col items-center gap-1 rounded-lg py-1.5 text-[8px] font-medium leading-none transition active:scale-95 ${
+                  active
+                    ? belowGrade
+                      ? "bg-gradient-to-br from-amber-700 to-amber-900 text-white shadow-sm"
+                      : "bg-gradient-to-br from-slate-500 to-slate-700 text-white shadow-sm"
+                    : "text-zinc-600 hover:bg-black/5"
+                }`}
+              >
+                <span
+                  className="w-1.5 rounded-full bg-current"
+                  style={{ height: 4 + ((lvl.elevationFt + 35) / 95) * 16 }}
+                />
+                {lvl.label}
+              </button>
+            </div>
+          );
+        })}
       </div>
+      <p className="text-center text-[9.5px] font-semibold uppercase tracking-wide text-zinc-400">Q / E to step tier</p>
       <label className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-600">
         <input type="checkbox" checked={twoWay} onChange={(e) => setTwoWay(e.target.checked)} className="accent-sky-600" />
         Two-way

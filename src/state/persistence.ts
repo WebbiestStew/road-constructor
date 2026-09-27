@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { NetworkSnapshot } from "@/sim/types";
 
 const STORAGE_KEY = "road-constructor:autosave:v1";
@@ -10,19 +11,69 @@ export interface PersistedPayload {
   nextEdgeSeq: number;
 }
 
+// ---------------------------------------------------------------------------
+// Zod schema mirroring NetworkSnapshot/NodeSpec/EdgeSpec (src/sim/types.ts).
+// Used to validate anything coming from outside this session's own state —
+// an imported file or, especially, a share-link hash someone else's browser
+// produced — before it's ever handed to assembleNetwork or the store.
+// ---------------------------------------------------------------------------
+
+const vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
+
+const signalControlSchema = z.object({
+  type: z.literal("signal"),
+  groupA: z.array(z.string()),
+  groupB: z.array(z.string()),
+  greenDurationS: z.number(),
+  allRedDurationS: z.number(),
+});
+
+const junctionControlSchema = z.union([signalControlSchema, z.object({ type: z.literal("priority") })]);
+
+const nodeSchema = z.object({
+  id: z.string(),
+  position: vec3Schema,
+  control: junctionControlSchema.optional(),
+});
+
+const zoneSchema = z.union([
+  z.object({ type: z.literal("entry"), demandVehPerHour: z.number() }),
+  z.object({ type: z.literal("destination"), targetSpeedMph: z.number() }),
+]);
+
+const roadClassIdSchema = z.enum(["lane", "street", "avenue", "highway", "motorway"]);
+const elevationLevelIdSchema = z.enum(["tunnel", "cutting", "ground", "tier1", "tier2", "tier3"]);
+
+const edgeSchema = z.object({
+  id: z.string(),
+  fromNodeId: z.string(),
+  toNodeId: z.string(),
+  interiorPoints: z.array(vec3Schema),
+  roadClassId: roadClassIdSchema,
+  elevationLevelId: elevationLevelIdSchema,
+  lanes: z.number(),
+  laneWidthFt: z.number(),
+  speedLimitMph: z.number(),
+  zone: zoneSchema.optional(),
+  isRoundaboutRing: z.boolean().optional(),
+  isTexasTurnaround: z.boolean().optional(),
+});
+
+const networkSnapshotSchema = z.object({
+  nodes: z.array(nodeSchema),
+  edges: z.array(edgeSchema),
+});
+
+const persistedPayloadSchema = z.object({
+  version: z.literal(1),
+  network: networkSnapshotSchema,
+  budget: z.number(),
+  nextNodeSeq: z.number(),
+  nextEdgeSeq: z.number(),
+});
+
 function isValidPayload(value: unknown): value is PersistedPayload {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return (
-    v.version === 1 &&
-    typeof v.network === "object" &&
-    v.network !== null &&
-    Array.isArray((v.network as Record<string, unknown>).nodes) &&
-    Array.isArray((v.network as Record<string, unknown>).edges) &&
-    typeof v.budget === "number" &&
-    typeof v.nextNodeSeq === "number" &&
-    typeof v.nextEdgeSeq === "number"
-  );
+  return persistedPayloadSchema.safeParse(value).success;
 }
 
 export function loadAutosave(): PersistedPayload | null {

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, OrthographicCamera } from "@react-three/drei";
+import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import * as THREE from "three";
 import RoadNetworkMesh from "@/components/RoadNetworkMesh";
 import RoadEditor from "@/components/RoadEditor";
@@ -19,17 +20,36 @@ import ScenarioTerrainFeature from "@/components/ScenarioTerrainFeature";
 
 const SHARE_HASH_PREFIX = "#data=";
 
-/** Auto-loads a shared network from a `#data=...` URL hash on first mount, if present. No visual output. */
+/** Auto-loads a shared network from a `#data=...` URL hash on first mount, if present, then centers the camera on it and opens it straight to traffic. No visual output. */
 function ShareLinkLoader() {
   const importPayload = useEditorStore((s) => s.importPayload);
+  const requestCameraFit = useEditorStore((s) => s.requestCameraFit);
+  const setMode = useEditorStore((s) => s.setMode);
 
   useEffect(() => {
     const hash = window.location.hash;
     if (!hash.startsWith(SHARE_HASH_PREFIX)) return;
     const encoded = hash.slice(SHARE_HASH_PREFIX.length);
     void decodeShareHash(encoded).then((payload) => {
-      if (payload) importPayload(payload);
-      else window.alert("That share link looks corrupted or out of date.");
+      if (payload) {
+        importPayload(payload);
+
+        const nodes = payload.network.nodes;
+        if (nodes.length > 0) {
+          let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+          for (const n of nodes) {
+            minX = Math.min(minX, n.position[0]);
+            maxX = Math.max(maxX, n.position[0]);
+            minZ = Math.min(minZ, n.position[2]);
+            maxZ = Math.max(maxZ, n.position[2]);
+          }
+          requestCameraFit({ centerX: (minX + maxX) / 2, centerZ: (minZ + maxZ) / 2 });
+        }
+
+        setMode("simulate");
+      } else {
+        window.alert("That share link looks corrupted or out of date.");
+      }
       history.replaceState(null, "", window.location.pathname + window.location.search);
     });
     // Intentionally run once on mount only — a hash present at load time is a one-shot import trigger, not reactive state to watch.
@@ -41,6 +61,7 @@ function ShareLinkLoader() {
 
 const SKY_COLOR_DAY = "#bff0c8";
 const SKY_COLOR_DUSK = "#2b2440";
+const SKY_COLOR_NIGHT = "#0a0c1c";
 
 /** Steep top-down-ish default camera direction, in feet, looking at the origin where building starts. Orthographic, so only the angle matters — not the distance. */
 const CAMERA_POSITION: [number, number, number] = [300, 650, 300];
@@ -48,6 +69,33 @@ const CAMERA_POSITION: [number, number, number] = [300, 650, 300];
 /** Orthographic zoom range from the OrbitControls below the canvas — used to map zoom to the ambient hum/engine crossfade. */
 const MIN_ZOOM = 0.08;
 const MAX_ZOOM = 12;
+
+const _cameraDir = new THREE.Vector3(...CAMERA_POSITION).normalize();
+const _cameraDist = new THREE.Vector3(...CAMERA_POSITION).length();
+
+/** Recenters the orthographic camera + its OrbitControls target on a requested bounding box (e.g. right after a share-link import), then clears the request. No visual output. */
+function CameraFitController() {
+  const camera = useThree((s) => s.camera) as THREE.OrthographicCamera;
+  const controls = useThree((s) => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | null;
+  const pendingCameraFit = useEditorStore((s) => s.pendingCameraFit);
+  const clearPendingCameraFit = useEditorStore((s) => s.clearPendingCameraFit);
+
+  useEffect(() => {
+    if (!pendingCameraFit || !controls) return;
+    const { centerX, centerZ } = pendingCameraFit;
+    const target = new THREE.Vector3(centerX, 0, centerZ);
+    // Recenter on the new target while preserving the current viewing
+    // angle/zoom: set position and target directly (matching OrbitControls'
+    // own target+offset model) rather than driving this through its dolly
+    // API, then let update() resync its internal spherical state from them.
+    camera.position.copy(target).addScaledVector(_cameraDir, _cameraDist);
+    controls.target.copy(target);
+    controls.update();
+    clearPendingCameraFit();
+  }, [pendingCameraFit, camera, controls, clearPendingCameraFit]);
+
+  return null;
+}
 
 /** Drives the ambient audio bed from camera zoom every frame — no visual output. */
 function AmbienceController() {
@@ -66,8 +114,8 @@ export default function Play() {
   const sim = useTrafficSimulation();
   const scenarioRunner = useScenarioRunner(sim);
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
-  const isDusk = timeOfDay === "dusk";
-  const skyColor = isDusk ? SKY_COLOR_DUSK : SKY_COLOR_DAY;
+  const skyColor =
+    timeOfDay === "night" ? SKY_COLOR_NIGHT : timeOfDay === "dusk" ? SKY_COLOR_DUSK : SKY_COLOR_DAY;
 
   return (
     <div id="sim-root">
@@ -82,7 +130,27 @@ export default function Play() {
 
         <OrthographicCamera makeDefault position={CAMERA_POSITION} zoom={1.05} near={1} far={20000} />
 
-        {isDusk ? (
+        {timeOfDay === "night" ? (
+          <>
+            <hemisphereLight intensity={0.12} color="#5b6fb0" groundColor="#0a0c1c" />
+            <ambientLight intensity={0.06} />
+            <directionalLight
+              position={[-700, 900, -400]}
+              intensity={0.18}
+              color="#7c8fd9"
+              castShadow
+              shadow-mapSize-width={2048}
+              shadow-mapSize-height={2048}
+              shadow-camera-left={-3600}
+              shadow-camera-right={3600}
+              shadow-camera-top={2200}
+              shadow-camera-bottom={-2200}
+              shadow-camera-near={10}
+              shadow-camera-far={6000}
+              shadow-bias={-0.0004}
+            />
+          </>
+        ) : timeOfDay === "dusk" ? (
           <>
             <hemisphereLight intensity={0.32} color="#ffb37a" groundColor="#241b3d" />
             <ambientLight intensity={0.16} />
@@ -135,8 +203,10 @@ export default function Play() {
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
         <AmbienceController />
+        <CameraFitController />
 
         <OrbitControls
+          makeDefault
           target={[0, 0, 0]}
           enableDamping
           dampingFactor={0.08}
@@ -149,6 +219,17 @@ export default function Play() {
             RIGHT: THREE.MOUSE.ROTATE,
           }}
         />
+
+        {timeOfDay !== "day" && (
+          <EffectComposer>
+            <Bloom
+              mipmapBlur
+              luminanceThreshold={0.35}
+              luminanceSmoothing={0.2}
+              intensity={timeOfDay === "night" ? 1.1 : 0.75}
+            />
+          </EffectComposer>
+        )}
       </Canvas>
 
       <SimControls sim={sim} scenarioRunner={scenarioRunner} />

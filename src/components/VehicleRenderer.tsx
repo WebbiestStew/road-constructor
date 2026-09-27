@@ -29,8 +29,9 @@ interface VehicleRendererProps {
 export default function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const headlightRef = useRef<THREE.InstancedMesh>(null);
+  const taillightRef = useRef<THREE.InstancedMesh>(null);
   const lastVersionRef = useRef(0);
-  const isDusk = useEditorStore((s) => s.timeOfDay === "dusk");
+  const lightsOn = useEditorStore((s) => s.timeOfDay !== "day");
 
   // A thin emissive bar embedded at the front face of the vehicle's own
   // local box space (not the origin) — since it shares the vehicle's exact
@@ -39,6 +40,13 @@ export default function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
   const headlightGeometry = useMemo(() => {
     const geo = new THREE.BoxGeometry(VEHICLE_WIDTH_FT * 0.82, VEHICLE_HEIGHT_FT * 0.22, 0.6);
     geo.translate(0, -VEHICLE_HEIGHT_FT * 0.12, VEHICLE_LENGTH_FT / 2 - 0.2);
+    return geo;
+  }, []);
+
+  // Same trick, mirrored to the rear face, for glowing red taillights.
+  const taillightGeometry = useMemo(() => {
+    const geo = new THREE.BoxGeometry(VEHICLE_WIDTH_FT * 0.82, VEHICLE_HEIGHT_FT * 0.22, 0.5);
+    geo.translate(0, -VEHICLE_HEIGHT_FT * 0.12, -(VEHICLE_LENGTH_FT / 2 - 0.15));
     return geo;
   }, []);
 
@@ -60,6 +68,14 @@ export default function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
     headlights.frustumCulled = false;
   }, []);
 
+  useEffect(() => {
+    const taillights = taillightRef.current;
+    if (!taillights) return;
+    taillights.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    taillights.count = 0;
+    taillights.frustumCulled = false;
+  }, []);
+
   useFrame(() => {
     const mesh = meshRef.current;
     const snapshot = snapshotRef.current;
@@ -74,12 +90,21 @@ export default function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
     mesh.count = snapshot.activeCount;
 
     const headlights = headlightRef.current;
-    if (headlights && isDusk) {
-      headlights.instanceMatrix.array = snapshot.matrices;
-      headlights.instanceMatrix.needsUpdate = true;
-      headlights.count = snapshot.activeCount;
-    } else if (headlights) {
-      headlights.count = 0;
+    const taillights = taillightRef.current;
+    if (lightsOn) {
+      if (headlights) {
+        headlights.instanceMatrix.array = snapshot.matrices;
+        headlights.instanceMatrix.needsUpdate = true;
+        headlights.count = snapshot.activeCount;
+      }
+      if (taillights) {
+        taillights.instanceMatrix.array = snapshot.matrices;
+        taillights.instanceMatrix.needsUpdate = true;
+        taillights.count = snapshot.activeCount;
+      }
+    } else {
+      if (headlights) headlights.count = 0;
+      if (taillights) taillights.count = 0;
     }
   });
 
@@ -96,6 +121,9 @@ export default function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
       </instancedMesh>
       <instancedMesh ref={headlightRef} args={[headlightGeometry, undefined, MAX_VEHICLES]}>
         <meshStandardMaterial color="#fff6d0" emissive="#fff6d0" emissiveIntensity={2.6} toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={taillightRef} args={[taillightGeometry, undefined, MAX_VEHICLES]}>
+        <meshStandardMaterial color="#ff2a2a" emissive="#ff2a2a" emissiveIntensity={3.2} toneMapped={false} />
       </instancedMesh>
     </>
   );
