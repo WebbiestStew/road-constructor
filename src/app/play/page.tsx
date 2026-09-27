@@ -133,8 +133,8 @@ export default function Play() {
 
         {timeOfDay === "night" ? (
           <>
-            <hemisphereLight intensity={0.12} color="#5b6fb0" groundColor="#0a0c1c" />
-            <ambientLight intensity={0.06} />
+            <hemisphereLight intensity={0.16} color="#5b6fb0" groundColor="#0a0c1c" />
+            <ambientLight intensity={0.09} />
             <directionalLight
               position={[-700, 900, -400]}
               intensity={0.18}
@@ -156,8 +156,8 @@ export default function Play() {
             <hemisphereLight intensity={0.32} color="#ffb37a" groundColor="#241b3d" />
             <ambientLight intensity={0.16} />
             <directionalLight
-              position={[900, 1000, 500]}
-              intensity={0.5}
+              position={[1500, 260, 750]}
+              intensity={0.55}
               color="#ffb37a"
               castShadow
               shadow-mapSize-width={2048}
