@@ -8,7 +8,7 @@ import { assembleNetwork, planTexasTurnaround, type TexasTurnaroundPlan } from "
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
 import { useEditorStore } from "@/state/editorStore";
-import type { ContractStatus, Edge3D, EdgeSpeedRatio } from "@/sim/types";
+import type { ContractStatus, Edge3D, EdgeSpeedRatio, NodeSpec } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import { IconWarning } from "./hud/icons";
 import {
@@ -332,6 +332,37 @@ function GridlockMarker({ position }: { position: [number, number, number] }) {
         <IconWarning style={{ width: 13, height: 13 }} />
       </div>
     </Html>
+  );
+}
+
+/** Radius/height (ft) of the invisible click target that makes a junction selectable for the Simulate-mode civil metrics panel — a bit larger than Build mode's visible node marker since there's no colored disc here to aim at. */
+const NODE_INSPECT_HIT_RADIUS_FT = 9;
+const NODE_INSPECT_HIT_HEIGHT_FT = 2;
+
+/**
+ * An invisible click target at a junction, active only in Simulate mode.
+ * RoadEditor (the source of Build mode's clickable, colored node markers)
+ * unmounts entirely once traffic is opened so the network reads as
+ * "finished," which otherwise leaves junctions with no way to select them
+ * for LiveNodeInspector — this fills that gap without reintroducing any of
+ * Build mode's editing affordances.
+ */
+function NodeInspectTarget({ node }: { node: NodeSpec }) {
+  const handleClick = (event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
+    const store = useEditorStore.getState();
+    if (store.tool === "inspect") {
+      store.setSelection({ kind: "node", id: node.id });
+    }
+  };
+  return (
+    <mesh
+      position={[node.position[0], node.position[1] + NODE_INSPECT_HIT_HEIGHT_FT / 2, node.position[2]]}
+      onClick={handleClick}
+    >
+      <cylinderGeometry args={[NODE_INSPECT_HIT_RADIUS_FT, NODE_INSPECT_HIT_RADIUS_FT, NODE_INSPECT_HIT_HEIGHT_FT, 16]} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+    </mesh>
   );
 }
 
@@ -753,6 +784,9 @@ export default function RoadNetworkMesh({
         (gridlockMarkers ?? []).map((position, i) => (
           <GridlockMarker key={`gridlock-${i}`} position={position} />
         ))}
+
+      {mode === "simulate" &&
+        nodes.map((node) => <NodeInspectTarget key={`inspect-node-${node.id}`} node={node} />)}
 
       {clearanceViolations.map((violation, i) => (
         <ClearanceWarningMarker key={`clearance-${violation.edgeAId}-${violation.edgeBId}-${i}`} violation={violation} />

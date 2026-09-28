@@ -2,11 +2,12 @@
 
 import { useMemo, type ComponentType, type SVGProps } from "react";
 import {
+  ROAD_CLASSES,
   ROAD_CLASS_LIST,
   estimateEdgeCost,
   estimateEdgeUpkeepPerHour,
 } from "@/sim/roadClasses";
-import { LOS_COLOR, LOS_DESCRIPTIONS, type LOSGrade } from "@/sim/los";
+import { LOS_COLOR, LOS_DESCRIPTIONS, type EdgeTrafficStats, type LOSGrade } from "@/sim/los";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
 import { assembleNetwork } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
@@ -80,6 +81,27 @@ function StatCard({
             </span>
           ) : null}
         </span>
+      </div>
+    </div>
+  );
+}
+
+/** A slim v/c-ratio bar: how much of a road's per-lane capacity is actually being used, colored by the same LOS scale as the grade badge. Clamped visually at 120% so a badly oversaturated segment still reads as "full", not off the chart. */
+function VcRatioBar({ vcRatio, los, capacityVehPerHourPerLane }: { vcRatio: number; los: LOSGrade; capacityVehPerHourPerLane: number }) {
+  const pct = Math.min(1, vcRatio / 1.2) * 100;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between text-[10px] text-zinc-500">
+        <span>Capacity used</span>
+        <span className="font-medium tabular-nums text-zinc-700">
+          {Math.round(vcRatio * 100)}% of {capacityVehPerHourPerLane}/ln
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-black/[0.06]">
+        <div
+          className="h-full rounded-full transition-[width]"
+          style={{ width: `${pct}%`, backgroundColor: LOS_COLOR[los] }}
+        />
       </div>
     </div>
   );
@@ -413,6 +435,12 @@ function LiveEdgeInspector({ sim }: { sim: UseTrafficSimulationReturn }) {
         />
       </div>
 
+      <VcRatioBar
+        vcRatio={stats?.vcRatio ?? 0}
+        los={los}
+        capacityVehPerHourPerLane={ROAD_CLASSES[edge.roadClassId].capacityVehPerHourPerLane}
+      />
+
       <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs">
         <span className="text-zinc-600">Grade</span>
         <span
@@ -440,6 +468,131 @@ function LiveEdgeInspector({ sim }: { sim: UseTrafficSimulationReturn }) {
   );
 }
 
+/** Live per-approach traffic stats for a selected junction during Simulate mode — the node-selection counterpart to LiveEdgeInspector, built entirely from the same edgeTrafficStats stream the road-segment view already reads (no worker changes). */
+function LiveNodeInspector({ sim }: { sim: UseTrafficSimulationReturn }) {
+  const selection = useEditorStore((s) => s.selection);
+  const nodesById = useEditorStore((s) => s.nodesById);
+  const edgesById = useEditorStore((s) => s.edgesById);
+  const edges = useEditorStore((s) => s.edges);
+  const setSelection = useEditorStore((s) => s.setSelection);
+
+  if (!selection || selection.kind !== "node") return null;
+  const node = nodesById.get(selection.id);
+  if (!node) return null;
+
+  const statsById = new Map(sim.metrics.edgeTrafficStats.map((s) => [s.edgeId, s]));
+  const incoming = edges.filter((e) => e.toNodeId === node.id);
+  const outgoing = edges.filter((e) => e.fromNodeId === node.id);
+  const incomingStats = incoming
+    .map((e) => statsById.get(e.id))
+    .filter((s): s is EdgeTrafficStats => !!s);
+  const vehiclesWaiting = incomingStats.reduce((sum, s) => sum + s.vehicleCount, 0);
+  const worstLOS = computeNetworkLOS(incomingStats.map((s) => ({ vehicleCount: s.vehicleCount, los: s.los })));
+  const control = node.control;
+  const isSignal = control?.type === "signal";
+
+  return (
+    <div className="hud-panel flex flex-col gap-2.5 rounded-2xl p-3.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-zinc-800">Junction</span>
+        <button
+          type="button"
+          onClick={() => setSelection(null)}
+          className="text-zinc-400 hover:text-zinc-700"
+        >
+          <IconClose className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2.5 rounded-xl bg-black/[0.03] px-3 py-2.5">
+        <span
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-sm ${
+            isSignal ? "bg-gradient-to-br from-sky-400 to-blue-500" : "bg-gradient-to-br from-violet-500 to-fuchsia-600"
+          }`}
+        >
+          {isSignal ? <IconSignal className="h-4 w-4" /> : <IconYield className="h-4 w-4" />}
+        </span>
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-[9.5px] uppercase tracking-wide text-zinc-500">
+            Control
+          </span>
+          <span className="font-display text-sm font-bold leading-tight text-[#241b3d]">
+            {isSignal ? "Signalized" : "Priority / yield"}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard
+          icon={IconCar}
+          label="Waiting"
+          value={vehiclesWaiting.toString()}
+          unit="veh"
+          gradient="from-sky-400 to-blue-500"
+        />
+        <StatCard
+          icon={IconSignal}
+          label="Worst LOS"
+          value={worstLOS ?? "—"}
+          color={worstLOS ? LOS_COLOR[worstLOS] : undefined}
+          gradient="from-zinc-400 to-zinc-500"
+        />
+      </div>
+
+      {isSignal && control.type === "signal" && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+            Signal timing
+          </span>
+          <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs">
+            <span className="text-zinc-600">Phase A / Phase B approaches</span>
+            <span className="font-medium tabular-nums text-zinc-900">
+              {control.groupA.length} / {control.groupB.length}
+            </span>
+          </div>
+          <div className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs">
+            <span className="text-zinc-600">Green / all-red</span>
+            <span className="font-medium tabular-nums text-zinc-900">
+              {control.greenDurationS}s / {control.allRedDurationS}s
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+          Approaches ({incoming.length + outgoing.length})
+        </span>
+        <div className="flex flex-col gap-1">
+          {incoming.map((e) => {
+            const stats = statsById.get(e.id);
+            return (
+              <div
+                key={e.id}
+                className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-1.5 text-[11px]"
+              >
+                <span className="flex items-center gap-1.5 text-zinc-600">
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: stats ? LOS_COLOR[stats.los] : "#a1a1aa" }}
+                  />
+                  {ROAD_CLASSES[edgesById.get(e.id)?.roadClassId ?? "street"].label.split(" ")[0]} in
+                </span>
+                <span className="font-medium tabular-nums text-zinc-900">
+                  {stats ? `${stats.vehicleCount} veh · ${stats.avgSpeedMph.toFixed(0)} mph` : "0 veh"}
+                </span>
+              </div>
+            );
+          })}
+          {incoming.length === 0 && (
+            <p className="text-[11px] text-zinc-500">No incoming approaches.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const { metrics, setDemand } = sim;
   const edges = useEditorStore((s) => s.edges);
@@ -453,6 +606,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   return (
     <div className="flex w-80 flex-col gap-3">
       <LiveEdgeInspector sim={sim} />
+      <LiveNodeInspector sim={sim} />
       <div className="hud-panel flex flex-col gap-4 rounded-2xl p-3.5">
         <div className="grid grid-cols-2 gap-2">
           <StatCard
