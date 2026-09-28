@@ -13,11 +13,12 @@ import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulation";
 import { useScenarioRunner } from "@/hooks/useScenarioRunner";
-import { updateAmbience } from "@/lib/sound";
+import { updateAmbience, updateEngineDynamics } from "@/lib/sound";
 import { useEditorStore } from "@/state/editorStore";
 import { decodeShareHash } from "@/state/persistence";
 import Streetlights from "@/components/Streetlights";
 import ScenarioTerrainFeature from "@/components/ScenarioTerrainFeature";
+import JointClackDetector from "@/components/JointClackDetector";
 
 const SHARE_HASH_PREFIX = "#data=";
 
@@ -98,8 +99,8 @@ function CameraFitController() {
   return null;
 }
 
-/** Drives the ambient audio bed from camera zoom every frame — no visual output. */
-function AmbienceController() {
+/** Drives the ambient audio bed from camera zoom and live traffic speed every frame — no visual output. */
+function AmbienceController({ avgSpeedMph }: { avgSpeedMph: number }) {
   const camera = useThree((s) => s.camera);
   useFrame(() => {
     const zoom = (camera as THREE.OrthographicCamera).zoom ?? MIN_ZOOM;
@@ -107,6 +108,7 @@ function AmbienceController() {
     const logMax = Math.log(MAX_ZOOM);
     const t = (Math.log(Math.max(MIN_ZOOM, zoom)) - logMin) / (logMax - logMin);
     updateAmbience(t);
+    updateEngineDynamics(avgSpeedMph);
   });
   return null;
 }
@@ -203,7 +205,8 @@ export default function Play() {
         <Streetlights />
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
-        <AmbienceController />
+        <JointClackDetector snapshotRef={sim.snapshotRef} />
+        <AmbienceController avgSpeedMph={sim.metrics.avgSpeedMph} />
         <CameraFitController />
 
         <OrbitControls
