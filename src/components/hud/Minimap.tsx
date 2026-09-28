@@ -25,7 +25,10 @@ export default function Minimap() {
 
     if (nodes.length === 0) {
       ctx.fillStyle = "#5c8a63";
-      ctx.font = "10px var(--font-ui), sans-serif";
+      // Canvas 2D's `font` doesn't resolve CSS custom properties, so the
+      // Highway Gothic stack has to be read as its already-computed value.
+      const fontStack = getComputedStyle(document.documentElement).getPropertyValue("--font-sans").trim();
+      ctx.font = `10px ${fontStack || "sans-serif"}`;
       ctx.textAlign = "center";
       ctx.fillText("🗺️ blank canvas!", CANVAS_W / 2, CANVAS_H / 2);
       return;
@@ -90,7 +93,7 @@ export default function Minimap() {
   }, [nodes, edges]);
 
   return (
-    <div className="pointer-events-none absolute bottom-4 right-4 z-20">
+    <div className="pointer-events-none absolute bottom-4 right-4 z-20 hidden sm:block">
       <div className="hud-panel overflow-hidden rounded-xl p-1">
         <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="block rounded-lg" />
       </div>

@@ -87,7 +87,7 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   };
 
   return (
-    <div className="pointer-events-auto absolute left-4 top-4 z-20 flex items-center gap-1 rounded-full p-1.5 hud-panel">
+    <div className="pointer-events-auto absolute left-4 top-4 z-20 flex max-w-[calc(100vw-5.5rem)] flex-wrap items-center gap-1 rounded-2xl p-1.5 hud-panel lg:max-w-none lg:flex-nowrap lg:rounded-full">
       <div className="flex items-center gap-1.5 pl-1.5 pr-2.5">
         <span className="hover-wiggle flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-pink-500 text-white shadow-sm">
           <IconRoad className="h-4 w-4" />

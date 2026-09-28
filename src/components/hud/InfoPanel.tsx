@@ -334,7 +334,7 @@ function BuildInfo() {
   if (!selection) return null;
 
   return (
-    <div className="flex w-72 flex-col gap-3">
+    <div className="flex w-72 max-w-[calc(50vw-1.5rem)] flex-col gap-3">
       <SelectionInspector />
 
       <button
@@ -631,7 +631,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   }, [entries, destinations, network]);
 
   return (
-    <div className="flex w-80 flex-col gap-3">
+    <div className="flex w-80 max-w-[calc(50vw-1.5rem)] flex-col gap-3">
       <LiveEdgeInspector sim={sim} />
       <LiveNodeInspector sim={sim} />
       <div className="hud-panel flex flex-col gap-4 rounded-2xl p-3.5">
@@ -834,7 +834,7 @@ export default function InfoPanel({
   const mode = useEditorStore((s) => s.mode);
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-20 z-20">
+    <div className="pointer-events-auto absolute right-4 top-60 z-20 lg:top-20">
       {mode === "build" ? <BuildInfo /> : <SimulateInfo sim={sim} />}
     </div>
   );

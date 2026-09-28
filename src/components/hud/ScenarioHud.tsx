@@ -174,9 +174,9 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
 
   return (
     <>
-      <div className="pointer-events-auto absolute bottom-4 left-4 z-20 flex flex-col items-start gap-1.5">
+      <div className="pointer-events-auto absolute bottom-4 left-4 z-20 flex max-w-[calc(100vw-2rem)] flex-col items-start gap-1.5">
         {scenario && runner.progress && (
-          <span className="hud-panel rounded-full px-3 py-1 text-[10.5px] font-bold text-zinc-600">
+          <span className="hud-panel max-w-[12rem] truncate rounded-full px-3 py-1 text-[10.5px] font-bold text-zinc-600 sm:max-w-none">
             {runner.progress.label}
           </span>
         )}
@@ -188,7 +188,8 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
           {scenario ? (
             <>
               <IconClock className="h-3.5 w-3.5 text-violet-600" />
-              {scenario.name} · {formatMMSS(runner.remainingS)}
+              <span className="hidden sm:inline">{scenario.name} · </span>
+              {formatMMSS(runner.remainingS)}
             </>
           ) : (
             <>

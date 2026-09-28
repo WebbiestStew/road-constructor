@@ -62,7 +62,7 @@ function RoadClassPanel() {
   const setTool = useEditorStore((s) => s.setTool);
 
   return (
-    <div className="hud-panel flex items-stretch gap-1 rounded-2xl p-2">
+    <div className="hud-panel flex max-w-[calc(100vw-2rem)] items-stretch gap-1 overflow-x-auto rounded-2xl p-2">
       {ROAD_CLASS_LIST.map((cls, i) => {
         const active = tool === "draw" && selectedRoadClassId === cls.id;
         const pricePerFt = Math.round(cls.costPerFtPerLane * cls.lanesPerDirection);
@@ -204,9 +204,9 @@ export default function ToolDock() {
   if (mode !== "build") return null;
 
   return (
-    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
+    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center gap-2">
       {(tool === "draw" || tool === "turnaround") && (
-        <div className="animate-pop flex items-end gap-2">
+        <div className="animate-pop flex max-w-[calc(100vw-2rem)] items-end gap-2 overflow-x-auto">
           <RoadClassPanel />
           {tool === "draw" && <ElevationPanel />}
         </div>

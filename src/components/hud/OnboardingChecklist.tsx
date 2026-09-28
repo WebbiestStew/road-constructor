@@ -107,7 +107,7 @@ export default function OnboardingChecklist() {
   };
 
   return (
-    <div className="animate-pop pointer-events-auto absolute left-4 top-20 z-20 w-64">
+    <div className="animate-pop pointer-events-auto absolute left-4 top-60 z-20 w-64 max-w-[calc(50vw-1.5rem)] lg:top-20">
       <div className="hud-panel flex flex-col gap-2.5 rounded-2xl p-3.5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-zinc-800">Quick start 🚧</span>
@@ -121,7 +121,7 @@ export default function OnboardingChecklist() {
           </button>
         </div>
 
-        <div className="flex flex-col gap-2">
+        <div className="flex max-h-[32vh] flex-col gap-2 overflow-y-auto lg:max-h-none lg:overflow-visible">
           {steps.map((step, i) => (
             <div key={step.title} className="flex items-start gap-2">
               <span

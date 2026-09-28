@@ -1,20 +1,18 @@
 import type { Metadata } from "next";
-import { Manrope, Overpass } from "next/font/google";
+import { Overpass } from "next/font/google";
 import "./globals.css";
-
-const manrope = Manrope({
-  subsets: ["latin"],
-  variable: "--font-ui",
-  display: "swap",
-});
 
 // Overpass is the open-source metric-compatible reimplementation of Highway
 // Gothic (the FHWA road-sign alphabet) — the real font isn't freely licensed,
-// this is the standard free substitute.
+// this is the standard free substitute. Used everywhere (body text and
+// display headings both resolve to it, see --font-sans/--font-display in
+// globals.css), so the full range of weights Tailwind utility classes
+// reference (font-normal through font-black) is loaded here rather than
+// just the bold display-only subset it used to cover.
 const overpass = Overpass({
   subsets: ["latin"],
-  weight: ["600", "700", "800"],
-  variable: "--font-display",
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-highway",
   display: "swap",
 });
 
@@ -29,7 +27,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${manrope.variable} ${overpass.variable} antialiased`}>{children}</body>
+      <body className={`${overpass.variable} antialiased`}>{children}</body>
     </html>
   );
 }
