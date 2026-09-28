@@ -14,7 +14,7 @@ import Terrain from "@/components/Terrain";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulation";
 import { useScenarioRunner } from "@/hooks/useScenarioRunner";
 import { updateAmbience, updateEngineDynamics } from "@/lib/sound";
-import { useEditorStore } from "@/state/editorStore";
+import { useEditorStore, type EditorTool } from "@/state/editorStore";
 import { decodeShareHash } from "@/state/persistence";
 import Streetlights from "@/components/Streetlights";
 import ScenarioTerrainFeature from "@/components/ScenarioTerrainFeature";
@@ -114,13 +114,19 @@ function AmbienceController({ avgSpeedMph }: { avgSpeedMph: number }) {
   return null;
 }
 
+/** Which tools are "aim and place something new" (crosshair) vs. "click an existing thing" (default pointer) — a small but real cue for what a click will do, especially since Simulate mode's Inspect tool now reveals a live stats panel rather than editing anything. */
+const CROSSHAIR_TOOLS = new Set<EditorTool>(["draw", "zone", "turnaround"]);
+
 export default function Play() {
   const sim = useTrafficSimulation();
   const scenarioRunner = useScenarioRunner(sim);
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
   const rideAlongActive = useEditorStore((s) => s.rideAlongActive);
+  const mode = useEditorStore((s) => s.mode);
+  const tool = useEditorStore((s) => s.tool);
   const skyColor =
     timeOfDay === "night" ? SKY_COLOR_NIGHT : timeOfDay === "dusk" ? SKY_COLOR_DUSK : SKY_COLOR_DAY;
+  const canvasCursor = mode === "build" && CROSSHAIR_TOOLS.has(tool) ? "crosshair" : "default";
 
   return (
     <div id="sim-root">
@@ -129,6 +135,7 @@ export default function Play() {
         shadows
         dpr={[1, 2]}
         gl={{ antialias: true, powerPreference: "high-performance" }}
+        style={{ cursor: canvasCursor }}
       >
         <color attach="background" args={[skyColor]} />
         <fog attach="fog" args={[skyColor, 4200, 13000]} />

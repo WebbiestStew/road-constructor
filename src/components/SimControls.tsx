@@ -10,7 +10,9 @@ import HintBar from "./hud/HintBar";
 import InfoPanel from "./hud/InfoPanel";
 import MobileBlockerModal from "./hud/MobileBlockerModal";
 import Minimap from "./hud/Minimap";
+import ModeVignette from "./hud/ModeVignette";
 import OnboardingChecklist from "./hud/OnboardingChecklist";
+import PausedBanner from "./hud/PausedBanner";
 import PlayButton from "./hud/PlayButton";
 import ScenarioHud from "./hud/ScenarioHud";
 import ToolDock from "./hud/ToolDock";
@@ -26,10 +28,12 @@ export default function SimControls({
 }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
+      <ModeVignette />
       <MobileBlockerModal />
       <TopBar sim={sim} />
       <BudgetBar />
       <PlayButton sim={sim} />
+      <PausedBanner sim={sim} />
       <ToolDock />
       <InfoPanel sim={sim} />
       <OnboardingChecklist />

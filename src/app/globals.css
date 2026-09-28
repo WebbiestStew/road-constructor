@@ -208,3 +208,23 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 2px;
   animation: confetti-fall 900ms ease-in forwards;
 }
+
+/*
+ * A faint full-viewport edge tint reinforcing Build vs Simulate at a
+ * glance, independent of reading the small mode toggle in the top bar —
+ * violet for "still editing," emerald for "live traffic." Purely a color
+ * swap on one box-shadow so it costs nothing to keep always mounted.
+ */
+.mode-vignette {
+  position: absolute;
+  inset: 0;
+  transition: box-shadow 500ms ease;
+}
+
+.mode-vignette-build {
+  box-shadow: inset 0 0 0 3px rgba(139, 92, 246, 0.35), inset 0 0 90px rgba(139, 92, 246, 0.16);
+}
+
+.mode-vignette-simulate {
+  box-shadow: inset 0 0 0 3px rgba(16, 185, 129, 0.35), inset 0 0 90px rgba(16, 185, 129, 0.16);
+}

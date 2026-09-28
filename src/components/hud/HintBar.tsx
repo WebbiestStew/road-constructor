@@ -14,7 +14,10 @@ export default function HintBar() {
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
 
-  const text = mode === "build" ? HINTS[tool] : "🚗 Watch it flow, or hit Pause to freeze and stare at the chaos.";
+  const text =
+    mode === "build"
+      ? HINTS[tool]
+      : "🚗 Watch it flow, or click a road or junction for live LOS/speed stats. Space to pause.";
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
