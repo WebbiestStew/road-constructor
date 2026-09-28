@@ -28,7 +28,43 @@ const VERTICAL_CURVE_STEPS = 6;
 /** Elevation delta (ft) below which a straight segment reads as flat enough that a vertical curve would be pointless. */
 const VERTICAL_CURVE_THRESHOLD_FT = 0.5;
 
-function buildSpline(spec: EdgeSpec, nodesById: Map<string, NodeSpec>): THREE.CatmullRomCurve3 {
+/** Builds a `nodeId -> distinct neighbor node ids` map from every edge's endpoints, direction-agnostic (a two-way pair of edges between the same two nodes still counts as one neighbor). Used to tell a plain "bend point" mid-road (exactly one neighbor on each side) apart from a dead end or a real multi-way junction, which should keep a straight, unsmoothed approach. */
+function buildNeighborsByNode(edges: EdgeSpec[]): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    let set = map.get(a);
+    if (!set) {
+      set = new Set();
+      map.set(a, set);
+    }
+    set.add(b);
+  };
+  for (const e of edges) {
+    link(e.fromNodeId, e.toNodeId);
+    link(e.toNodeId, e.fromNodeId);
+  }
+  return map;
+}
+
+/** If `nodeId` has exactly one neighbor other than `exclude`, returns that neighbor's id — otherwise null (a dead end, or a real junction with no single unambiguous "through" direction). */
+function singleOtherNeighbor(
+  neighborsByNode: Map<string, Set<string>>,
+  nodeId: string,
+  exclude: string
+): string | null {
+  const neighbors = neighborsByNode.get(nodeId);
+  if (!neighbors || neighbors.size !== 2) return null;
+  for (const id of neighbors) {
+    if (id !== exclude) return id;
+  }
+  return null;
+}
+
+function buildSpline(
+  spec: EdgeSpec,
+  nodesById: Map<string, NodeSpec>,
+  neighborsByNode: Map<string, Set<string>>
+): THREE.CatmullRomCurve3 {
   const fromNode = nodesById.get(spec.fromNodeId);
   const toNode = nodesById.get(spec.toNodeId);
   if (!fromNode || !toNode) {
@@ -58,6 +94,53 @@ function buildSpline(spec: EdgeSpec, nodesById: Map<string, NodeSpec>): THREE.Ca
     return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
   }
 
+  // A flat (or near-flat) edge with no authored shape gets its endpoint
+  // tangents blended with whatever road continues past each end — a plain
+  // "bend point" the player tapped into a road while drawing keeps
+  // travelling smoothly through it instead of the pavement kinking to a
+  // sharp vertex where two dead-straight edges meet. A dead end or a real
+  // multi-way junction has no single unambiguous "continuing" direction, so
+  // that end is left as a straight approach exactly as before — only a
+  // node with precisely one neighbor on the far side counts as a bend.
+  if (spec.interiorPoints.length === 0) {
+    const fromV = new THREE.Vector3(...from);
+    const toV = new THREE.Vector3(...to);
+    const prevNeighborId = singleOtherNeighbor(neighborsByNode, spec.fromNodeId, spec.toNodeId);
+    const nextNeighborId = singleOtherNeighbor(neighborsByNode, spec.toNodeId, spec.fromNodeId);
+    const prevNode = prevNeighborId ? nodesById.get(prevNeighborId) : undefined;
+    const nextNode = nextNeighborId ? nodesById.get(nextNeighborId) : undefined;
+
+    if (prevNode || nextNode) {
+      const chordLength = toV.distanceTo(fromV);
+      const straightDir = toV.clone().sub(fromV).normalize();
+      // Tangent direction follows the neighboring segment (Catmull-Rom
+      // style: "prev -> to" / "from -> next"), but its magnitude is scaled
+      // to this edge's own length rather than the neighbor's — otherwise a
+      // long lead-in segment feeding a short one would wildly overshoot the
+      // control points and bulge or loop the curve.
+      const startDir = prevNode
+        ? toV.clone().sub(new THREE.Vector3(...prevNode.position)).normalize()
+        : straightDir;
+      const endDir = nextNode
+        ? new THREE.Vector3(...nextNode.position).sub(fromV).normalize()
+        : straightDir;
+
+      const control1 = fromV.clone().addScaledVector(startDir, chordLength / 3);
+      const control2 = toV.clone().addScaledVector(endDir, -chordLength / 3);
+      const bezier = new THREE.CubicBezierCurve3(fromV, control1, control2, toV);
+
+      // Resample as a CatmullRomCurve3 (rather than returning the Bezier
+      // directly) so every downstream consumer of Edge3D.spline keeps
+      // working against the exact same curve type unchanged.
+      const sampleCount = 12;
+      const sampled: THREE.Vector3[] = [];
+      for (let i = 0; i <= sampleCount; i++) {
+        sampled.push(bezier.getPoint(i / sampleCount));
+      }
+      return new THREE.CatmullRomCurve3(sampled, false, "catmullrom", 0.5);
+    }
+  }
+
   const points: THREE.Vector3[] = [new THREE.Vector3(...from)];
   for (const p of spec.interiorPoints) points.push(new THREE.Vector3(...p));
   points.push(new THREE.Vector3(...to));
@@ -82,9 +165,10 @@ function computeIsElevated(curve: THREE.CatmullRomCurve3): boolean {
  */
 export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   const nodesById = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const neighborsByNode = buildNeighborsByNode(snapshot.edges);
 
   const edges: Edge3D[] = snapshot.edges.map((spec) => {
-    const spline = buildSpline(spec, nodesById);
+    const spline = buildSpline(spec, nodesById, neighborsByNode);
     const length = spline.getLength();
     const roadClass = ROAD_CLASSES[spec.roadClassId];
     return {
