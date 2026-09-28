@@ -20,6 +20,7 @@ import Streetlights from "@/components/Streetlights";
 import ScenarioTerrainFeature from "@/components/ScenarioTerrainFeature";
 import JointClackDetector from "@/components/JointClackDetector";
 import ChaseCamera from "@/components/ChaseCamera";
+import AutosaveHydrator from "@/components/AutosaveHydrator";
 
 const SHARE_HASH_PREFIX = "#data=";
 
@@ -130,6 +131,7 @@ export default function Play() {
 
   return (
     <div id="sim-root">
+      <AutosaveHydrator />
       <ShareLinkLoader />
       <Canvas
         shadows

@@ -175,6 +175,15 @@ interface EditorState {
   getSnapshot: () => NetworkSnapshot;
   exportPayload: () => PersistedPayload;
   importPayload: (payload: PersistedPayload) => void;
+  /**
+   * Applies any autosaved network, once, from a client-only effect after
+   * mount — never at store-creation time. The store's initial state must be
+   * identical on the server-rendered HTML and the client's first render (no
+   * `localStorage` access), or React logs a hydration mismatch the moment a
+   * returning player (who has autosave data) loads or reloads the page. A
+   * silent no-op if there's nothing saved.
+   */
+  hydrateAutosave: () => void;
 
   activeScenarioId: string | null;
   loadScenario: (scenario: ScenarioDef) => void;
@@ -191,8 +200,6 @@ function findCounterpart(
     (e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId,
   );
 }
-
-const autosaved = loadAutosave();
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   mode: "build",
@@ -221,17 +228,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ selectedElevationId: HOTKEY_TIER_IDS[nextIdx] });
   },
 
-  nodes: autosaved?.network.nodes ?? [],
-  edges: autosaved?.network.edges ?? [],
-  nodesById: new Map((autosaved?.network.nodes ?? []).map((n) => [n.id, n])),
-  edgesById: new Map((autosaved?.network.edges ?? []).map((e) => [e.id, e])),
+  // Always the same hard defaults here, matching the statically prerendered
+  // HTML exactly — any autosave is applied post-mount by hydrateAutosave()
+  // instead, never read at store-creation time (see that action's doc
+  // comment for why).
+  nodes: [],
+  edges: [],
+  nodesById: new Map(),
+  edgesById: new Map(),
 
-  budget: autosaved?.budget ?? STARTING_BUDGET,
+  budget: STARTING_BUDGET,
   selection: null,
   drawFromNodeId: null,
 
-  nextNodeSeq: autosaved?.nextNodeSeq ?? 1,
-  nextEdgeSeq: autosaved?.nextEdgeSeq ?? 1,
+  nextNodeSeq: 1,
+  nextEdgeSeq: 1,
 
   past: [],
   future: [],
@@ -803,6 +814,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     const radius = radiusFt ?? Math.max(45, legs.length * 16);
     const y = node.position[1];
+    // The ring's own capacity shouldn't be a hard single-lane bottleneck
+    // regardless of how busy the roads feeding it are — scale it with the
+    // widest connected approach (capped at 2, since a roundabout wider than
+    // that starts fighting the simulation's generic lane-changing logic,
+    // which isn't roundabout-aware).
+    const maxApproachLanes = Math.max(1, ...connected.map((e) => e.lanes));
+    const ringLanes = Math.max(1, Math.min(2, maxApproachLanes));
 
     let nodeSeq = state.nextNodeSeq;
     const ringNodes: NodeSpec[] = legs.map((leg) => {
@@ -845,7 +863,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const length = edgeLengthFt(fromNode.position, toNode.position, [
         midPoint,
       ]);
-      ringCost += estimateEdgeCost("lane", "ground", length, 1);
+      ringCost += estimateEdgeCost("lane", "ground", length, ringLanes);
       ringEdges.push({
         id: `e${edgeSeq++}`,
         fromNodeId: fromNode.id,
@@ -853,7 +871,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         interiorPoints: [midPoint],
         roadClassId: "lane",
         elevationLevelId: "ground",
-        lanes: 1,
+        lanes: ringLanes,
         laneWidthFt: ROUNDABOUT_LANE_WIDTH_FT,
         speedLimitMph: ROUNDABOUT_SPEED_MPH,
         isRoundaboutRing: true,
@@ -976,6 +994,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextEdgeSeq: payload.nextEdgeSeq,
       selection: null,
       drawFromNodeId: null,
+    });
+  },
+
+  hydrateAutosave: () => {
+    const payload = loadAutosave();
+    if (!payload) return;
+    // No history entry pushed (unlike importPayload) — this is the very
+    // first thing to touch the network after mount, so there's no prior
+    // state worth making undoable back to.
+    set({
+      nodes: payload.network.nodes,
+      edges: payload.network.edges,
+      nodesById: new Map(payload.network.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(payload.network.edges.map((e) => [e.id, e])),
+      budget: payload.budget,
+      nextNodeSeq: payload.nextNodeSeq,
+      nextEdgeSeq: payload.nextEdgeSeq,
     });
   },
 

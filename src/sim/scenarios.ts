@@ -96,7 +96,12 @@ export function finalizeScenario(
 
 const SCP_ENTRY_ROAD = "scpEntryRoad";
 const SCP_DEST_ROAD = "scpDestRoad";
-const SCP_TARGET_MOVED = 250;
+// At the scenario's fixed 1000 veh/h entry demand, a 150s run can only ever
+// see ~42 vehicles arrive at all (1000/h * 150s/3600s) — 250 was unreachable
+// by any build, since demand is locked for campaign scenarios and can't be
+// cranked up to compensate. 35 is a real stretch target: hitting it means
+// the bridge is flowing with next to no despawns or wasted capacity.
+const SCP_TARGET_MOVED = 35;
 const SCP_SUSTAIN_S = 60;
 
 const suburbanChokePointNetwork: NetworkSnapshot = {
@@ -355,7 +360,7 @@ export const SCENARIOS: ScenarioDef[] = [
     name: "The Suburban Choke Point",
     tagline: "Bridge the river between suburb and industrial park.",
     briefing:
-      "A suburb on one bank needs to reach the industrial park on the other, and there's no crossing yet. Build a bridge or viaduct over the river, then keep the approach road flowing at LOS C or better for a full minute while moving 250 vehicles through.",
+      "A suburb on one bank needs to reach the industrial park on the other, and there's no crossing yet. Build a bridge or viaduct over the river, then keep the approach road flowing at LOS C or better for a full minute while moving 35 vehicles through.",
     startingNetwork: suburbanChokePointNetwork,
     startingBudget: 750_000,
     durationS: 150,

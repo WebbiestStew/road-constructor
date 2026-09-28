@@ -598,6 +598,13 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const setEntryDemand = useEditorStore((s) => s.setEntryDemand);
+  // Campaign scenarios are balanced around their own fixed starting demand —
+  // letting a player just drag it up bypasses the actual civil-engineering
+  // puzzle (build enough capacity) in favor of a slider. Free-build/sandbox
+  // keeps full control since there's no authored difficulty to protect.
+  const activeScenarioId = useEditorStore((s) => s.activeScenarioId);
+  const demandLocked = activeScenarioId !== null;
+  const setSelection = useEditorStore((s) => s.setSelection);
 
   const entries = edges.filter((e) => e.zone?.type === "entry");
   const destinations = edges.filter((e) => e.zone?.type === "destination");
@@ -718,7 +725,14 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
               {entries.map((edge, i) => (
                 <div key={edge.id} className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-600">Entry {i + 1}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelection({ kind: "edge", id: edge.id })}
+                      title="Highlight this road on the map"
+                      className="text-zinc-600 underline decoration-dotted underline-offset-2 hover:text-zinc-900"
+                    >
+                      Entry {i + 1}
+                    </button>
                     <span className="font-medium text-zinc-900 tabular-nums">
                       {edge.zone?.type === "entry"
                         ? edge.zone.demandVehPerHour
@@ -731,6 +745,9 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
                     min={0}
                     max={MAX_DEMAND}
                     step={50}
+                    disabled={demandLocked}
+                    title={demandLocked ? "Demand is fixed for this scenario" : undefined}
+                    className="disabled:cursor-not-allowed disabled:opacity-40"
                     value={
                       edge.zone?.type === "entry"
                         ? edge.zone.demandVehPerHour
@@ -764,7 +781,12 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
                     key={edge.id}
                     className="flex items-center justify-between rounded-lg bg-black/[0.03] px-3 py-2 text-xs"
                   >
-                    <span className="flex items-center gap-1.5 text-zinc-600">
+                    <button
+                      type="button"
+                      onClick={() => setSelection({ kind: "edge", id: edge.id })}
+                      title="Highlight this road on the map"
+                      className="flex items-center gap-1.5 text-zinc-600 underline decoration-dotted underline-offset-2 hover:text-zinc-900"
+                    >
                       <span
                         className={`h-1.5 w-1.5 rounded-full ${
                           !hasData
@@ -775,7 +797,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
                         }`}
                       />
                       Destination {i + 1}
-                    </span>
+                    </button>
                     <span
                       className={`font-medium tabular-nums ${
                         !hasData
