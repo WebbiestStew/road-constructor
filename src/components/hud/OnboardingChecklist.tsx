@@ -12,15 +12,23 @@ interface ChecklistStep {
 }
 
 /**
- * A lightweight, non-blocking 3-step checklist for first-time players —
+ * A lightweight, non-blocking 5-step checklist for first-time players —
  * unlike Tutorial.tsx's modal tour, this stays out of the way and tracks
  * real progress live, so it disappears the moment the player has actually
- * done the thing rather than requiring an explicit "next" click.
+ * done the thing rather than requiring an explicit "next" click. The last
+ * two steps only become completable once traffic is open, so — unlike the
+ * original 3-step version — this stays visible in Simulate mode too rather
+ * than hiding until everything's done.
  */
 export default function OnboardingChecklist() {
   const mode = useEditorStore((s) => s.mode);
   const edges = useEditorStore((s) => s.edges);
+  const selection = useEditorStore((s) => s.selection);
+  const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
+  const rideAlongActive = useEditorStore((s) => s.rideAlongActive);
   const [visible, setVisible] = useState(false);
+  const [hasInspectedLive, setHasInspectedLive] = useState(false);
+  const [hasTriedHeatmapOrRideAlong, setHasTriedHeatmapOrRideAlong] = useState(false);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
@@ -28,6 +36,25 @@ export default function OnboardingChecklist() {
     });
     return () => cancelAnimationFrame(raf);
   }, []);
+
+  // These two only make sense once traffic is running, so they latch true
+  // permanently the first time they happen rather than tracking current
+  // state — otherwise deselecting or re-toggling would "undo" the
+  // checkmark. Adjusted directly during render, guarded by a stored
+  // previous value (React's documented pattern for deriving state from a
+  // changed value), rather than in an effect or a ref — refs can't be
+  // read or written during render either.
+  const [prevSelection, setPrevSelection] = useState(selection);
+  if (selection !== prevSelection) {
+    setPrevSelection(selection);
+    if (mode === "simulate" && selection) setHasInspectedLive(true);
+  }
+  const heatmapOrRideAlongNow = heatmapEnabled || rideAlongActive;
+  const [prevHeatmapOrRideAlong, setPrevHeatmapOrRideAlong] = useState(heatmapOrRideAlongNow);
+  if (heatmapOrRideAlongNow !== prevHeatmapOrRideAlong) {
+    setPrevHeatmapOrRideAlong(heatmapOrRideAlongNow);
+    if (heatmapOrRideAlongNow) setHasTriedHeatmapOrRideAlong(true);
+  }
 
   const hasHighway = edges.some((e) => e.roadClassId === "highway");
   const hasEntry = edges.some((e) => e.zone?.type === "entry");
@@ -50,6 +77,16 @@ export default function OnboardingChecklist() {
       body: "Top-left toggle — watch your network handle real cars.",
       done: hasOpenedTraffic,
     },
+    {
+      title: "Inspect live traffic",
+      body: "While traffic's open, click a road or junction for live LOS, speed, and capacity stats.",
+      done: hasInspectedLive,
+    },
+    {
+      title: "Try Heatmap or Ride Along",
+      body: "Heatmap colors roads by congestion; Ride Along chases one car down the road.",
+      done: hasTriedHeatmapOrRideAlong,
+    },
   ];
 
   const allDone = steps.every((s) => s.done);
@@ -63,7 +100,6 @@ export default function OnboardingChecklist() {
   }, [allDone, visible]);
 
   if (!visible) return null;
-  if (mode !== "build" && !allDone) return null;
 
   const dismiss = () => {
     markOnboardingSeen();

@@ -39,7 +39,7 @@ const STEPS: Step[] = [
   {
     icon: IconFlag,
     title: "More to explore",
-    body: "Undo/redo (Ctrl+Z), export/import your network, a traffic heatmap toggle, and timed Campaign scenarios with scoring are all in the top bar and bottom-left corner.",
+    body: "Undo/redo (Ctrl+Z), export/import, a Heatmap toggle, and a Ride Along chase camera are in the top bar. While traffic's open, click any road or junction for live LOS/speed stats — plus timed Campaign scenarios with scoring.",
   },
 ];
 
