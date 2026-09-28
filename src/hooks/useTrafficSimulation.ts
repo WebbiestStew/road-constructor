@@ -14,6 +14,7 @@ import { useEditorStore } from "@/state/editorStore";
 export interface VehicleSnapshot {
   matrices: Float32Array;
   colors: Float32Array;
+  taillightColors: Float32Array;
   activeCount: number;
   version: number;
 }
@@ -71,6 +72,7 @@ export function useTrafficSimulation() {
   const pendingReturnRef = useRef<{
     matrices: ArrayBuffer;
     colors: ArrayBuffer;
+    taillightColors: ArrayBuffer;
   } | null>(null);
   const versionCounterRef = useRef(0);
   const lastMetricsFlushRef = useRef(0);
@@ -82,6 +84,7 @@ export function useTrafficSimulation() {
 
   const mode = useEditorStore((s) => s.mode);
   const running = mode === "simulate" && !userPaused;
+  const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
 
   useEffect(() => {
     const worker = new Worker(new URL("../sim/worker.ts", import.meta.url), {
@@ -104,19 +107,22 @@ export function useTrafficSimulation() {
               type: "returnBuffers",
               matrices: pending.matrices,
               colors: pending.colors,
+              taillightColors: pending.taillightColors,
             } satisfies WorkerInMessage,
-            [pending.matrices, pending.colors],
+            [pending.matrices, pending.colors, pending.taillightColors],
           );
         }
         pendingReturnRef.current = {
           matrices: msg.matrices,
           colors: msg.colors,
+          taillightColors: msg.taillightColors,
         };
 
         versionCounterRef.current += 1;
         snapshotRef.current = {
           matrices: new Float32Array(msg.matrices),
           colors: new Float32Array(msg.colors),
+          taillightColors: new Float32Array(msg.taillightColors),
           activeCount: msg.activeCount,
           version: versionCounterRef.current,
         };
@@ -175,6 +181,17 @@ export function useTrafficSimulation() {
       running,
     } satisfies WorkerInMessage);
   }, [running]);
+
+  // Vehicles normally render their own fixed paint color; the heatmap
+  // toggle switches them (and the road surface) over to live speed-ratio
+  // tinting instead — kept in sync with the worker since that's where
+  // per-vehicle colors are actually written into the snapshot buffer.
+  useEffect(() => {
+    workerRef.current?.postMessage({
+      type: "setColorMode",
+      heatmap: heatmapEnabled,
+    } satisfies WorkerInMessage);
+  }, [heatmapEnabled]);
 
   const setRunning = useCallback((value: boolean) => {
     setUserPaused(!value);

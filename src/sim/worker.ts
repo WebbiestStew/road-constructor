@@ -92,6 +92,8 @@ const contractSamples = new Map<string, ContractSample[]>();
 let running = false;
 let speedMultiplier = 1;
 let simTime = 0;
+/** When true, vehicle body colors are overridden by their live speed ratio (the heatmap) instead of their fixed paint color. */
+let heatmapColorMode = false;
 let nextVehicleId = 1;
 let spawnedTotal = 0;
 let completedTripsTotal = 0;
@@ -136,6 +138,14 @@ const COLOR_FREE = new THREE.Color(0x3b82f6);
 const COLOR_SLOW = new THREE.Color(0xeab308);
 const COLOR_STOP = new THREE.Color(0xef4444);
 
+/** Body paint palettes, sampled once per vehicle at spawn — a wide mix for sedans, a duller fleet-like set for semis. */
+const SEDAN_PALETTE = [0xf4f4f5, 0x1c1c22, 0x8a8f98, 0xb0281c, 0x2452a6, 0x2f6b3a, 0xc9a13b, 0x5b5f66];
+const TRUCK_PALETTE = [0xf4f4f5, 0xc23b2e, 0x2452a6, 0x8a8f98, 0x1c1c22];
+const _spawnColor = new THREE.Color();
+
+/** Vehicles decelerating harder than this (ft/s^2) get a brightened, near-white-hot brake light instead of a dim cruising glow. */
+const HARD_BRAKE_ACCEL_THRESHOLD = -4;
+
 // ---------------------------------------------------------------------------
 // Double-buffered transfer pool
 // ---------------------------------------------------------------------------
@@ -143,12 +153,14 @@ const COLOR_STOP = new THREE.Color(0xef4444);
 interface BufferSet {
   matrices: Float32Array;
   colors: Float32Array;
+  taillightColors: Float32Array;
 }
 
 function createBufferSet(): BufferSet {
   return {
     matrices: new Float32Array(MAX_VEHICLES * 16),
     colors: new Float32Array(MAX_VEHICLES * 3),
+    taillightColors: new Float32Array(MAX_VEHICLES * 3),
   };
 }
 
@@ -187,6 +199,9 @@ function acquireVehicle(): VehicleState {
     stuckTimeS: 0,
     isTruck: false,
     weightToPowerLbPerHp: 25,
+    bodyColorR: 1,
+    bodyColorG: 1,
+    bodyColorB: 1,
   };
 }
 
@@ -326,6 +341,11 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   // grade hits them (see idmAccelForVehicle / gradeAccelFtps2).
   const isTruck = rng() < 0.15;
   v.isTruck = isTruck;
+  const palette = isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
+  _spawnColor.set(palette[Math.floor(rng() * palette.length)]);
+  v.bodyColorR = _spawnColor.r;
+  v.bodyColorG = _spawnColor.g;
+  v.bodyColorB = _spawnColor.b;
   v.weightToPowerLbPerHp = isTruck ? randRange(260, 340) : randRange(18, 32);
   v.length = isTruck ? randRange(32, 42) : randRange(13, 19);
   v.maxAccel = isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
@@ -853,23 +873,47 @@ function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: numb
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
 
+    // Trucks get a taller, slightly wider box on top of their already-longer
+    // length, so an 18-wheeler reads as a distinct bulkier silhouette next
+    // to a sedan using nothing but the one shared box geometry.
+    const widthScale = v.isTruck ? 1.15 : 1;
+    const heightScale = v.isTruck ? 1.55 : 1;
+
     const t = distanceToT(edge, v.distanceAlongEdge);
     laneCenterPointAt(edge, t, v.laneIndex, _tangent, _right, _pos);
-    _pos.y += VEHICLE_HEIGHT_FT / 2;
+    // The box's local origin is its center, so its footprint sits at ground
+    // level only if we lift it by half of its *scaled* height — using the
+    // unscaled height here would leave taller (truck) boxes sunk into the
+    // pavement by the difference.
+    _pos.y += (VEHICLE_HEIGHT_FT * heightScale) / 2;
 
     if (v.stuckTimeS >= GRIDLOCK_WARNING_S) {
       gridlockMarkers.push([_pos.x, _pos.y, _pos.z]);
     }
 
     _quat.setFromUnitVectors(FORWARD_AXIS, _tangent);
-    _scale.set(1, 1, v.length / VEHICLE_LENGTH_FT);
+    _scale.set(widthScale, heightScale, v.length / VEHICLE_LENGTH_FT);
     _matrix.compose(_pos, _quat, _scale);
     _matrix.toArray(buf.matrices, i * 16);
 
     const speedLimitFtps = mphToFtps(edge.speedLimitMph);
     const ratio = v.speed / speedLimitFtps;
-    speedColorInto(ratio, _color);
-    _color.toArray(buf.colors, i * 3);
+    if (heatmapColorMode) {
+      speedColorInto(ratio, _color);
+      _color.toArray(buf.colors, i * 3);
+    } else {
+      buf.colors[i * 3] = v.bodyColorR;
+      buf.colors[i * 3 + 1] = v.bodyColorG;
+      buf.colors[i * 3 + 2] = v.bodyColorB;
+    }
+
+    // Dim cruising glow that brightens toward white-hot as deceleration
+    // ramps from light braking (-1 ft/s^2) up to the hard-brake threshold,
+    // so a following driver (or player) can read braking intensity at a glance.
+    const brakeT = clamp((-v.accel - 1) / (-HARD_BRAKE_ACCEL_THRESHOLD - 1), 0, 1);
+    buf.taillightColors[i * 3] = 0.55 + brakeT * 1.05;
+    buf.taillightColors[i * 3 + 1] = 0.05 + brakeT * 0.2;
+    buf.taillightColors[i * 3 + 2] = 0.05 + brakeT * 0.2;
 
     edgeSpeedRatioSum.set(edge.id, (edgeSpeedRatioSum.get(edge.id) ?? 0) + ratio);
     edgeSpeedRatioCount.set(edge.id, (edgeSpeedRatioCount.get(edge.id) ?? 0) + 1);
@@ -946,10 +990,12 @@ function postSnapshot() {
   updateCongestionState(deltaSimTime);
   const matricesBuffer = buf.matrices.buffer as ArrayBuffer;
   const colorsBuffer = buf.colors.buffer as ArrayBuffer;
+  const taillightColorsBuffer = buf.taillightColors.buffer as ArrayBuffer;
   const message: WorkerOutMessage = {
     type: "tick",
     matrices: matricesBuffer,
     colors: colorsBuffer,
+    taillightColors: taillightColorsBuffer,
     activeCount,
     simTime,
     avgSpeedFtS,
@@ -963,7 +1009,7 @@ function postSnapshot() {
     gridlockPenaltyTotal,
     gridlockMarkers,
   };
-  ctx.postMessage(message, [matricesBuffer, colorsBuffer]);
+  ctx.postMessage(message, [matricesBuffer, colorsBuffer, taillightColorsBuffer]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1015,10 +1061,14 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
         nextSpawnTimeByEntry.set(msg.edgeId, sampleExponentialInterarrival(msg.vehiclesPerHour));
       }
       break;
+    case "setColorMode":
+      heatmapColorMode = msg.heatmap;
+      break;
     case "returnBuffers":
       bufferPool.push({
         matrices: new Float32Array(msg.matrices),
         colors: new Float32Array(msg.colors),
+        taillightColors: new Float32Array(msg.taillightColors),
       });
       break;
   }

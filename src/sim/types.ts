@@ -173,6 +173,10 @@ export interface VehicleState {
   isTruck: boolean;
   /** Weight-to-power ratio, lb/hp — drives how hard road grade hits this vehicle's climbing speed. */
   weightToPowerLbPerHp: number;
+  /** Fixed body paint color (0-1 components), assigned once at spawn from a truck- or sedan-specific palette. */
+  bodyColorR: number;
+  bodyColorG: number;
+  bodyColorB: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +188,8 @@ export type WorkerInMessage =
   | { type: "setRunning"; running: boolean }
   | { type: "setSpeedMultiplier"; value: number }
   | { type: "setDemand"; edgeId: string; vehiclesPerHour: number }
-  | { type: "returnBuffers"; matrices: ArrayBuffer; colors: ArrayBuffer };
+  | { type: "setColorMode"; heatmap: boolean }
+  | { type: "returnBuffers"; matrices: ArrayBuffer; colors: ArrayBuffer; taillightColors: ArrayBuffer };
 
 export interface ContractStatus {
   edgeId: string;
@@ -203,6 +208,8 @@ export type WorkerOutMessage =
       type: "tick";
       matrices: ArrayBuffer;
       colors: ArrayBuffer;
+      /** Per-vehicle taillight tint (3 floats each): dim red at cruise, brightening toward white-hot when braking hard (accel below the hard-brake threshold). */
+      taillightColors: ArrayBuffer;
       activeCount: number;
       simTime: number;
       avgSpeedFtS: number;
