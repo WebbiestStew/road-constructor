@@ -9,7 +9,7 @@ import {
 } from "@/sim/roadClasses";
 import { LOS_COLOR, LOS_DESCRIPTIONS, type EdgeTrafficStats, type LOSGrade } from "@/sim/los";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
-import { assembleNetwork } from "@/sim/network";
+import { assembleNetworkCached } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import {
@@ -358,7 +358,7 @@ function LiveEdgeInspector({ sim }: { sim: UseTrafficSimulationReturn }) {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const setSelection = useEditorStore((s) => s.setSelection);
-  const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
+  const network = useMemo(() => assembleNetworkCached(nodes, edges), [nodes, edges]);
 
   if (!selection || selection.kind !== "edge") return null;
   const edge = network.edgesById.get(selection.id);

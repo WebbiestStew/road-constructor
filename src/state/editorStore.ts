@@ -2,7 +2,7 @@
 
 import * as THREE from "three";
 import { create } from "zustand";
-import { assembleNetwork, computeSignalPhaseGroups, planTexasTurnaround } from "@/sim/network";
+import { assembleNetwork, assembleNetworkCached, computeSignalPhaseGroups, planTexasTurnaround } from "@/sim/network";
 import { findClearanceViolations } from "@/sim/clearance";
 import {
   DEMOLISH_REFUND_FRACTION,
@@ -888,7 +888,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   createTexasTurnaround: (edgeId, clickPoint) => {
     const state = get();
-    const network = assembleNetwork({ nodes: state.nodes, edges: state.edges });
+    const network = assembleNetworkCached(state.nodes, state.edges);
     const plan = planTexasTurnaround(network, edgeId, new THREE.Vector3(...clickPoint));
 
     if (!plan) {

@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, type RefObject } from "react";
 import { useFrame } from "@react-three/fiber";
-import { assembleNetwork } from "@/sim/network";
+import { assembleNetworkCached } from "@/sim/network";
 import { computePierDescriptors } from "./roadGeometry";
 import { useEditorStore } from "@/state/editorStore";
 import { playExpansionJointClack } from "@/lib/sound";
@@ -35,7 +35,7 @@ export default function JointClackDetector({ snapshotRef }: JointClackDetectorPr
 
   const jointPositions = useMemo(() => {
     if (mode !== "simulate") return [];
-    const network = assembleNetwork({ nodes, edges });
+    const network = assembleNetworkCached(nodes, edges);
     const points: [number, number][] = [];
     for (const edge of network.edges) {
       if (!edge.isElevated) continue;

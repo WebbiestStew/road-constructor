@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Html, Line } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
-import { assembleNetwork, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
+import { assembleNetworkCached, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
 import { useEditorStore } from "@/state/editorStore";
@@ -635,7 +635,7 @@ export default function RoadNetworkMesh({
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
 
-  const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
+  const network = useMemo(() => assembleNetworkCached(nodes, edges), [nodes, edges]);
 
   const [turnaroundHover, setTurnaroundHover] = useState<{ edgeId: string; point: THREE.Vector3 } | null>(null);
   const lastHoverPointRef = useRef<THREE.Vector3 | null>(null);

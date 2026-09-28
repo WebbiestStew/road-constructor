@@ -128,6 +128,32 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   return { nodesById, edges, edgesById };
 }
 
+// ---------------------------------------------------------------------------
+// A one-slot memoization cache for assembleNetwork, keyed by the exact
+// `nodes`/`edges` array references. RoadNetworkMesh, InfoPanel's live edge
+// and junction inspectors, and JointClackDetector each independently call
+// assembleNetwork off the same editor-store arrays, which — for anything
+// past a small network — is real, duplicated O(edges^2) work (the diverge-
+// lane assignment pass) done up to four times per store update instead of
+// once. Since the store's `nodes`/`edges` are only ever replaced wholesale
+// (never mutated in place), a same-reference check is a safe, exact cache
+// hit test — no risk of serving stale data.
+// ---------------------------------------------------------------------------
+let cachedNodes: NodeSpec[] | null = null;
+let cachedEdges: EdgeSpec[] | null = null;
+let cachedNetwork: RoadNetwork | null = null;
+
+/** Same result as `assembleNetwork({ nodes, edges })`, but reuses the last computed network when both array references are unchanged since the last call — see the module-level comment above. */
+export function assembleNetworkCached(nodes: NodeSpec[], edges: EdgeSpec[]): RoadNetwork {
+  if (cachedNetwork && cachedNodes === nodes && cachedEdges === edges) {
+    return cachedNetwork;
+  }
+  cachedNodes = nodes;
+  cachedEdges = edges;
+  cachedNetwork = assembleNetwork({ nodes, edges });
+  return cachedNetwork;
+}
+
 const UP = new THREE.Vector3(0, 1, 0);
 
 /**

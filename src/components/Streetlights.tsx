@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useEditorStore } from "@/state/editorStore";
-import { assembleNetwork } from "@/sim/network";
+import { assembleNetworkCached } from "@/sim/network";
+import type { RoadNetwork } from "@/sim/types";
 
 const LAMP_SPACING_FT = 180;
 const LAMP_HEIGHT_FT = 22;
@@ -39,7 +40,7 @@ const _poolQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI /
 const _poolScale = new THREE.Vector3(1, 1, 1);
 
 /** Lamp fixture placements along non-loop road edges, alternating sides, cleared of the actual paved width + shoulder + barrier for that road class. Only meaningful at dusk/night. */
-function computeLampFixtures(network: ReturnType<typeof assembleNetwork>): LampFixture[] {
+function computeLampFixtures(network: RoadNetwork): LampFixture[] {
   const fixtures: LampFixture[] = [];
   const seenPairs = new Set<string>();
   for (const edge of network.edges) {
@@ -103,7 +104,7 @@ export default function Streetlights() {
   const edges = useEditorStore((s) => s.edges);
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
 
-  const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
+  const network = useMemo(() => assembleNetworkCached(nodes, edges), [nodes, edges]);
   const fixtures = useMemo(() => computeLampFixtures(network), [network]);
   const glowTexture = useMemo(() => createGlowTexture(), []);
 

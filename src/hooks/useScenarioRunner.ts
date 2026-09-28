@@ -10,7 +10,7 @@ import {
   type ScenarioProgress,
   type ScenarioResult,
 } from "@/sim/scenarios";
-import { assembleNetwork } from "@/sim/network";
+import { assembleNetworkCached } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "./useTrafficSimulation";
 
@@ -32,7 +32,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
   const edges = useEditorStore((s) => s.edges);
 
   const scenario = activeScenarioId ? getScenarioById(activeScenarioId) : undefined;
-  const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
+  const network = useMemo(() => assembleNetworkCached(nodes, edges), [nodes, edges]);
 
   const [results, setResults] = useState<ScenarioResult | null>(null);
   const [progress, setProgress] = useState<ScenarioProgress | null>(null);
