@@ -9,7 +9,7 @@ import {
 } from "@/sim/roadClasses";
 import { LOS_COLOR, LOS_DESCRIPTIONS, type EdgeTrafficStats, type LOSGrade } from "@/sim/los";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
-import { assembleNetworkCached } from "@/sim/network";
+import { assembleNetworkCached, computeRoute } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import {
@@ -595,6 +595,7 @@ function LiveNodeInspector({ sim }: { sim: UseTrafficSimulationReturn }) {
 
 function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const { metrics, setDemand } = sim;
+  const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const setEntryDemand = useEditorStore((s) => s.setEntryDemand);
 
@@ -602,6 +603,25 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const destinations = edges.filter((e) => e.zone?.type === "destination");
   const contractsByEdge = new Map(metrics.contracts.map((c) => [c.edgeId, c]));
   const networkLOS = computeNetworkLOS(metrics.edgeTrafficStats);
+
+  // An entry with zero route to every destination spawns traffic that goes
+  // nowhere — silently: no vehicles ever appear, but nothing else says why,
+  // and the eventual LOS reading for an untouched road reads as a
+  // misleadingly reassuring "A" (free flow, because free of any traffic at
+  // all). Surfaced explicitly here rather than left for the player to
+  // puzzle out from an all-zero metrics panel.
+  const network = useMemo(() => assembleNetworkCached(nodes, edges), [nodes, edges]);
+  const disconnectedEntryNumbers = useMemo(() => {
+    if (entries.length === 0 || destinations.length === 0) return [];
+    const numbers: number[] = [];
+    entries.forEach((entryEdge, i) => {
+      const reachable = destinations.some(
+        (destEdge) => computeRoute(network, entryEdge.id, destEdge.id) !== null
+      );
+      if (!reachable) numbers.push(i + 1);
+    });
+    return numbers;
+  }, [entries, destinations, network]);
 
   return (
     <div className="flex w-80 flex-col gap-3">
@@ -679,6 +699,17 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
             🚧 Ghost town! Hop back to Build, grab the Zone tool, and mark an
             Entry + a Destination — nobody&rsquo;s driving anywhere until then.
           </p>
+        )}
+
+        {disconnectedEntryNumbers.length > 0 && (
+          <div className="flex items-center gap-2 rounded-xl bg-red-500/15 p-2.5 text-[11px] leading-snug text-red-800">
+            <span className="animate-warn-pulse flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-700">
+              <IconWarning className="h-3.5 w-3.5" />
+            </span>
+            {disconnectedEntryNumbers.length === entries.length
+              ? "🔌 No route from any Entry to any Destination — look for a gap or a piece that didn't connect."
+              : `🔌 Entry ${disconnectedEntryNumbers.join(", ")} can't reach any Destination — look for a gap or a piece that didn't connect.`}
+          </div>
         )}
 
         {entries.length > 0 && (
