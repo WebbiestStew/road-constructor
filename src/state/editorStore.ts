@@ -84,6 +84,9 @@ interface EditorState {
   setHeatmapEnabled: (v: boolean) => void;
   timeOfDay: "day" | "dusk" | "night";
   setTimeOfDay: (v: "day" | "dusk" | "night") => void;
+  /** Chase/ride-along camera: locks the view behind a live vehicle instead of the free orthographic overview. Only meaningful in Simulate mode. */
+  rideAlongActive: boolean;
+  setRideAlongActive: (v: boolean) => void;
 
   /** Transient user-facing message (e.g. a rejected clearance-violating road) — cleared automatically after a few seconds. */
   buildWarning: string | null;
@@ -201,6 +204,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setHeatmapEnabled: (v) => set({ heatmapEnabled: v }),
   timeOfDay: "day",
   setTimeOfDay: (v) => set({ timeOfDay: v }),
+  rideAlongActive: false,
+  setRideAlongActive: (v) => set({ rideAlongActive: v }),
 
   buildWarning: null,
   setBuildWarning: (message) => set({ buildWarning: message }),
@@ -301,6 +306,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       drawFromNodeId: null,
       tool: mode === "simulate" ? "inspect" : "draw",
       selection: null,
+      rideAlongActive: mode === "simulate" ? get().rideAlongActive : false,
     }),
   setTool: (tool) => set({ tool, drawFromNodeId: null, selection: null }),
   setRoadClass: (id) => set({ selectedRoadClassId: id }),

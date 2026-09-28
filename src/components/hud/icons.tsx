@@ -292,6 +292,15 @@ export function IconHeatmap(props: IconProps) {
   );
 }
 
+export function IconRideAlong(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3.5 8.5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2z" />
+      <path d="M15.5 10.8l4-2.3v7l-4-2.3" />
+    </svg>
+  );
+}
+
 export function IconSpeakerOff(props: IconProps) {
   return (
     <svg {...base} {...props}>

@@ -19,6 +19,7 @@ import { decodeShareHash } from "@/state/persistence";
 import Streetlights from "@/components/Streetlights";
 import ScenarioTerrainFeature from "@/components/ScenarioTerrainFeature";
 import JointClackDetector from "@/components/JointClackDetector";
+import ChaseCamera from "@/components/ChaseCamera";
 
 const SHARE_HASH_PREFIX = "#data=";
 
@@ -117,6 +118,7 @@ export default function Play() {
   const sim = useTrafficSimulation();
   const scenarioRunner = useScenarioRunner(sim);
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
+  const rideAlongActive = useEditorStore((s) => s.rideAlongActive);
   const skyColor =
     timeOfDay === "night" ? SKY_COLOR_NIGHT : timeOfDay === "dusk" ? SKY_COLOR_DUSK : SKY_COLOR_DAY;
 
@@ -206,23 +208,26 @@ export default function Play() {
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
         <JointClackDetector snapshotRef={sim.snapshotRef} />
+        <ChaseCamera snapshotRef={sim.snapshotRef} />
         <AmbienceController avgSpeedMph={sim.metrics.avgSpeedMph} />
         <CameraFitController />
 
-        <OrbitControls
-          makeDefault
-          target={[0, 0, 0]}
-          enableDamping
-          dampingFactor={0.08}
-          minZoom={0.08}
-          maxZoom={12}
-          maxPolarAngle={Math.PI / 2 - 0.05}
-          mouseButtons={{
-            LEFT: -1 as unknown as THREE.MOUSE,
-            MIDDLE: THREE.MOUSE.PAN,
-            RIGHT: THREE.MOUSE.ROTATE,
-          }}
-        />
+        {!rideAlongActive && (
+          <OrbitControls
+            makeDefault
+            target={[0, 0, 0]}
+            enableDamping
+            dampingFactor={0.08}
+            minZoom={0.08}
+            maxZoom={12}
+            maxPolarAngle={Math.PI / 2 - 0.05}
+            mouseButtons={{
+              LEFT: -1 as unknown as THREE.MOUSE,
+              MIDDLE: THREE.MOUSE.PAN,
+              RIGHT: THREE.MOUSE.ROTATE,
+            }}
+          />
+        )}
 
         {/*
           Always-on pipeline (not gated by timeOfDay) so exposure and color

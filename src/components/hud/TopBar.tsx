@@ -17,6 +17,7 @@ import {
   IconPlay,
   IconRedo,
   IconReset,
+  IconRideAlong,
   IconRoad,
   IconShare,
   IconSpeakerOff,
@@ -39,6 +40,8 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const setMode = useEditorStore((s) => s.setMode);
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const setHeatmapEnabled = useEditorStore((s) => s.setHeatmapEnabled);
+  const rideAlongActive = useEditorStore((s) => s.rideAlongActive);
+  const setRideAlongActive = useEditorStore((s) => s.setRideAlongActive);
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
   const setTimeOfDay = useEditorStore((s) => s.setTimeOfDay);
   const [muted, setMutedState] = useState(false);
@@ -244,6 +247,24 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           >
             <IconHeatmap className="h-3.5 w-3.5" />
             Heatmap
+          </button>
+          <button
+            type="button"
+            onClick={() => setRideAlongActive(!rideAlongActive)}
+            disabled={sim.metrics.activeCount === 0 && !rideAlongActive}
+            title={
+              sim.metrics.activeCount === 0 && !rideAlongActive
+                ? "No traffic on the road yet"
+                : "Ride along with a vehicle from a chase camera"
+            }
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-30 ${
+              rideAlongActive
+                ? "bg-gradient-to-br from-sky-400 to-indigo-500 text-white shadow"
+                : "bg-black/5 text-zinc-600 hover:text-zinc-900"
+            }`}
+          >
+            <IconRideAlong className="h-3.5 w-3.5" />
+            Ride Along
           </button>
         </>
       )}
