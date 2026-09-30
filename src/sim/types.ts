@@ -44,6 +44,11 @@ export interface SignalControl {
   allRedDurationS: number;
 }
 
+/** A movement a lane may make at the end of its road. U-turns count as "left". */
+export type LaneMove = "left" | "straight" | "right";
+
+export const LANE_MOVES: LaneMove[] = ["left", "straight", "right"];
+
 export type JunctionControl = SignalControl | { type: "priority" };
 
 /** A junction / control point in the road graph, in feet (x, y-up, z). */
@@ -78,6 +83,11 @@ export interface EdgeSpec {
   zone?: ZoneSpec;
   /** True for the auto-generated ring segments of a roundabout — always outranks any road class at a junction. */
   isRoundaboutRing?: boolean;
+  /**
+   * Player-set lane arrows: for each lane (index 0 = leftmost), the moves it may make at the end of this
+   * edge. Omitted = automatic assignment by exit heading. Ignored if its length doesn't match `lanes`.
+   */
+  laneMoves?: LaneMove[][];
 }
 
 /** The editable network as plain, structured-cloneable data. */
@@ -113,15 +123,19 @@ export interface Edge3D {
   isRoundaboutRing: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
+  /** Player-set lane arrows copied from the spec (null = automatic). */
+  manualLaneMoves: LaneMove[][] | null;
+  /** Classification of each next edge by exit heading relative to this edge's end. */
+  nextMoves: Map<string, LaneMove>;
   /**
-   * When this edge diverges into 2+ distinct next edges, the inclusive
-   * [minLane, maxLane] range of lanes assigned to reach each one — lanes
-   * ordered left-to-right by exit heading. Null when there's only one
-   * next edge (no assignment needed).
+   * When this edge diverges into 2+ next edges: for each next edge id, which lanes may take it
+   * (index 0 = leftmost). Null when there's only one exit, so any lane works.
    */
-  divergeLaneRanges: Map<string, [number, number]> | null;
-  /** Per-lane turn direction in [-1, 1] (negative = left, positive = right, 0 = straight) at this edge's diverge, for turn-arrow rendering. All zero when `divergeLaneRanges` is null. */
-  laneTurnBias: number[];
+  laneAllowed: Map<string, boolean[]> | null;
+  /** Effective moves per lane (manual arrows if set and valid, else automatic) — what's painted and what cars obey. */
+  laneMoves: LaneMove[][];
+  /** The automatic per-lane moves, so the UI can show/reset to them. */
+  autoLaneMoves: LaneMove[][];
 }
 
 export interface RoadNetwork {
@@ -163,6 +177,8 @@ export interface VehicleState {
   /** Destination edge ID this vehicle is trying to reach (for contract metrics). */
   destinationEdgeId: string;
   spawnTime: number;
+  /** Seconds spent stopped at the end of a road in a lane that may not make the turn it needs; past a limit it goes anyway so nothing deadlocks. */
+  wrongLaneWaitS: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +189,12 @@ export type WorkerInMessage =
   | { type: "updateNetwork"; network: NetworkSnapshot; seed: number }
   | { type: "setRunning"; running: boolean }
   | { type: "setSpeedMultiplier"; value: number }
+  | { type: "setMaxVehicles"; value: number }
+  /** Clears every vehicle, the clock, demand overrides and scoring samples — a fresh run. Send before `updateNetwork`. */
+  | { type: "reset" }
+  /** Live tweaks while traffic is running: speed limits and lane arrows per edge, signal/priority control per node. */
+  | { type: "patchEdges"; edges: { id: string; speedLimitMph: number; laneMoves: LaneMove[][] | null }[] }
+  | { type: "patchNodes"; nodes: { id: string; control: JunctionControl | null }[] }
   | { type: "setDemand"; edgeId: string; vehiclesPerHour: number }
   | { type: "returnBuffers"; matrices: ArrayBuffer; colors: ArrayBuffer };
 

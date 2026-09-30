@@ -11,7 +11,7 @@ import {
   type MobilInputs,
 } from "./idm";
 import { distanceToT, laneCenterPointAt } from "./laneGeometry";
-import { assembleNetwork, computeRoute } from "./network";
+import { assembleNetwork, computeRoute, patchEdge } from "./network";
 import {
   MAX_VEHICLES,
   SIM_DT,
@@ -91,6 +91,8 @@ let speedMultiplier = 1;
 let simTime = 0;
 let nextVehicleId = 1;
 let spawnedTotal = 0;
+/** Soft cap on concurrent vehicles (<= MAX_VEHICLES, which sizes the buffers); lowered by the main thread in low-quality mode. */
+let maxVehicles = MAX_VEHICLES;
 let accumulator = 0;
 let lastWallTimeMs = 0;
 
@@ -166,6 +168,7 @@ function acquireVehicle(): VehicleState {
     laneChangeCooldown: 0,
     destinationEdgeId: "",
     spawnTime: 0,
+    wrongLaneWaitS: 0,
   };
 }
 
@@ -254,6 +257,23 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   }
 }
 
+/** Returns the sim to t = 0 with no traffic, keeping the loaded network. */
+function resetRun() {
+  for (const v of vehicles.values()) releaseVehicle(v);
+  vehicles.clear();
+  simTime = 0;
+  accumulator = 0;
+  spawnedTotal = 0;
+  despawnTimestamps.length = 0;
+  demandByEntry.clear();
+  nextSpawnTimeByEntry.clear();
+  contractSamples.clear();
+  signalPhaseState.clear();
+  congestionTimer.clear();
+  problemEdges.clear();
+  lastSnapshotSimTime = 0;
+}
+
 // ---------------------------------------------------------------------------
 // Spawning
 // ---------------------------------------------------------------------------
@@ -262,7 +282,7 @@ const MIN_SPAWN_CLEARANCE_FT = 55;
 
 function trySpawn(entryEdgeId: string) {
   if (!network) return;
-  if (vehicles.size >= MAX_VEHICLES) return;
+  if (vehicles.size >= maxVehicles) return;
 
   const edge = network.edgesById.get(entryEdgeId);
   if (!edge || edge.zone?.type !== "entry") return;
@@ -270,9 +290,21 @@ function trySpawn(entryEdgeId: string) {
   const destinations = network.edges.filter((e) => e.zone?.type === "destination" && e.id !== entryEdgeId);
   if (destinations.length === 0) return;
 
-  const destination = destinations[Math.floor(rng() * destinations.length)];
-  const route = computeRoute(network, entryEdgeId, destination.id);
-  if (!route || route.length === 0) return;
+  // Start at a random destination but fall through to the next reachable one, so entries in a
+  // partly disconnected network still spawn at their full rate.
+  const startIdx = Math.floor(rng() * destinations.length);
+  let destination = destinations[startIdx];
+  let route: string[] | null = null;
+  for (let k = 0; k < destinations.length; k++) {
+    const candidate = destinations[(startIdx + k) % destinations.length];
+    const r = computeRoute(network, entryEdgeId, candidate.id);
+    if (r && r.length > 0) {
+      destination = candidate;
+      route = r;
+      break;
+    }
+  }
+  if (!route) return;
 
   const occupancy = laneOccupancy.get(edge.id);
   if (!occupancy) return;
@@ -310,6 +342,7 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.accel = 0;
   v.laneChangeCooldown = randRange(0, 60);
   v.spawnTime = simTime;
+  v.wrongLaneWaitS = 0;
 
   vehicles.set(v.id, v);
   spawnedTotal++;
@@ -397,9 +430,38 @@ function rebuildNodeApproaches() {
   }
 }
 
+const RING_ENTRY_CLEAR_FT = 38;
+const RING_VEHICLE_SLOT_FT = 32;
+
+/**
+ * True if a vehicle about to enter a roundabout should hold at the line because the ring segment it would
+ * join is crowded. Without this, cars "commit" into a full ring, it packs solid, and the whole roundabout
+ * locks up with nobody able to exit.
+ */
+function ringEntryBlocked(v: VehicleState, edge: Edge3D): boolean {
+  if (!network || edge.isRoundaboutRing) return false;
+  const next = network.edgesById.get(v.routeEdgeIds[v.routeIndex + 1] ?? "");
+  if (!next?.isRoundaboutRing) return false;
+  const lanes = laneOccupancy.get(next.id);
+  if (!lanes) return false;
+  let count = 0;
+  for (const lane of lanes) {
+    for (const id of lane) {
+      count++;
+      const other = vehicles.get(id);
+      if (other && other.distanceAlongEdge < RING_ENTRY_CLEAR_FT) return true;
+    }
+  }
+  return count >= Math.max(1, Math.floor((next.length * next.lanes) / RING_VEHICLE_SLOT_FT));
+}
+
 /** Returns the distance (ft) at which a vehicle must stop for a junction it cannot yet enter, or null if clear. */
 function computeVirtualStopDistance(v: VehicleState, edge: Edge3D): number | null {
   if (!network) return null;
+  if (ringEntryBlocked(v, edge)) {
+    const toLine = edge.length - v.distanceAlongEdge;
+    if (toLine <= JUNCTION_APPROACH_FT) return Math.max(toLine, 0.1);
+  }
   const nodeId = edge.toNodeId;
   const incomingCount = incomingEdgeCountByNode.get(nodeId) ?? 0;
   if (incomingCount <= 1) return null;
@@ -445,6 +507,34 @@ interface GapInfo {
   leaderSpeed: number;
 }
 
+/** Lanes of `edge` that may take the vehicle's next route edge (index 0 = leftmost), or null if any lane may. */
+function allowedLanesForNext(v: VehicleState, edge: Edge3D): boolean[] | null {
+  if (!edge.laneAllowed) return null;
+  const nextRouteEdgeId = v.routeEdgeIds[v.routeIndex + 1];
+  return nextRouteEdgeId ? (edge.laneAllowed.get(nextRouteEdgeId) ?? null) : null;
+}
+
+const WRONG_LANE_STOP_FT = 70;
+const WRONG_LANE_PATIENCE_S = 10;
+
+/** Stop line for a vehicle stuck in a lane that can't make its turn: it waits to merge, then gives up and goes. */
+function wrongLaneStopDistance(v: VehicleState, edge: Edge3D): number | null {
+  const allowed = allowedLanesForNext(v, edge);
+  if (!allowed || allowed[clamp(v.laneIndex, 0, edge.lanes - 1)]) return null;
+  if (v.wrongLaneWaitS >= WRONG_LANE_PATIENCE_S) return null;
+  const distanceToNode = edge.length - v.distanceAlongEdge;
+  return distanceToNode < WRONG_LANE_STOP_FT ? Math.max(distanceToNode - 2, 0.1) : null;
+}
+
+function updateWrongLaneTimer(v: VehicleState, edge: Edge3D, dt: number) {
+  const allowed = allowedLanesForNext(v, edge);
+  if (!allowed || allowed[clamp(v.laneIndex, 0, edge.lanes - 1)]) {
+    v.wrongLaneWaitS = 0;
+    return;
+  }
+  if (v.speed < 2 && edge.length - v.distanceAlongEdge < WRONG_LANE_STOP_FT + 10) v.wrongLaneWaitS += dt;
+}
+
 function findLeaderGapForVehicle(v: VehicleState, edge: Edge3D): GapInfo {
   const lanes = laneOccupancy.get(edge.id);
   let result: GapInfo = { gap: NO_LEADER_GAP, leaderSpeed: v.speed };
@@ -480,6 +570,10 @@ function findLeaderGapForVehicle(v: VehicleState, edge: Edge3D): GapInfo {
   const virtualStop = computeVirtualStopDistance(v, edge);
   if (virtualStop !== null && virtualStop < result.gap) {
     result = { gap: Math.max(virtualStop, 0.1), leaderSpeed: 0 };
+  }
+  const wrongLaneStop = wrongLaneStopDistance(v, edge);
+  if (wrongLaneStop !== null && wrongLaneStop < result.gap) {
+    result = { gap: wrongLaneStop, leaderSpeed: 0 };
   }
 
   return result;
@@ -540,13 +634,17 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
   // approaches so it tends to be in the right lane before it must transition.
   let requiredDirection = 0;
   let mergeUrgency = 0;
-  if (edge.divergeLaneRanges) {
-    const nextRouteEdgeId = v.routeEdgeIds[v.routeIndex + 1];
-    const range = nextRouteEdgeId ? edge.divergeLaneRanges.get(nextRouteEdgeId) : undefined;
-    if (range && (v.laneIndex < range[0] || v.laneIndex > range[1])) {
-      requiredDirection = v.laneIndex < range[0] ? 1 : -1;
-      const distanceToNode = edge.length - v.distanceAlongEdge;
-      mergeUrgency = clamp(1 - distanceToNode / 500, 0, 1);
+  const allowedLanes = allowedLanesForNext(v, edge);
+  const distanceToNode = edge.length - v.distanceAlongEdge;
+  if (allowedLanes && !allowedLanes[v.laneIndex]) {
+    let nearest = -1;
+    for (let d = 1; d < edge.lanes && nearest < 0; d++) {
+      if (v.laneIndex - d >= 0 && allowedLanes[v.laneIndex - d]) nearest = v.laneIndex - d;
+      else if (v.laneIndex + d < edge.lanes && allowedLanes[v.laneIndex + d]) nearest = v.laneIndex + d;
+    }
+    if (nearest >= 0) {
+      requiredDirection = nearest < v.laneIndex ? -1 : 1;
+      mergeUrgency = clamp(1 - distanceToNode / 500, 0.15, 1);
     }
   }
 
@@ -566,6 +664,11 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
     }
     const newLeader = insertIdx < candArr.length ? vehicles.get(candArr[insertIdx])! : null;
     const newFollower = insertIdx > 0 ? vehicles.get(candArr[insertIdx - 1])! : null;
+
+    // Don't drift out of a lane that can make the turn into one that can't, near the junction.
+    if (allowedLanes && allowedLanes[v.laneIndex] && !allowedLanes[candidateLane] && distanceToNode < 300) {
+      continue;
+    }
 
     if (newLeader && newLeader.distanceAlongEdge - newLeader.length - v.distanceAlongEdge < v.minGap) {
       continue;
@@ -661,6 +764,7 @@ function step(dt: number) {
   for (const v of vehicles.values()) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
+    updateWrongLaneTimer(v, edge, dt);
     const gapInfo = findLeaderGapForVehicle(v, edge);
     v.accel = idmAccelForVehicle(v, edge, gapInfo);
   }
@@ -874,6 +978,9 @@ function loopTick() {
 ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
   const msg = event.data;
   switch (msg.type) {
+    case "reset":
+      resetRun();
+      break;
     case "updateNetwork":
       onNetworkUpdated(msg);
       break;
@@ -883,6 +990,28 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case "setSpeedMultiplier":
       speedMultiplier = msg.value;
+      break;
+    case "patchEdges":
+      if (network) {
+        for (const p of msg.edges) {
+          const edge = network.edgesById.get(p.id);
+          if (edge) patchEdge(edge, network.edgesById, p);
+        }
+      }
+      break;
+    case "patchNodes":
+      if (network) {
+        for (const p of msg.nodes) {
+          const node = network.nodesById.get(p.id);
+          if (!node) continue;
+          if (p.control) node.control = p.control;
+          else delete node.control;
+          signalPhaseState.delete(p.id);
+        }
+      }
+      break;
+    case "setMaxVehicles":
+      maxVehicles = Math.max(0, Math.min(MAX_VEHICLES, Math.floor(msg.value)));
       break;
     case "setDemand":
       demandByEntry.set(msg.edgeId, msg.vehiclesPerHour);

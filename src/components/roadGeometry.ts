@@ -178,9 +178,10 @@ export function buildLaneArrows(
   const tipSkew = turnBias * widthFt * 0.7;
 
   const positions: number[] = [];
-  const startOffset = spacingFt * 0.5;
+  // Count back from the stop line so the last arrow always sits just before the junction, as on real roads.
+  const stopLineGapFt = 26;
 
-  for (let s = startOffset; s < totalLen - lengthFt; s += spacingFt) {
+  for (let s = totalLen - lengthFt - stopLineGapFt; s > 0; s -= spacingFt) {
     const tMid = clamp01((s + lengthFt / 2) / totalLen);
     edgePointAt(edge, tMid, pointScratch);
     edgeRightVectorAt(edge, tMid, tangentScratch, rightScratch);

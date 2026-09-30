@@ -4,6 +4,7 @@ import { mphToFtps } from "./types";
 import type {
   Edge3D,
   EdgeSpec,
+  LaneMove,
   NetworkSnapshot,
   NodeSpec,
   RoadNetwork,
@@ -69,8 +70,11 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       zone: spec.zone,
       isRoundaboutRing: spec.isRoundaboutRing ?? false,
       nextEdgeIds: [],
-      divergeLaneRanges: null,
-      laneTurnBias: new Array(spec.lanes).fill(0),
+      manualLaneMoves: spec.laneMoves ?? null,
+      nextMoves: new Map(),
+      laneAllowed: null,
+      laneMoves: Array.from({ length: spec.lanes }, () => ["straight" as LaneMove]),
+      autoLaneMoves: Array.from({ length: spec.lanes }, () => ["straight" as LaneMove]),
     };
   });
 
@@ -82,40 +86,64 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   }
 
   for (const edge of edges) {
-    assignDivergeLanes(edge, edgesById);
+    computeLaneUse(edge, edgesById);
   }
 
   return { nodesById, edges, edgesById };
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+const STRAIGHT_HALF_ANGLE = (30 * Math.PI) / 180;
 
-/**
- * When an edge has 2+ lanes and diverges into 2+ distinct next edges, splits
- * its lanes into contiguous left-to-right ranges — one per next edge, ordered
- * by exit heading — so vehicles have a specific lane (or lanes) to merge into
- * ahead of the diverge, mirroring how real multi-lane roads sign turn/exit lanes.
- */
-function assignDivergeLanes(edge: Edge3D, edgesById: Map<string, Edge3D>): void {
-  if (edge.lanes < 2 || edge.nextEdgeIds.length < 2) return;
-  const nextEdges = edge.nextEdgeIds
-    .map((id) => edgesById.get(id))
-    .filter((e): e is Edge3D => !!e);
-  if (nextEdges.length < 2) return;
-
+/** Buckets an exit by the signed heading change from this edge's end to the next edge's start (positive = right). */
+function classifyMove(edge: Edge3D, next: Edge3D): { move: LaneMove; score: number } {
   const tangentEnd = edge.spline.getTangentAt(1);
   const rightEnd = new THREE.Vector3().crossVectors(tangentEnd, UP).normalize();
+  const tangentNext = next.spline.getTangentAt(0);
+  const score = tangentNext.dot(rightEnd);
+  const angle = Math.atan2(score, tangentNext.dot(tangentEnd));
+  if (Math.abs(angle) < STRAIGHT_HALF_ANGLE) return { move: "straight", score };
+  // Near-reversals (U-turns) read as left, as they do in real lane signage.
+  if (angle > 0 && angle < Math.PI * 0.83) return { move: "right", score };
+  return { move: "left", score };
+}
 
-  const scored = nextEdges
-    .map((ne) => ({ id: ne.id, score: ne.spline.getTangentAt(0).dot(rightEnd) }))
-    .sort((a, b) => a.score - b.score);
+function isValidManualMoves(edge: Edge3D, moves: LaneMove[][] | null): moves is LaneMove[][] {
+  return !!moves && moves.length === edge.lanes && moves.every((m) => m.length > 0);
+}
 
+/**
+ * Works out which lanes may take which exit. Automatic mode splits lanes into
+ * contiguous left-to-right ranges ordered by exit heading; manual mode (player
+ * lane arrows) allows exactly the moves painted on each lane, falling back to
+ * "any lane" for an exit no lane can reach so the player can't strand traffic.
+ * Safe to call again after a live patch.
+ */
+export function computeLaneUse(edge: Edge3D, edgesById: Map<string, Edge3D>): void {
+  const straightAll = () => Array.from({ length: edge.lanes }, () => ["straight" as LaneMove]);
+  edge.nextMoves = new Map();
+  edge.laneAllowed = null;
+  edge.laneMoves = straightAll();
+  edge.autoLaneMoves = straightAll();
+
+  const nextEdges = edge.nextEdgeIds.map((id) => edgesById.get(id)).filter((e): e is Edge3D => !!e);
+  if (nextEdges.length === 0) return;
+
+  const scored = nextEdges.map((ne) => {
+    const c = classifyMove(edge, ne);
+    edge.nextMoves.set(ne.id, c.move);
+    return { id: ne.id, move: c.move, score: c.score };
+  });
+  if (nextEdges.length < 2) return;
+
+  // Automatic: contiguous ranges ordered left-to-right by exit heading.
+  scored.sort((a, b) => a.score - b.score);
   const lanes = edge.lanes;
   const count = scored.length;
   const base = Math.floor(lanes / count);
   let remainder = lanes - base * count;
-
-  const ranges = new Map<string, [number, number]>();
+  const autoAllowed = new Map<string, boolean[]>();
+  const autoMoves: Set<LaneMove>[] = Array.from({ length: lanes }, () => new Set<LaneMove>());
   let cursor = 0;
   for (const s of scored) {
     let laneCount = base;
@@ -124,15 +152,46 @@ function assignDivergeLanes(edge: Edge3D, edgesById: Map<string, Edge3D>): void 
       remainder -= 1;
     }
     if (laneCount < 1) laneCount = 1;
-    const start = cursor;
+    const start = Math.min(cursor, lanes - 1);
     const end = Math.min(lanes - 1, cursor + laneCount - 1);
-    ranges.set(s.id, [start, end]);
+    const allowed = new Array<boolean>(lanes).fill(false);
     for (let i = start; i <= end; i++) {
-      edge.laneTurnBias[i] = Math.max(-1, Math.min(1, s.score * 2));
+      allowed[i] = true;
+      autoMoves[i].add(s.move);
     }
+    autoAllowed.set(s.id, allowed);
     cursor = end + 1;
   }
-  edge.divergeLaneRanges = ranges;
+  edge.autoLaneMoves = autoMoves.map((set) => (set.size > 0 ? orderMoves(set) : ["straight"]));
+
+  if (isValidManualMoves(edge, edge.manualLaneMoves)) {
+    const manual = edge.manualLaneMoves;
+    const allowedByNext = new Map<string, boolean[]>();
+    for (const s of scored) {
+      const arr = manual.map((moves) => moves.includes(s.move));
+      allowedByNext.set(s.id, arr.some(Boolean) ? arr : new Array<boolean>(lanes).fill(true));
+    }
+    edge.laneAllowed = allowedByNext;
+    edge.laneMoves = manual.map((m) => orderMoves(new Set(m)));
+  } else {
+    edge.laneAllowed = autoAllowed;
+    edge.laneMoves = edge.autoLaneMoves;
+  }
+}
+
+function orderMoves(set: Set<LaneMove>): LaneMove[] {
+  return (["left", "straight", "right"] as LaneMove[]).filter((m) => set.has(m));
+}
+
+/** Applies a live edit (speed limit and/or lane arrows) to an assembled edge in place. */
+export function patchEdge(
+  edge: Edge3D,
+  edgesById: Map<string, Edge3D>,
+  patch: { speedLimitMph: number; laneMoves: LaneMove[][] | null }
+): void {
+  edge.speedLimitMph = patch.speedLimitMph;
+  edge.manualLaneMoves = patch.laneMoves;
+  computeLaneUse(edge, edgesById);
 }
 
 /**

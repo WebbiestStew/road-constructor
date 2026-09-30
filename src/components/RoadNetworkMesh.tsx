@@ -4,9 +4,10 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { Html } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
+import { assembleCached } from "@/sim/assembleCache";
 import { assembleNetwork } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
-import type { ContractStatus, Edge3D, EdgeSpeedRatio } from "@/sim/types";
+import type { ContractStatus, Edge3D, EdgeSpeedRatio, NetworkSnapshot } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import { IconWarning } from "./hud/icons";
 import {
@@ -79,8 +80,11 @@ function buildEdgeGeometries(edge: Edge3D): EdgeGeometries {
 
   if (edge.length > 90) {
     for (let lane = 0; lane < edge.lanes; lane++) {
-      const turnBias = edge.laneTurnBias[lane] ?? 0;
-      stripes.push({ geometry: buildLaneArrows(edge, lane, 140, 16, 5, 0.04, turnBias), color: WHITE_COLOR });
+      // One arrowhead per permitted move, so a shared left+straight lane reads as a fork.
+      for (const move of edge.laneMoves[lane] ?? ["straight"]) {
+        const turnBias = move === "left" ? -1 : move === "right" ? 1 : 0;
+        stripes.push({ geometry: buildLaneArrows(edge, lane, 140, 16, 5, 0.04, turnBias), color: WHITE_COLOR });
+      }
     }
   }
 
@@ -205,7 +209,9 @@ function EdgeGroup({
   badgeIndex,
   typeIndex,
   speedRatio,
+  decorative,
 }: {
+  decorative?: boolean;
   edge: Edge3D;
   contract?: ContractStatus;
   badgeIndex?: number;
@@ -243,7 +249,7 @@ function EdgeGroup({
 
   return (
     <group>
-      <mesh geometry={geometries.ribbon} receiveShadow onClick={handleClick}>
+      <mesh geometry={geometries.ribbon} receiveShadow onClick={decorative ? undefined : handleClick}>
         <meshStandardMaterial
           color={
             edge.isRoundaboutRing
@@ -296,7 +302,7 @@ function EdgeGroup({
         );
       })}
 
-      {edge.zone && badgeIndex !== undefined && typeIndex !== undefined && (
+      {!decorative && edge.zone && badgeIndex !== undefined && typeIndex !== undefined && (
         <ZoneBadge edge={edge} badgeIndex={badgeIndex} typeIndex={typeIndex} contract={contract} />
       )}
     </group>
@@ -307,16 +313,25 @@ export default function RoadNetworkMesh({
   contracts,
   edgeSpeedRatios,
   problemEdgeIds,
+  networkOverride,
 }: {
   contracts?: ContractStatus[];
   edgeSpeedRatios?: EdgeSpeedRatio[];
   problemEdgeIds?: string[];
+  /** Render this fixed network instead of the editor's (used by the landing page): no zone badges, not clickable. */
+  networkOverride?: NetworkSnapshot;
 }) {
-  const nodes = useEditorStore((s) => s.nodes);
-  const edges = useEditorStore((s) => s.edges);
+  const storeNodes = useEditorStore((s) => s.nodes);
+  const storeEdges = useEditorStore((s) => s.edges);
   const mode = useEditorStore((s) => s.mode);
+  const nodes = networkOverride?.nodes ?? storeNodes;
+  const edges = networkOverride?.edges ?? storeEdges;
+  const decorative = networkOverride !== undefined;
 
-  const network = useMemo(() => assembleNetwork({ nodes, edges }), [nodes, edges]);
+  const network = useMemo(
+    () => (decorative ? assembleNetwork({ nodes, edges }) : assembleCached(nodes, edges)),
+    [nodes, edges, decorative]
+  );
 
   const contractsByEdgeId = useMemo(() => {
     const map = new Map<string, ContractStatus>();
@@ -373,6 +388,7 @@ export default function RoadNetworkMesh({
           badgeIndex={badgeIndexByEdgeId.get(edge.id)}
           typeIndex={typeIndexByEdgeId.get(edge.id)}
           speedRatio={speedRatioByEdgeId.get(edge.id)}
+          decorative={decorative}
         />
       ))}
 
