@@ -22,6 +22,13 @@ export interface DemoCity {
 const ENTRY = (vph: number): ZoneSpec => ({ type: "entry", demandVehPerHour: vph });
 const DEST: ZoneSpec = { type: "destination", targetSpeedMph: 25 };
 
+/**
+ * The city is laid out in generous real-world distances, then squeezed horizontally by this factor before use so
+ * the hero reads as a dense, busy scene rather than a few thin roads in a meadow. Heights are untouched, and the
+ * parts that must keep their real size (roundabout radius, motorway separation) are pre-compensated below.
+ */
+const LAYOUT_SCALE = 0.6;
+
 let cached: DemoCity | null = null;
 
 export function getDemoCity(): DemoCity {
@@ -32,7 +39,7 @@ export function getDemoCity(): DemoCity {
 
   // ---- Stage 0: the avenue (N-S, x = 0) ----------------------------------
   const RING_CENTER: [number, number] = [0, -700];
-  const RING_R = 72;
+  const RING_R = 72 / LAYOUT_SCALE;
   // Ring nodes sit on the avenue/street legs at N, E, S, W (same order the editor uses: ascending angle).
   const ringAngles = { N: -Math.PI / 2, E: 0, S: Math.PI / 2, W: Math.PI };
   const ring = (k: keyof typeof ringAngles) =>
@@ -112,7 +119,7 @@ export function getDemoCity(): DemoCity {
     });
     b.stageOfEdge.set(id, 2);
   };
-  const CARRIAGEWAY_OFFSET = 24;
+  const CARRIAGEWAY_OFFSET = 24 / LAYOUT_SCALE;
   const carriageway = (dir: "e" | "w", z: number) => {
     const sign = dir === "e" ? 1 : -1;
     const xs = [-2100, -1150, -650, 650, 1150, 2100].map((x) => x * sign);
@@ -129,6 +136,13 @@ export function getDemoCity(): DemoCity {
   };
   carriageway("e", CARRIAGEWAY_OFFSET);
   carriageway("w", -CARRIAGEWAY_OFFSET);
+
+  for (const n of b.nodes.values()) {
+    n.position = [n.position[0] * LAYOUT_SCALE, n.position[1], n.position[2] * LAYOUT_SCALE];
+  }
+  for (const e of b.edges) {
+    e.interiorPoints = e.interiorPoints.map(([x, y, z]) => [x * LAYOUT_SCALE, y, z * LAYOUT_SCALE]);
+  }
 
   const stages = Array.from({ length: DEMO_STAGE_COUNT }, (_, i) => b.slice(i));
   cached = {

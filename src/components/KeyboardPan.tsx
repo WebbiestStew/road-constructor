@@ -5,8 +5,8 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
-const PAN_SPEED_FT_PER_S = 900; // at zoom 1; scaled by 1/zoom so the on-screen speed stays constant
-const FAST_MULTIPLIER = 2.6;
+const PAN_SPEED_FT_PER_S = 650; // at zoom 1; scaled by 1/zoom so the on-screen speed stays constant
+const FAST_MULTIPLIER = 2.4;
 const ROTATE_SPEED_RAD_PER_S = 1.1;
 
 const PAN_KEYS = new Set(["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"]);

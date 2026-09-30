@@ -28,7 +28,7 @@ export default function ManagerRail() {
   }, []);
 
   return (
-    <div className="pointer-events-auto absolute left-4 top-24 z-20 flex flex-col items-center gap-1.5 rounded-2xl hud-panel p-1.5">
+    <div className="pointer-events-auto absolute bottom-24 left-4 z-20 flex flex-col items-center gap-1.5 rounded-2xl hud-panel p-1.5">
       <span className="font-display px-1 pt-0.5 text-[8.5px] font-extrabold uppercase leading-none tracking-wider text-zinc-400">
         Traffic
       </span>

@@ -55,8 +55,8 @@ function CameraRig({ reducedMotion }: { reducedMotion: boolean }) {
     const t = reducedMotion ? 0 : clock.elapsedTime;
     // Intro: start high and far, settle into a low cinematic orbit while the city builds.
     const intro = reducedMotion ? 1 : 1 - Math.pow(1 - Math.min(1, t / 11), 3);
-    const radius = THREE.MathUtils.lerp(5200, 3300, intro);
-    const height = THREE.MathUtils.lerp(3800, 1350, intro);
+    const radius = THREE.MathUtils.lerp(3400, 1900, intro);
+    const height = THREE.MathUtils.lerp(2600, 800, intro);
     const az = 0.62 + t * 0.028 + Math.sin(t * 0.11) * 0.08;
     cam.position.set(Math.sin(az) * radius, height, Math.cos(az) * radius);
     cam.lookAt(0, 40, 0);

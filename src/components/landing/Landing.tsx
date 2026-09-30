@@ -134,7 +134,7 @@ function Hero() {
       </nav>
 
       <div className="relative z-10 flex h-full flex-col justify-center px-5 pb-40 pt-24 sm:px-8 lg:px-16">
-        <div className="max-w-[46rem]">
+        <div className="max-w-[52rem]">
           <p
             className="fade-up mb-4 inline-flex items-center gap-2 rounded-full border-2 border-[#2b1c40] bg-white/85 px-3.5 py-1.5 text-xs font-extrabold uppercase tracking-wider text-[#43305f]"
             style={{ animationDelay: "150ms" }}
@@ -143,7 +143,7 @@ function Hero() {
             Free · Runs in your browser · No sign-up
           </p>
           <h1
-            className="font-display fade-up text-[clamp(2.7rem,7vw,6rem)] font-extrabold uppercase leading-[0.92] tracking-tight text-[#241b3d]"
+            className="font-display fade-up text-balance text-[clamp(2.3rem,4.6vw,4.6rem)] font-extrabold uppercase leading-[0.92] tracking-tight text-[#241b3d]"
             style={{ animationDelay: "300ms" }}
           >
             The city is built.

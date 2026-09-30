@@ -31,9 +31,15 @@ function createGroundTexture(): THREE.CanvasTexture {
     const y = Math.random() * size;
     const r = 8 + Math.random() * 28;
     ctx.fillStyle = Math.random() < 0.5 ? "rgba(70,150,60,0.16)" : "rgba(190,230,120,0.22)";
-    ctx.beginPath();
-    ctx.ellipse(x, y, r, r * 0.55, Math.random() * Math.PI, 0, Math.PI * 2);
-    ctx.fill();
+    const angle = Math.random() * Math.PI;
+    // Draw each blotch at its wrapped positions too, so the texture tiles without visible seams along its edges.
+    for (const dx of [-size, 0, size]) {
+      for (const dy of [-size, 0, size]) {
+        ctx.beginPath();
+        ctx.ellipse(x + dx, y + dy, r, r * 0.55, angle, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   const flowerColors = [
@@ -49,20 +55,12 @@ function createGroundTexture(): THREE.CanvasTexture {
     ctx.fillRect(x, y, 2, 2);
   }
 
-  ctx.strokeStyle = "rgba(40,110,40,0.08)";
-  ctx.lineWidth = 1;
-  for (let i = -size; i < size * 2; i += 26) {
-    ctx.beginPath();
-    ctx.moveTo(i, 0);
-    ctx.lineTo(i - size, size);
-    ctx.stroke();
-  }
-
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(36, 36);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
   return texture;
 }
 

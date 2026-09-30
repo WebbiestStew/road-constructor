@@ -23,7 +23,7 @@ const ENTRY = (vph: number): ZoneSpec => ({ type: "entry", demandVehPerHour: vph
 const DEST: ZoneSpec = { type: "destination", targetSpeedMph: 25 };
 
 const BLOCK = 420;
-const REACH = 1500;
+const REACH = 1100;
 
 /**
  * Midtown: a two-by-two avenue grid, four signals, eight ways in and out.

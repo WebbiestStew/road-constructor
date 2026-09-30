@@ -906,7 +906,7 @@ export default function InfoPanel({
   const managing = tool === "lanes" || tool === "speed" || tool === "junction";
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-60 z-20 flex max-h-[calc(100vh-6rem)] w-80 flex-col gap-3 overflow-y-auto hud-scrollbar lg:top-20">
+    <div className="pointer-events-auto absolute right-4 top-60 z-20 flex max-h-[calc(100vh-19rem)] w-80 flex-col gap-3 overflow-y-auto hud-scrollbar lg:top-20 lg:max-h-[calc(100vh-16rem)]">
       {managing ? (
         <>
           {mode === "simulate" && <MiniStats sim={sim} />}

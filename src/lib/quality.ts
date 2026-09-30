@@ -78,3 +78,10 @@ export function useAutoDowngraded(): boolean {
     () => false
   );
 }
+
+const noopSubscribe = () => () => {};
+
+/** False on the server and during hydration, true on the client afterwards — lets a component hold off mounting anything that depends on client-only state (like the saved quality). */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(noopSubscribe, () => true, () => false);
+}

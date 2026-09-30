@@ -74,6 +74,8 @@ interface AbutmentDescriptor {
 
 interface EdgeGeometries {
   ribbon: THREE.BufferGeometry;
+  /** A flat strip laid on the ground over the stretch of this edge that runs underground, so cuttings and tunnels stay visible from above. Null for at-grade and raised edges. */
+  belowGradeOverlay: THREE.BufferGeometry | null;
   stripes: StripeSpec[];
   barriers: THREE.BufferGeometry[];
   parapets: THREE.BufferGeometry[];
@@ -98,6 +100,29 @@ const CENTERLINE_GAP_FT = 0.3;
 const DIVIDED_CENTERLINE_GAP_FT = 1.6;
 /** A lane-boundary offset this close to 0 is treated as landing on the centerline itself, so it's painted yellow (below) instead of getting a redundant white dash. */
 const CENTERLINE_EPSILON_FT = 0.05;
+
+/**
+ * The terrain is a solid plane, so a cutting or tunnel would simply vanish beneath it (leaving only a few
+ * barrier rails poking through). This lays a ground-level strip over just the underground stretch — the real
+ * ribbon still runs below it — so the player can see where the road dives and where it surfaces.
+ */
+function buildBelowGradeOverlay(edge: Edge3D): THREE.BufferGeometry | null {
+  let minY = Infinity;
+  const p = new THREE.Vector3();
+  for (let i = 0; i <= 24; i++) {
+    edge.spline.getPointAt(i / 24, p);
+    minY = Math.min(minY, p.y);
+  }
+  // Spline smoothing can dip a foot or two below zero at the base of a ramp; only a real cutting or tunnel gets an overlay.
+  if (minY > -4) return null;
+  const geo = buildAsphaltRibbon(edge, SHOULDER_FT + 2, 0);
+  const pos = geo.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, Math.max(pos.getY(i), 0) + 0.18);
+  }
+  pos.needsUpdate = true;
+  return geo;
+}
 
 function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolean, hasCrosswalk: boolean): EdgeGeometries {
   const pavedHalfWidth = (edge.lanes * edge.laneWidthFt) / 2;
@@ -168,6 +193,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const startPoint = edge.spline.getPointAt(0);
   const endPoint = edge.spline.getPointAt(1);
 
+  const belowGradeOverlay = buildBelowGradeOverlay(edge);
   const groundShadow = edge.isElevated ? buildGroundShadowRibbon(edge) : null;
   // One expansion joint per pier — that's exactly where a real bridge deck
   // is segmented, so reusing the pier spacing keeps the two in lockstep for
@@ -205,6 +231,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
 
   return {
     ribbon,
+    belowGradeOverlay,
     stripes,
     barriers,
     parapets,
@@ -545,6 +572,22 @@ function EdgeGroup({
           metalness={0.05}
         />
       </mesh>
+
+      {geometries.belowGradeOverlay && (
+        <mesh geometry={geometries.belowGradeOverlay} renderOrder={3}>
+          <meshBasicMaterial
+            // Excavation reads warm brown, a tunnel cool slate — the same coding the elevation picker uses.
+            color={edge.elevationLevelId === "tunnel" ? "#5f6b85" : "#9a7a52"}
+            transparent
+            opacity={0.62}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+            polygonOffset
+            polygonOffsetFactor={-2}
+            polygonOffsetUnits={-2}
+          />
+        </mesh>
+      )}
 
       {geometries.stripes.map((stripe, i) => (
         <mesh key={i} geometry={stripe.geometry} receiveShadow={false}>

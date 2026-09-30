@@ -276,7 +276,12 @@ export function computeLaneUse(edge: Edge3D, edgesById: Map<string, Edge3D>): vo
   edge.laneMoves = straightAll();
   edge.autoLaneMoves = straightAll();
 
-  const nextEdges = edge.nextEdgeIds.map((id) => edgesById.get(id)).filter((e): e is Edge3D => !!e);
+  // A U-turn onto the road's own opposite direction is never painted on a lane (real roads don't), and counting it
+  // would fork the lanes of every plain mid-block node into a fake "turn left" arrow.
+  const nextEdges = edge.nextEdgeIds
+    .map((id) => edgesById.get(id))
+    .filter((e): e is Edge3D => !!e)
+    .filter((e) => !(e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId));
   if (nextEdges.length === 0) return;
 
   const scored = nextEdges.map((ne) => {

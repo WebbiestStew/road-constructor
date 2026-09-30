@@ -24,7 +24,7 @@ import AutosaveHydrator from "@/components/AutosaveHydrator";
 import FallbackScreen from "@/components/FallbackScreen";
 import KeyboardPan from "@/components/KeyboardPan";
 import PerfGuard from "@/components/PerfGuard";
-import { useQuality } from "@/lib/quality";
+import { useHydrated, useQuality } from "@/lib/quality";
 import { useWebGLSupported } from "@/lib/webgl";
 
 const SHARE_HASH_PREFIX = "#data=";
@@ -73,7 +73,19 @@ const SKY_COLOR_DUSK = "#2b2440";
 const SKY_COLOR_NIGHT = "#0a0c1c";
 
 /** Steep top-down-ish default camera direction, in feet, looking at the origin where building starts. Orthographic, so only the angle matters — not the distance. */
-const CAMERA_POSITION: [number, number, number] = [300, 650, 300];
+const CAMERA_DIRECTION: [number, number, number] = [300, 650, 300];
+/**
+ * How far back along that direction the camera sits. It has to be far: an orthographic camera clips anything
+ * nearer than its own plane, so a camera only ~780 ft up loses the whole bottom of the screen to empty sky
+ * the moment you zoom out over a large network.
+ */
+const CAMERA_DISTANCE_FT = 4800;
+const CAMERA_POSITION: [number, number, number] = (() => {
+  const d = new THREE.Vector3(...CAMERA_DIRECTION).normalize().multiplyScalar(CAMERA_DISTANCE_FT);
+  return [d.x, d.y, d.z];
+})();
+/** The ground plane now sits this much farther from the camera than before, so the fog band moves back by the same amount. */
+const FOG_OFFSET_FT = CAMERA_DISTANCE_FT - new THREE.Vector3(...CAMERA_DIRECTION).length();
 
 /** Orthographic zoom range from the OrbitControls below the canvas — used to map zoom to the ambient hum/engine crossfade. */
 const MIN_ZOOM = 0.08;
@@ -145,6 +157,7 @@ export default function Play() {
   const quality = useQuality();
   const high = quality === "high";
   const webglSupported = useWebGLSupported();
+  const hydrated = useHydrated();
   const [contextLost, setContextLost] = useState(false);
 
   if (!webglSupported) {
@@ -169,6 +182,10 @@ export default function Play() {
     );
   }
 
+  // The saved graphics quality is only known on the client; mounting the canvas before it settles would mount a
+  // second, throwaway canvas (and log a React unmount error) when it flips from the default to the saved value.
+  if (!hydrated) return <div id="sim-root" />;
+
   return (
     <div id="sim-root">
       <AutosaveHydrator />
@@ -190,9 +207,9 @@ export default function Play() {
         <PerfGuard />
         <KeyboardPan />
         <color attach="background" args={[skyColor]} />
-        <fog attach="fog" args={[skyColor, 4200, 13000]} />
+        <fog attach="fog" args={[skyColor, 4200 + FOG_OFFSET_FT, 13000 + FOG_OFFSET_FT]} />
 
-        <OrthographicCamera makeDefault position={CAMERA_POSITION} zoom={1.05} near={1} far={20000} />
+        <OrthographicCamera makeDefault position={CAMERA_POSITION} zoom={1.05} near={1} far={60000} />
 
         {timeOfDay === "night" ? (
           <>

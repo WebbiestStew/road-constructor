@@ -434,6 +434,32 @@ function createTripsEvaluator(target: number): () => ScenarioEvaluator {
   };
 }
 
+/**
+ * Win condition for levels where the fault is a speed collapse: after a warm-up (traffic takes a couple of
+ * minutes to back up), average speed must hold above a line for a stretch. The line sits between the broken
+ * city (low teens) and the fixed one (about 20 mph), found by running both in the headless sim.
+ */
+function createSpeedHoldEvaluator(opts: { warmupS: number; minMph: number; holdS: number }): () => ScenarioEvaluator {
+  return () => {
+    const sustain = createSustainTracker(opts.holdS);
+    return (ctx) => {
+      const flowing = ctx.elapsedS >= opts.warmupS && ctx.activeCount > 20 && ctx.avgSpeedMph >= opts.minMph;
+      const heldS = sustain(ctx.simTimeS, flowing);
+      const warm = ctx.elapsedS < opts.warmupS;
+      return {
+        won: heldS >= opts.holdS,
+        label: warm
+          ? `Traffic building up… ${Math.round(ctx.avgSpeedMph)} mph`
+          : `${Math.round(ctx.avgSpeedMph)} mph · hold ${opts.minMph}+ for ${opts.holdS}s (${Math.round(heldS)}s)`,
+        detailLines: [
+          `Average speed: ${Math.round(ctx.avgSpeedMph)} mph (need ${opts.minMph}+ held ${opts.holdS}s straight, after the first ${opts.warmupS}s)`,
+          `Vehicles moved: ${ctx.completedTripsTotal}`,
+        ],
+      };
+    };
+  };
+}
+
 const MIDTOWN_NETWORK = buildMidtown(true);
 const HARBOR_NETWORK = buildHarborDrive(true);
 const INTERCHANGE_NETWORK = buildInterchangeSite();
@@ -1125,7 +1151,7 @@ export const SCENARIOS: ScenarioDef[] = [
     startingBudget: 1000000,
     durationS: 300,
     targetAvgSpeedMph: 24,
-    createEvaluator: createTripsEvaluator(435),
+    createEvaluator: createSpeedHoldEvaluator({ warmupS: 140, minMph: 17.5, holdS: 30 }),
   },
   {
     id: "harbor-drive",
