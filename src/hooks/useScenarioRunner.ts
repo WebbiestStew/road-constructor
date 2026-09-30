@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getScenarioById, scoreScenario, SCENARIOS, type ScenarioDef, type ScenarioResult } from "@/sim/scenarios";
 import { useEditorStore } from "@/state/editorStore";
+import { networkRadiusFt, requestFitView } from "@/lib/camera";
 import type { UseTrafficSimulationReturn } from "./useTrafficSimulation";
 
 /**
@@ -37,6 +38,13 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
     return () => cancelAnimationFrame(raf);
   }, [scenario, mode, results, startSimTime, sim.metrics.simTime]);
 
+  // A fresh run resets the sim clock to 0; if we captured a baseline from the previous run, follow it back down.
+  useEffect(() => {
+    if (startSimTime === null || sim.metrics.simTime >= startSimTime) return;
+    const raf = requestAnimationFrame(() => setStartSimTime(sim.metrics.simTime));
+    return () => cancelAnimationFrame(raf);
+  }, [startSimTime, sim.metrics.simTime]);
+
   // Score and auto-pause once the scenario's duration has elapsed.
   useEffect(() => {
     if (!scenario || mode !== "simulate" || results || startSimTime === null) return;
@@ -56,6 +64,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
       loadScenario(def);
       setStartSimTime(null);
       setResults(null);
+      requestFitView(networkRadiusFt(def.startingNetwork.nodes));
     },
     [loadScenario]
   );

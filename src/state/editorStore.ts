@@ -2,6 +2,7 @@
 
 import * as THREE from "three";
 import { create } from "zustand";
+import { assembleCached } from "@/sim/assembleCache";
 import { computeSignalPhaseGroups } from "@/sim/network";
 import {
   DEMOLISH_REFUND_FRACTION,
@@ -15,16 +16,22 @@ import {
 import type {
   EdgeSpec,
   JunctionControl,
+  LaneMove,
   NetworkSnapshot,
   NodeSpec,
   ZoneSpec,
 } from "@/sim/types";
-import { loadAutosave, saveAutosave, type PersistedPayload } from "./persistence";
+import { CURRENT_SAVE_VERSION, loadAutosave, saveAutosave, type PersistedPayload } from "./persistence";
 import { playDemolish, playPlaceRoad } from "@/lib/sound";
 import type { ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
-export type EditorTool = "draw" | "delete" | "inspect" | "zone";
+export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "lanes" | "speed" | "junction";
+
+/** Tools that change how traffic is managed rather than what is built — these work while traffic is running. */
+export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction"];
+
+export const SPEED_LIMIT_CHOICES_MPH = [15, 20, 25, 30, 35, 40, 45, 55, 65, 75];
 
 export type Selection =
   | { kind: "node"; id: string }
@@ -113,6 +120,14 @@ interface EditorState {
   setDestinationTarget: (edgeId: string, targetSpeedMph: number) => void;
 
   setNodeControl: (nodeId: string, control: JunctionControl | undefined) => void;
+  setSignalTiming: (nodeId: string, greenDurationS: number) => void;
+
+  /** Sets one lane's permitted moves (traffic management: free, works live). Seeds the other lanes from the automatic assignment. */
+  setLaneMoves: (edgeId: string, laneIndex: number, moves: LaneMove[]) => void;
+  /** Drops the player's lane arrows on this edge so it goes back to automatic assignment. */
+  resetLaneMoves: (edgeId: string) => void;
+  /** Sets the speed limit on this segment, its opposite direction, and optionally the rest of the road it belongs to. */
+  setSpeedLimit: (edgeId: string, mph: number, wholeRoad: boolean) => void;
 
   /** Replaces a junction node with an auto-generated roundabout ring, re-pointing its existing approach roads to the ring. */
   convertNodeToRoundabout: (nodeId: string, radiusFt?: number) => void;
@@ -123,6 +138,10 @@ interface EditorState {
   importPayload: (payload: PersistedPayload) => void;
 
   activeScenarioId: string | null;
+  /** True in a manage-only city: roads can't be built or changed, only traffic management tools work. */
+  buildLocked: boolean;
+  /** Bumped whenever a scenario (re)starts, so the simulation knows to start a fresh run even if the mode didn't change. */
+  simEpoch: number;
   loadScenario: (scenario: ScenarioDef) => void;
   exitScenario: () => void;
 }
@@ -218,8 +237,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  setMode: (mode) => set({ mode, drawFromNodeId: null }),
-  setTool: (tool) => set({ tool, drawFromNodeId: null, selection: null }),
+  setMode: (mode) =>
+    set((s) => ({
+      mode,
+      drawFromNodeId: null,
+      // Build tools don't exist while traffic is running; land on the selector instead.
+      tool: mode === "simulate" && !MANAGER_TOOLS.includes(s.tool) ? "inspect" : s.tool,
+    })),
+  setTool: (tool) =>
+    set((s) => (s.buildLocked && !MANAGER_TOOLS.includes(tool) ? s : { tool, drawFromNodeId: null, selection: null })),
   setRoadClass: (id) => set({ selectedRoadClassId: id }),
   setElevation: (id) => set({ selectedElevationId: id }),
   setTwoWay: (v) => set({ twoWay: v }),
@@ -424,7 +450,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
     const oldCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
     const newCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, clamped);
-    const updated: EdgeSpec = { ...edge, lanes: clamped };
+    // Lane arrows are per lane, so they no longer line up once the count changes.
+    const updated: EdgeSpec = { ...edge, lanes: clamped, laneMoves: undefined };
     set((s) => {
       const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
       const edgesById = new Map(s.edgesById);
@@ -552,6 +579,97 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const nodesById = new Map(s.nodesById);
       nodesById.set(nodeId, updated);
       return { nodes, nodesById };
+    });
+  },
+
+  setSignalTiming: (nodeId, greenDurationS) => {
+    const node = get().nodesById.get(nodeId);
+    if (!node || node.control?.type !== "signal") return;
+    const green = Math.max(5, Math.min(90, Math.round(greenDurationS)));
+    if (green === node.control.greenDurationS) return;
+    get().pushHistoryEntry();
+    const updated: NodeSpec = { ...node, control: { ...node.control, greenDurationS: green } };
+    set((s) => {
+      const nodes = s.nodes.map((n) => (n.id === nodeId ? updated : n));
+      const nodesById = new Map(s.nodesById);
+      nodesById.set(nodeId, updated);
+      return { nodes, nodesById };
+    });
+  },
+
+  setLaneMoves: (edgeId, laneIndex, moves) => {
+    const state = get();
+    const edge = state.edgesById.get(edgeId);
+    if (!edge || moves.length === 0 || laneIndex < 0 || laneIndex >= edge.lanes) return;
+    const assembled = assembleCached(state.nodes, state.edges).edgesById.get(edgeId);
+    if (!assembled) return;
+    // Start from what's in effect now (manual or automatic) so editing one lane doesn't disturb the rest.
+    const next = assembled.laneMoves.map((m, i) => (i === laneIndex ? moves : [...m]));
+    get().pushHistoryEntry();
+    const updated: EdgeSpec = { ...edge, laneMoves: next };
+    set((s) => {
+      const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
+      const edgesById = new Map(s.edgesById);
+      edgesById.set(edgeId, updated);
+      return { edges, edgesById };
+    });
+  },
+
+  resetLaneMoves: (edgeId) => {
+    const edge = get().edgesById.get(edgeId);
+    if (!edge?.laneMoves) return;
+    get().pushHistoryEntry();
+    const updated: EdgeSpec = { ...edge, laneMoves: undefined };
+    set((s) => {
+      const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
+      const edgesById = new Map(s.edgesById);
+      edgesById.set(edgeId, updated);
+      return { edges, edgesById };
+    });
+  },
+
+  setSpeedLimit: (edgeId, mph, wholeRoad) => {
+    const state = get();
+    const start = state.edgesById.get(edgeId);
+    if (!start) return;
+    const targets = new Set<string>([edgeId]);
+
+    if (wholeRoad) {
+      // Follow the road straight through junctions, in both directions of travel, while it stays the same class.
+      const network = assembleCached(state.nodes, state.edges);
+      const queue = [edgeId];
+      while (queue.length > 0) {
+        const cur = network.edgesById.get(queue.pop()!);
+        if (!cur || cur.isRoundaboutRing) continue;
+        for (const [nextId, move] of cur.nextMoves) {
+          const next = network.edgesById.get(nextId);
+          if (move === "straight" && next && next.roadClassId === cur.roadClassId && !next.isRoundaboutRing && !targets.has(nextId)) {
+            targets.add(nextId);
+            queue.push(nextId);
+          }
+        }
+        for (const other of network.edges) {
+          if (targets.has(other.id) || other.isRoundaboutRing || other.roadClassId !== cur.roadClassId) continue;
+          if (other.nextMoves.get(cur.id) === "straight") {
+            targets.add(other.id);
+            queue.push(other.id);
+          }
+        }
+      }
+    }
+    // Two-way roads share one limit across both directions.
+    for (const id of Array.from(targets)) {
+      const e = state.edgesById.get(id);
+      const back = e ? findCounterpart(state.edges, e) : undefined;
+      if (back) targets.add(back.id);
+    }
+
+    const changed = state.edges.filter((e) => targets.has(e.id) && e.speedLimitMph !== mph);
+    if (changed.length === 0) return;
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => (targets.has(e.id) ? { ...e, speedLimitMph: mph } : e));
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
     });
   },
 
@@ -685,7 +803,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   exportPayload: () => {
     const s = get();
     return {
-      version: 1,
+      app: "road-constructor",
+      version: CURRENT_SAVE_VERSION,
       network: { nodes: s.nodes, edges: s.edges },
       budget: s.budget,
       nextNodeSeq: s.nextNodeSeq,
@@ -709,6 +828,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   activeScenarioId: null,
+  buildLocked: false,
+  simEpoch: 0,
 
   loadScenario: (scenario) => {
     set({
@@ -721,14 +842,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextEdgeSeq: 1,
       selection: null,
       drawFromNodeId: null,
-      mode: "build",
+      // Manage cities open straight to traffic — the point is to watch it break and fix it live.
+      mode: scenario.kind === "manage" ? "simulate" : "build",
+      tool: scenario.kind === "manage" ? "inspect" : get().tool,
+      buildLocked: scenario.kind === "manage",
+      simEpoch: get().simEpoch + 1,
       activeScenarioId: scenario.id,
       past: [],
       future: [],
     });
   },
 
-  exitScenario: () => set({ activeScenarioId: null }),
+  exitScenario: () => set({ activeScenarioId: null, buildLocked: false }),
 }));
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -736,7 +861,8 @@ useEditorStore.subscribe((state) => {
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     saveAutosave({
-      version: 1,
+      app: "road-constructor",
+      version: CURRENT_SAVE_VERSION,
       network: { nodes: state.nodes, edges: state.edges },
       budget: state.budget,
       nextNodeSeq: state.nextNodeSeq,

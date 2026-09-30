@@ -1,9 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ContractStatus, EdgeSpeedRatio, WorkerInMessage, WorkerOutMessage } from "@/sim/types";
+import type {
+  ContractStatus,
+  EdgeSpec,
+  EdgeSpeedRatio,
+  JunctionControl,
+  LaneMove,
+  NodeSpec,
+  WorkerInMessage,
+  WorkerOutMessage,
+} from "@/sim/types";
 import { ftpsToMph } from "@/sim/types";
 import { useEditorStore } from "@/state/editorStore";
+import { VEHICLE_CAP, useQuality } from "@/lib/quality";
 
 export interface VehicleSnapshot {
   matrices: Float32Array;
@@ -62,8 +72,11 @@ export function useTrafficSimulation() {
   const [userPaused, setUserPaused] = useState(false);
   const [speedMultiplier, setSpeedMultiplierState] = useState(1);
   const [ready, setReady] = useState(false);
+  const [workerFailed, setWorkerFailed] = useState(false);
+  const quality = useQuality();
 
   const mode = useEditorStore((s) => s.mode);
+  const simEpoch = useEditorStore((s) => s.simEpoch);
   const running = mode === "simulate" && !userPaused;
 
   useEffect(() => {
@@ -114,6 +127,12 @@ export function useTrafficSimulation() {
       }
     };
 
+    worker.onerror = (event) => {
+      console.error("Simulation worker crashed:", event.message);
+      setWorkerFailed(true);
+    };
+    worker.onmessageerror = () => setWorkerFailed(true);
+
     worker.postMessage({ type: "setSpeedMultiplier", value: 1 } satisfies WorkerInMessage);
 
     return () => {
@@ -122,15 +141,68 @@ export function useTrafficSimulation() {
     };
   }, []);
 
+  useEffect(() => {
+    workerRef.current?.postMessage({ type: "setMaxVehicles", value: VEHICLE_CAP[quality] } satisfies WorkerInMessage);
+  }, [quality]);
+
   // Cross Build -> Simulate: push a full network resync so the worker
-  // always simulates exactly what's on screen.
+  // always simulates exactly what's on screen. While simulating, keep it in
+  // sync with live traffic-management edits (speed limits, lane arrows,
+  // junction control) via small patches, so the sim is never restarted.
   useEffect(() => {
     if (mode !== "simulate") return;
     const worker = workerRef.current;
     if (!worker) return;
     const snapshot = useEditorStore.getState().getSnapshot();
+    // Every time traffic opens (or a level restarts) is a fresh run from t = 0, so the fixed seed really does
+    // replay the same traffic and a fix can be judged against the last attempt.
+    worker.postMessage({ type: "reset" } satisfies WorkerInMessage);
     worker.postMessage({ type: "updateNetwork", network: snapshot, seed: DEFAULT_SEED } satisfies WorkerInMessage);
-  }, [mode]);
+
+    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}`;
+    const nodeSig = (n: NodeSpec) => JSON.stringify(n.control ?? null);
+    let sentEdges = new Map(snapshot.edges.map((e) => [e.id, edgeSig(e)]));
+    let sentNodes = new Map(snapshot.nodes.map((n) => [n.id, nodeSig(n)]));
+
+    const structureSig = (edges: EdgeSpec[], nodes: NodeSpec[]) =>
+      `${edges.map((e) => `${e.id}:${e.fromNodeId}>${e.toNodeId}:${e.lanes}`).join(",")}|${nodes.map((n) => n.id).join(",")}`;
+    let sentStructure = structureSig(snapshot.edges, snapshot.nodes);
+
+    return useEditorStore.subscribe((state) => {
+      // A roads-changed edit (e.g. a junction turned into a roundabout) needs the whole network re-sent; the
+      // worker keeps vehicles that are still on roads that exist and drops the rest. The clock keeps running.
+      const sig = structureSig(state.edges, state.nodes);
+      if (sig !== sentStructure) {
+        sentStructure = sig;
+        const next = state.getSnapshot();
+        worker.postMessage({ type: "updateNetwork", network: next, seed: DEFAULT_SEED } satisfies WorkerInMessage);
+        sentEdges = new Map(next.edges.map((e) => [e.id, edgeSig(e)]));
+        sentNodes = new Map(next.nodes.map((n) => [n.id, nodeSig(n)]));
+        return;
+      }
+
+      const edgePatches: { id: string; speedLimitMph: number; laneMoves: LaneMove[][] | null }[] = [];
+      for (const e of state.edges) {
+        const sig = edgeSig(e);
+        if (sentEdges.get(e.id) === sig) continue;
+        sentEdges.set(e.id, sig);
+        edgePatches.push({ id: e.id, speedLimitMph: e.speedLimitMph, laneMoves: e.laneMoves ?? null });
+      }
+      if (edgePatches.length > 0) {
+        worker.postMessage({ type: "patchEdges", edges: edgePatches } satisfies WorkerInMessage);
+      }
+      const nodePatches: { id: string; control: JunctionControl | null }[] = [];
+      for (const n of state.nodes) {
+        const sig = nodeSig(n);
+        if (sentNodes.get(n.id) === sig) continue;
+        sentNodes.set(n.id, sig);
+        nodePatches.push({ id: n.id, control: n.control ?? null });
+      }
+      if (nodePatches.length > 0) {
+        worker.postMessage({ type: "patchNodes", nodes: nodePatches } satisfies WorkerInMessage);
+      }
+    });
+  }, [mode, simEpoch]);
 
   // `running` is derived (mode === "simulate" && !userPaused); keep the
   // worker's clock in sync with it whenever either input changes.
@@ -161,6 +233,7 @@ export function useTrafficSimulation() {
     running,
     speedMultiplier,
     ready,
+    workerFailed,
     setRunning,
     setSpeedMultiplier,
     setDemand,

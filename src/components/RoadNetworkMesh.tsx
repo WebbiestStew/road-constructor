@@ -231,10 +231,15 @@ function EdgeGroup({
     const store = useEditorStore.getState();
     const point: [number, number, number] = [event.point.x, event.point.y, event.point.z];
 
+    // Traffic-management tools select a road in either mode; everything else edits the network, so Build only.
+    if (store.tool === "inspect" || store.tool === "lanes" || store.tool === "speed") {
+      store.setSelection({ kind: "edge", id: edge.id });
+      return;
+    }
+    if (store.mode !== "build") return;
+
     if (store.tool === "delete") {
       store.deleteEdge(edge.id);
-    } else if (store.tool === "inspect") {
-      store.setSelection({ kind: "edge", id: edge.id });
     } else if (store.tool === "zone") {
       store.cycleEdgeZone(edge.id);
     } else if (store.tool === "draw") {
