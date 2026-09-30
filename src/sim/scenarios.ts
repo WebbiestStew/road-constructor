@@ -1,3 +1,4 @@
+import { buildHarborDrive, buildInterchangeSite, buildMidtown, buildOldTown } from "./cities";
 import type { ContractStatus, EdgeSpec, NetworkSnapshot, NodeSpec } from "./types";
 
 /** A built-in campaign scenario: a starting layout, a budget, a time limit, and score targets. */
@@ -11,6 +12,11 @@ export interface ScenarioDef {
   durationS: number;
   targetThroughputPerMinute: number;
   targetAvgSpeedMph: number;
+  /**
+   * "manage" levels start from a finished city and lock building: the roads are fixed and the player fixes the
+   * flow with lane arrows, speed limits and junction control. Undefined = a normal build-and-fix level.
+   */
+  kind?: "manage";
 }
 
 export interface ScenarioResult {
@@ -171,6 +177,11 @@ const highwayMerge: NetworkSnapshot = {
   ] satisfies EdgeSpec[],
 };
 
+const MIDTOWN_NETWORK = buildMidtown(true);
+const HARBOR_NETWORK = buildHarborDrive(true);
+const OLD_TOWN_NETWORK = buildOldTown(true);
+const INTERCHANGE_NETWORK = buildInterchangeSite();
+
 export const SCENARIOS: ScenarioDef[] = [
   {
     id: "bottleneck-alley",
@@ -208,6 +219,57 @@ export const SCENARIOS: ScenarioDef[] = [
     targetThroughputPerMinute: 20,
     targetAvgSpeedMph: 45,
   },
+  {
+    id: "highway-interchange",
+    name: "Interchange Builder",
+    tagline: "Two motorways that don't meet. Make them.",
+    briefing:
+      "Two motorways stop short of each other, so nothing can get from the west or south to the east or north until you connect them. A plain junction will clog under this much traffic. Fly one road over the other with a bridge or viaduct, add ramps for the turns, and keep budget in mind: elevated road is expensive.",
+    startingNetwork: INTERCHANGE_NETWORK,
+    startingBudget: 2_000_000,
+    durationS: 120,
+    targetThroughputPerMinute: 78,
+    targetAvgSpeedMph: 50,
+  },
+  {
+    id: "midtown",
+    kind: "manage",
+    name: "Midtown Meltdown",
+    tagline: "The city is built. The traffic is not working.",
+    briefing:
+      "Four signals, eight ways in, and three things wrong. One avenue is posted at a crawl, one light flips too fast to move anyone, and two approaches waste a lane on left turns. You can't build anything: use lane arrows, speed limits and junction timing while traffic runs.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 0,
+    durationS: 180,
+    targetThroughputPerMinute: 135,
+    targetAvgSpeedMph: 22,
+  },
+  {
+    id: "harbor-drive",
+    kind: "manage",
+    name: "Harbor Drive",
+    tagline: "Five lights in a row, and the waterfront is crawling.",
+    briefing:
+      "One long avenue, five signalized cross streets, and traffic that never gets going. A block of the avenue is posted far too slow, two lights flip green-to-red every few seconds, and three approaches waste a lane on left turns. Fix what you find while the cars keep moving.",
+    startingNetwork: HARBOR_NETWORK,
+    startingBudget: 0,
+    durationS: 180,
+    targetThroughputPerMinute: 66,
+    targetAvgSpeedMph: 26,
+  },
+  {
+    id: "old-town",
+    kind: "manage",
+    name: "Old Town",
+    tagline: "Every corner has a traffic light. Every light is wrong.",
+    briefing:
+      "A tight grid of narrow streets where four corner lights flip every three seconds and spend their lives on clearance. Retime them, or ask whether a corner needs a light at all: switching a junction to priority can move more cars than a bad signal.",
+    startingNetwork: OLD_TOWN_NETWORK,
+    startingBudget: 0,
+    durationS: 180,
+    targetThroughputPerMinute: 88,
+    targetAvgSpeedMph: 15,
+  },
 ];
 
 export function getScenarioById(id: string): ScenarioDef | undefined {
@@ -227,7 +289,13 @@ export function scoreScenario(
   const speedScore = Math.min(1, metrics.avgSpeedMph / scenario.targetAvgSpeedMph);
   const budgetScore = Math.min(1, Math.max(0, budgetRemaining) / scenario.startingBudget);
 
-  const score = Math.round(40 * throughputScore + 25 * speedScore + 25 * contractFraction + 10 * budgetScore);
+  // Nothing is ever spent in a manage level, so budget is worthless there, and its destination targets are
+  // trivially met; flow speed carries the score. Cubing each ratio makes doing nothing score poorly and
+  // fixing the obvious faults score well, with headroom above that for real tuning.
+  const score =
+    scenario.kind === "manage"
+      ? Math.round(30 * throughputScore ** 3 + 70 * speedScore ** 3)
+      : Math.round(40 * throughputScore + 25 * speedScore + 25 * contractFraction + 10 * budgetScore);
 
   return {
     score,
