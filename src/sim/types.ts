@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { ElevationLevelId, RoadClassId } from "./roadClasses";
+import type { EdgeTrafficStats } from "./los";
 
 /**
  * Global shared constants. All spatial units are feet, speeds are ft/s
@@ -88,6 +89,8 @@ export interface EdgeSpec {
    * edge. Omitted = automatic assignment by exit heading. Ignored if its length doesn't match `lanes`.
    */
   laneMoves?: LaneMove[][];
+  /** True for an auto-generated Texas turnaround slip lane — always yields at its merge, below any real road class's priority. */
+  isTexasTurnaround?: boolean;
 }
 
 /** The editable network as plain, structured-cloneable data. */
@@ -121,6 +124,7 @@ export interface Edge3D {
   isElevated: boolean;
   zone?: ZoneSpec;
   isRoundaboutRing: boolean;
+  isTexasTurnaround: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
   /** Player-set lane arrows copied from the spec (null = automatic). */
@@ -179,6 +183,16 @@ export interface VehicleState {
   spawnTime: number;
   /** Seconds spent stopped at the end of a road in a lane that may not make the turn it needs; past a limit it goes anyway so nothing deadlocks. */
   wrongLaneWaitS: number;
+  /** Consecutive sim-seconds spent at near-zero speed — drives gridlock detection/despawn. */
+  stuckTimeS: number;
+  /** True for the 15% of vehicles simulated as 18-wheeler semis rather than passenger sedans. */
+  isTruck: boolean;
+  /** Weight-to-power ratio, lb/hp — drives how hard road grade hits this vehicle's climbing speed. */
+  weightToPowerLbPerHp: number;
+  /** Fixed body paint color (0-1 components), assigned once at spawn from a truck- or sedan-specific palette. */
+  bodyColorR: number;
+  bodyColorG: number;
+  bodyColorB: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +210,8 @@ export type WorkerInMessage =
   | { type: "patchEdges"; edges: { id: string; speedLimitMph: number; laneMoves: LaneMove[][] | null }[] }
   | { type: "patchNodes"; nodes: { id: string; control: JunctionControl | null }[] }
   | { type: "setDemand"; edgeId: string; vehiclesPerHour: number }
-  | { type: "returnBuffers"; matrices: ArrayBuffer; colors: ArrayBuffer };
+  | { type: "setColorMode"; heatmap: boolean }
+  | { type: "returnBuffers"; matrices: ArrayBuffer; colors: ArrayBuffer; taillightColors: ArrayBuffer };
 
 export interface ContractStatus {
   edgeId: string;
@@ -215,13 +230,23 @@ export type WorkerOutMessage =
       type: "tick";
       matrices: ArrayBuffer;
       colors: ArrayBuffer;
+      /** Per-vehicle taillight tint (3 floats each): dim red at cruise, brightening toward white-hot when braking hard (accel below the hard-brake threshold). */
+      taillightColors: ArrayBuffer;
       activeCount: number;
       simTime: number;
       avgSpeedFtS: number;
       throughputLastMinute: number;
       spawnedTotal: number;
+      /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */
+      completedTripsTotal: number;
       contracts: ContractStatus[];
       edgeSpeedRatios: EdgeSpeedRatio[];
       /** Edge IDs that have been badly congested (well under the speed limit) for a sustained stretch of time — surfaced as warning markers so players can spot trouble without reading stats. */
       problemEdgeIds: string[];
+      /** Live Level-of-Service / v-c / flow stats per edge, for the Inspect panel. */
+      edgeTrafficStats: EdgeTrafficStats[];
+      /** Total vehicles forcibly despawned after sitting gridlocked (near-zero speed) for GRIDLOCK_DESPAWN_S — a throughput penalty counter. */
+      gridlockPenaltyTotal: number;
+      /** World positions of currently-stuck vehicles that have crossed the warning threshold but haven't been despawned yet, for the pulsing exclamation marker. */
+      gridlockMarkers: [number, number, number][];
     };

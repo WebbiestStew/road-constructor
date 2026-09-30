@@ -12,12 +12,14 @@ import type {
   WorkerOutMessage,
 } from "@/sim/types";
 import { ftpsToMph } from "@/sim/types";
+import type { EdgeTrafficStats } from "@/sim/los";
 import { useEditorStore } from "@/state/editorStore";
 import { VEHICLE_CAP, useQuality } from "@/lib/quality";
 
 export interface VehicleSnapshot {
   matrices: Float32Array;
   colors: Float32Array;
+  taillightColors: Float32Array;
   activeCount: number;
   version: number;
 }
@@ -28,9 +30,13 @@ export interface SimMetricsState {
   throughputPerMinute: number;
   simTime: number;
   spawnedTotal: number;
+  completedTripsTotal: number;
   contracts: ContractStatus[];
   edgeSpeedRatios: EdgeSpeedRatio[];
   problemEdgeIds: string[];
+  edgeTrafficStats: EdgeTrafficStats[];
+  gridlockPenaltyTotal: number;
+  gridlockMarkers: [number, number, number][];
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -39,9 +45,13 @@ const DEFAULT_METRICS: SimMetricsState = {
   throughputPerMinute: 0,
   simTime: 0,
   spawnedTotal: 0,
+  completedTripsTotal: 0,
   contracts: [],
   edgeSpeedRatios: [],
   problemEdgeIds: [],
+  edgeTrafficStats: [],
+  gridlockPenaltyTotal: 0,
+  gridlockMarkers: [],
 };
 
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
@@ -64,7 +74,11 @@ const METRICS_UPDATE_INTERVAL_MS = 200;
 export function useTrafficSimulation() {
   const workerRef = useRef<Worker | null>(null);
   const snapshotRef = useRef<VehicleSnapshot | null>(null);
-  const pendingReturnRef = useRef<{ matrices: ArrayBuffer; colors: ArrayBuffer } | null>(null);
+  const pendingReturnRef = useRef<{
+    matrices: ArrayBuffer;
+    colors: ArrayBuffer;
+    taillightColors: ArrayBuffer;
+  } | null>(null);
   const versionCounterRef = useRef(0);
   const lastMetricsFlushRef = useRef(0);
 
@@ -78,6 +92,7 @@ export function useTrafficSimulation() {
   const mode = useEditorStore((s) => s.mode);
   const simEpoch = useEditorStore((s) => s.simEpoch);
   const running = mode === "simulate" && !userPaused;
+  const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
 
   useEffect(() => {
     const worker = new Worker(new URL("../sim/worker.ts", import.meta.url), {
@@ -96,16 +111,26 @@ export function useTrafficSimulation() {
         const pending = pendingReturnRef.current;
         if (pending) {
           worker.postMessage(
-            { type: "returnBuffers", matrices: pending.matrices, colors: pending.colors } satisfies WorkerInMessage,
-            [pending.matrices, pending.colors]
+            {
+              type: "returnBuffers",
+              matrices: pending.matrices,
+              colors: pending.colors,
+              taillightColors: pending.taillightColors,
+            } satisfies WorkerInMessage,
+            [pending.matrices, pending.colors, pending.taillightColors],
           );
         }
-        pendingReturnRef.current = { matrices: msg.matrices, colors: msg.colors };
+        pendingReturnRef.current = {
+          matrices: msg.matrices,
+          colors: msg.colors,
+          taillightColors: msg.taillightColors,
+        };
 
         versionCounterRef.current += 1;
         snapshotRef.current = {
           matrices: new Float32Array(msg.matrices),
           colors: new Float32Array(msg.colors),
+          taillightColors: new Float32Array(msg.taillightColors),
           activeCount: msg.activeCount,
           version: versionCounterRef.current,
         };
@@ -119,9 +144,13 @@ export function useTrafficSimulation() {
             throughputPerMinute: msg.throughputLastMinute,
             simTime: msg.simTime,
             spawnedTotal: msg.spawnedTotal,
+            completedTripsTotal: msg.completedTripsTotal,
             contracts: msg.contracts,
             edgeSpeedRatios: msg.edgeSpeedRatios,
             problemEdgeIds: msg.problemEdgeIds,
+            edgeTrafficStats: msg.edgeTrafficStats,
+            gridlockPenaltyTotal: msg.gridlockPenaltyTotal,
+            gridlockMarkers: msg.gridlockMarkers,
           });
         }
       }
@@ -207,8 +236,22 @@ export function useTrafficSimulation() {
   // `running` is derived (mode === "simulate" && !userPaused); keep the
   // worker's clock in sync with it whenever either input changes.
   useEffect(() => {
-    workerRef.current?.postMessage({ type: "setRunning", running } satisfies WorkerInMessage);
+    workerRef.current?.postMessage({
+      type: "setRunning",
+      running,
+    } satisfies WorkerInMessage);
   }, [running]);
+
+  // Vehicles normally render their own fixed paint color; the heatmap
+  // toggle switches them (and the road surface) over to live speed-ratio
+  // tinting instead — kept in sync with the worker since that's where
+  // per-vehicle colors are actually written into the snapshot buffer.
+  useEffect(() => {
+    workerRef.current?.postMessage({
+      type: "setColorMode",
+      heatmap: heatmapEnabled,
+    } satisfies WorkerInMessage);
+  }, [heatmapEnabled]);
 
   const setRunning = useCallback((value: boolean) => {
     setUserPaused(!value);
@@ -216,7 +259,10 @@ export function useTrafficSimulation() {
 
   const setSpeedMultiplier = useCallback((value: number) => {
     setSpeedMultiplierState(value);
-    workerRef.current?.postMessage({ type: "setSpeedMultiplier", value } satisfies WorkerInMessage);
+    workerRef.current?.postMessage({
+      type: "setSpeedMultiplier",
+      value,
+    } satisfies WorkerInMessage);
   }, []);
 
   const setDemand = useCallback((edgeId: string, vehiclesPerHour: number) => {
@@ -224,6 +270,19 @@ export function useTrafficSimulation() {
       type: "setDemand",
       edgeId,
       vehiclesPerHour,
+    } satisfies WorkerInMessage);
+  }, []);
+
+  /** Re-sends the current network to the worker with the same fixed seed, restarting traffic from a clean slate without leaving Simulate mode. */
+  const resetTraffic = useCallback(() => {
+    const worker = workerRef.current;
+    if (!worker) return;
+    const snapshot = useEditorStore.getState().getSnapshot();
+    worker.postMessage({ type: "reset" } satisfies WorkerInMessage);
+    worker.postMessage({
+      type: "updateNetwork",
+      network: snapshot,
+      seed: DEFAULT_SEED,
     } satisfies WorkerInMessage);
   }, []);
 
@@ -237,7 +296,10 @@ export function useTrafficSimulation() {
     setRunning,
     setSpeedMultiplier,
     setDemand,
+    resetTraffic,
   };
 }
 
-export type UseTrafficSimulationReturn = ReturnType<typeof useTrafficSimulation>;
+export type UseTrafficSimulationReturn = ReturnType<
+  typeof useTrafficSimulation
+>;

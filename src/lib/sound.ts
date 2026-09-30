@@ -44,6 +44,11 @@ export function setMuted(value: boolean): void {
       // ignore
     }
   }
+  if (value && ambience) {
+    ambience.humGain.gain.value = 0;
+    ambience.engineGain.gain.value = 0;
+    ambience.rumbleGain.gain.value = 0;
+  }
   for (const l of listeners) l(muted);
 }
 
@@ -118,4 +123,175 @@ export function playSuccessChime(): void {
   tone(523.25, 0, 0.16, 0.08, "sine");
   tone(659.25, 0.09, 0.16, 0.08, "sine");
   tone(783.99, 0.18, 0.22, 0.09, "sine");
+}
+
+/** A fuller, longer fanfare for finishing a whole campaign scenario. */
+export function playVictoryFanfare(): void {
+  if (muted) return;
+  tone(523.25, 0, 0.18, 0.09, "triangle");
+  tone(659.25, 0.1, 0.18, 0.09, "triangle");
+  tone(783.99, 0.2, 0.18, 0.09, "triangle");
+  tone(1046.5, 0.32, 0.4, 0.11, "triangle");
+  tone(1318.5, 0.34, 0.38, 0.07, "sine");
+}
+
+/** A short, low descending "womp" when a scenario run ends without a win. */
+export function playFailTone(): void {
+  if (muted) return;
+  tone(220, 0, 0.22, 0.09, "sawtooth");
+  tone(164.81, 0.14, 0.3, 0.08, "sawtooth");
+}
+
+/** A brief filtered-noise whoosh while dragging out a new road segment. */
+export function playDrawWhoosh(): void {
+  if (muted) return;
+  noiseBurst(0.1, 0.05, 2200);
+}
+
+/** A low, brief double-honk when a road segment breaks down to Level of Service F. */
+export function playGridlockHonk(): void {
+  if (muted) return;
+  tone(240, 0, 0.14, 0.07, "sawtooth");
+  tone(190, 0.16, 0.16, 0.07, "sawtooth");
+}
+
+/** A quick double clack-clack when a vehicle rolls over a bridge expansion joint. */
+export function playExpansionJointClack(): void {
+  if (muted) return;
+  noiseBurst(0.035, 0.05, 3200);
+  tone(140, 0.05, 0.03, 0.03, "square");
+  noiseBurst(0.035, 0.045, 3000);
+  tone(130, 0.14, 0.03, 0.025, "square");
+}
+
+// ---------------------------------------------------------------------------
+// Persistent ambience: a distant-highway hum (zoomed out) that crossfades
+// into a closer engine buzz (zoomed in), driven by camera zoom every frame.
+// Lazily created on first use and never recreated, so gain/frequency changes
+// are just parameter automation rather than restarting audio graphs.
+// ---------------------------------------------------------------------------
+
+interface AmbienceGraph {
+  humGain: GainNode;
+  engineGain: GainNode;
+  /** The detuned oscillator pair driving the close-up engine buzz — kept around so their pitch can track average traffic speed. */
+  engineOscillators: OscillatorNode[];
+  /** A fixed low rumble standing in for the truck fraction of the fleet, faded in only while traffic is actually moving. */
+  rumbleGain: GainNode;
+}
+
+let ambience: AmbienceGraph | null = null;
+
+function ensureAmbience(): AmbienceGraph | null {
+  const audio = getCtx();
+  if (!audio) return null;
+  if (ambience) return ambience;
+
+  // Distant highway hum: filtered looping noise, low and steady.
+  const humSampleCount = audio.sampleRate * 2;
+  const humBuffer = audio.createBuffer(1, humSampleCount, audio.sampleRate);
+  const humData = humBuffer.getChannelData(0);
+  for (let i = 0; i < humSampleCount; i++) humData[i] = Math.random() * 2 - 1;
+  const humSource = audio.createBufferSource();
+  humSource.buffer = humBuffer;
+  humSource.loop = true;
+  const humFilter = audio.createBiquadFilter();
+  humFilter.type = "lowpass";
+  humFilter.frequency.value = 220;
+  const humGain = audio.createGain();
+  humGain.gain.value = 0;
+  humSource.connect(humFilter);
+  humFilter.connect(humGain);
+  humGain.connect(audio.destination);
+  humSource.start();
+
+  // Close-up engine buzz: a detuned pair of low sawtooth oscillators.
+  const engineGain = audio.createGain();
+  engineGain.gain.value = 0;
+  const engineFilter = audio.createBiquadFilter();
+  engineFilter.type = "lowpass";
+  engineFilter.frequency.value = 480;
+  engineFilter.connect(engineGain);
+  engineGain.connect(audio.destination);
+  const engineOscillators: OscillatorNode[] = [];
+  for (const detune of [-6, 6]) {
+    const osc = audio.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.value = 55;
+    osc.detune.value = detune;
+    osc.connect(engineFilter);
+    osc.start();
+    engineOscillators.push(osc);
+  }
+
+  // Truck rumble: a low, steady sawtooth standing in for the ~15% of the
+  // fleet simulated as heavy trucks — fades in only while traffic is
+  // actually moving, since we don't plumb per-vehicle class to the main
+  // thread and average speed is already a reasonable proxy for "there's a
+  // live network to hear."
+  const rumbleGain = audio.createGain();
+  rumbleGain.gain.value = 0;
+  const rumbleFilter = audio.createBiquadFilter();
+  rumbleFilter.type = "lowpass";
+  rumbleFilter.frequency.value = 150;
+  rumbleFilter.connect(rumbleGain);
+  rumbleGain.connect(audio.destination);
+  const rumbleOsc = audio.createOscillator();
+  rumbleOsc.type = "sawtooth";
+  rumbleOsc.frequency.value = 38;
+  rumbleOsc.connect(rumbleFilter);
+  rumbleOsc.start();
+
+  ambience = { humGain, engineGain, engineOscillators, rumbleGain };
+  return ambience;
+}
+
+/**
+ * Crossfades the ambient bed based on camera zoom: `zoomFactor` should be
+ * ~0 fully zoomed out (highway hum dominant) to ~1 fully zoomed in (engine
+ * buzz dominant). Safe to call every frame — it only nudges gain values.
+ */
+export function updateAmbience(zoomFactor: number): void {
+  if (muted) {
+    if (ambience) {
+      ambience.humGain.gain.value = 0;
+      ambience.engineGain.gain.value = 0;
+      ambience.rumbleGain.gain.value = 0;
+    }
+    return;
+  }
+  const graph = ensureAmbience();
+  if (!graph) return;
+  const t = Math.min(1, Math.max(0, zoomFactor));
+  const audio = getCtx();
+  const now = audio?.currentTime ?? 0;
+  graph.humGain.gain.linearRampToValueAtTime(0.05 * (1 - t), now + 0.3);
+  graph.engineGain.gain.linearRampToValueAtTime(0.035 * t, now + 0.3);
+}
+
+const ENGINE_IDLE_FREQ = 55;
+const ENGINE_CRUISE_FREQ = 92;
+/** Average speed (mph) at which the engine pitch reaches its cruise ceiling. */
+const ENGINE_PITCH_REFERENCE_MPH = 55;
+
+/**
+ * Ties the close-up engine buzz's pitch and the truck-rumble layer's level
+ * to live traffic conditions: `avgSpeedMph` is the sim's current
+ * network-wide average speed (0 when the network is empty or paused).
+ * Safe to call every frame — it only nudges existing oscillator/gain
+ * parameters, never rebuilds the audio graph.
+ */
+export function updateEngineDynamics(avgSpeedMph: number): void {
+  if (muted) return;
+  const graph = ensureAmbience();
+  if (!graph) return;
+  const audio = getCtx();
+  const now = audio?.currentTime ?? 0;
+  const speedT = Math.min(1, Math.max(0, avgSpeedMph / ENGINE_PITCH_REFERENCE_MPH));
+  const freq = ENGINE_IDLE_FREQ + speedT * (ENGINE_CRUISE_FREQ - ENGINE_IDLE_FREQ);
+  for (const osc of graph.engineOscillators) {
+    osc.frequency.linearRampToValueAtTime(freq, now + 0.4);
+  }
+  const trafficMoving = avgSpeedMph > 0.5 ? 1 : 0;
+  graph.rumbleGain.gain.linearRampToValueAtTime(trafficMoving * 0.02, now + 0.6);
 }

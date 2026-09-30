@@ -6,11 +6,14 @@ import {
   MOBIL_DEFAULTS,
   NO_LEADER_GAP,
   clamp,
+  climbSensitivityFromWeightToPower,
+  gradeAccelFtps2,
   idmAccel,
   mobilEvaluate,
   type MobilInputs,
 } from "./idm";
 import { distanceToT, laneCenterPointAt } from "./laneGeometry";
+import { computeEdgeTrafficStats, type EdgeTrafficStats } from "./los";
 import { assembleNetwork, computeRoute, patchEdge } from "./network";
 import {
   MAX_VEHICLES,
@@ -89,16 +92,30 @@ const contractSamples = new Map<string, ContractSample[]>();
 let running = false;
 let speedMultiplier = 1;
 let simTime = 0;
+/** When true, vehicle body colors are overridden by their live speed ratio (the heatmap) instead of their fixed paint color. */
+let heatmapColorMode = false;
 let nextVehicleId = 1;
 let spawnedTotal = 0;
 /** Soft cap on concurrent vehicles (<= MAX_VEHICLES, which sizes the buffers); lowered by the main thread in low-quality mode. */
 let maxVehicles = MAX_VEHICLES;
+let completedTripsTotal = 0;
 let accumulator = 0;
 let lastWallTimeMs = 0;
 
 const vehicles = new Map<number, VehicleState>();
 const vehiclePool: VehicleState[] = [];
 const despawnTimestamps: number[] = [];
+
+// ---------------------------------------------------------------------------
+// Gridlock detection: a vehicle stuck at near-zero speed for GRIDLOCK_DESPAWN_S
+// is forcibly removed (with a throughput penalty) rather than sitting frozen
+// forever. It gets a warning window first so the player sees it coming.
+// ---------------------------------------------------------------------------
+
+const STUCK_SPEED_THRESHOLD_FTPS = 1.5; // ~1 mph
+const GRIDLOCK_WARNING_S = 18;
+const GRIDLOCK_DESPAWN_S = 25;
+let gridlockPenaltyTotal = 0;
 
 // ---------------------------------------------------------------------------
 // Scratch objects (allocation-free hot path)
@@ -112,6 +129,9 @@ const _scale = new THREE.Vector3(1, 1, 1);
 const _matrix = new THREE.Matrix4();
 const _color = new THREE.Color();
 const FORWARD_AXIS = new THREE.Vector3(0, 0, 1);
+const _curveTangentA = new THREE.Vector3();
+const _curveTangentB = new THREE.Vector3();
+const _gradeTangent = new THREE.Vector3();
 
 // Blue -> amber -> red (never green) so free-flow vs. stopped traffic reads
 // correctly for red-green colorblind players, who lose the green/red contrast
@@ -120,6 +140,14 @@ const COLOR_FREE = new THREE.Color(0x3b82f6);
 const COLOR_SLOW = new THREE.Color(0xeab308);
 const COLOR_STOP = new THREE.Color(0xef4444);
 
+/** Body paint palettes, sampled once per vehicle at spawn — a wide mix for sedans, a duller fleet-like set for semis. */
+const SEDAN_PALETTE = [0xf4f4f5, 0x1c1c22, 0x8a8f98, 0xb0281c, 0x2452a6, 0x2f6b3a, 0xc9a13b, 0x5b5f66];
+const TRUCK_PALETTE = [0xf4f4f5, 0xc23b2e, 0x2452a6, 0x8a8f98, 0x1c1c22];
+const _spawnColor = new THREE.Color();
+
+/** Vehicles decelerating harder than this (ft/s^2) get a brightened, near-white-hot brake light instead of a dim cruising glow. */
+const HARD_BRAKE_ACCEL_THRESHOLD = -4;
+
 // ---------------------------------------------------------------------------
 // Double-buffered transfer pool
 // ---------------------------------------------------------------------------
@@ -127,12 +155,14 @@ const COLOR_STOP = new THREE.Color(0xef4444);
 interface BufferSet {
   matrices: Float32Array;
   colors: Float32Array;
+  taillightColors: Float32Array;
 }
 
 function createBufferSet(): BufferSet {
   return {
     matrices: new Float32Array(MAX_VEHICLES * 16),
     colors: new Float32Array(MAX_VEHICLES * 3),
+    taillightColors: new Float32Array(MAX_VEHICLES * 3),
   };
 }
 
@@ -169,6 +199,12 @@ function acquireVehicle(): VehicleState {
     destinationEdgeId: "",
     spawnTime: 0,
     wrongLaneWaitS: 0,
+    stuckTimeS: 0,
+    isTruck: false,
+    weightToPowerLbPerHp: 25,
+    bodyColorR: 1,
+    bodyColorG: 1,
+    bodyColorB: 1,
   };
 }
 
@@ -248,6 +284,8 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   congestionTimer.clear();
   problemEdges.clear();
   lastSnapshotSimTime = simTime;
+  gridlockPenaltyTotal = 0;
+  completedTripsTotal = 0;
 
   for (const [id, v] of vehicles) {
     if (!network.edgesById.has(v.edgeId)) {
@@ -264,6 +302,8 @@ function resetRun() {
   simTime = 0;
   accumulator = 0;
   spawnedTotal = 0;
+  completedTripsTotal = 0;
+  gridlockPenaltyTotal = 0;
   despawnTimestamps.length = 0;
   demandByEntry.clear();
   nextSpawnTimeByEntry.clear();
@@ -330,7 +370,17 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.routeIndex = 0;
   v.destinationEdgeId = destinationEdgeId;
 
-  const isTruck = rng() < 0.08;
+  // 15% semi-trucks, 85% passenger sedans, each with distinct accel/braking
+  // physics and a distinct weight-to-power ratio driving how badly road
+  // grade hits them (see idmAccelForVehicle / gradeAccelFtps2).
+  const isTruck = rng() < 0.15;
+  v.isTruck = isTruck;
+  const palette = isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
+  _spawnColor.set(palette[Math.floor(rng() * palette.length)]);
+  v.bodyColorR = _spawnColor.r;
+  v.bodyColorG = _spawnColor.g;
+  v.bodyColorB = _spawnColor.b;
+  v.weightToPowerLbPerHp = isTruck ? randRange(260, 340) : randRange(18, 32);
   v.length = isTruck ? randRange(32, 42) : randRange(13, 19);
   v.maxAccel = isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
   v.comfortBrake = isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
@@ -343,6 +393,7 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.laneChangeCooldown = randRange(0, 60);
   v.spawnTime = simTime;
   v.wrongLaneWaitS = 0;
+  v.stuckTimeS = 0;
 
   vehicles.set(v.id, v);
   spawnedTotal++;
@@ -579,8 +630,46 @@ function findLeaderGapForVehicle(v: VehicleState, edge: Edge3D): GapInfo {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Curvature-based speed cap: sample the tangent direction a short lookahead
+// ahead of the vehicle and behind it; a bigger swing means a tighter curve,
+// which caps how fast a driver is willing to take it (independent of the
+// road's posted limit) — sharp bends slow traffic down like a real curve
+// advisory speed, not just a hard sign-post number.
+// ---------------------------------------------------------------------------
+
+const CURVATURE_LOOKAHEAD_FT = 55;
+const COMFORTABLE_LATERAL_ACCEL_FTPS2 = 11;
+
+function curvatureSpeedCapFtps(edge: Edge3D, distanceAlongEdge: number): number {
+  if (edge.length <= CURVATURE_LOOKAHEAD_FT) return Infinity;
+  const t0 = distanceToT(edge, Math.max(0, distanceAlongEdge - CURVATURE_LOOKAHEAD_FT / 2));
+  const t1 = distanceToT(edge, Math.min(edge.length, distanceAlongEdge + CURVATURE_LOOKAHEAD_FT / 2));
+  edge.spline.getTangentAt(t0, _curveTangentA);
+  edge.spline.getTangentAt(t1, _curveTangentB);
+  const angleRad = _curveTangentA.angleTo(_curveTangentB);
+  if (angleRad < 0.015) return Infinity; // effectively straight — no cap
+  const turnRadiusFt = CURVATURE_LOOKAHEAD_FT / angleRad;
+  return Math.sqrt(turnRadiusFt * COMFORTABLE_LATERAL_ACCEL_FTPS2);
+}
+
+/**
+ * Sine of the road's slope angle at a point along an edge, positive =
+ * climbing in the vehicle's direction of travel. A unit tangent vector's
+ * y-component is exactly sin(theta) for theta = atan(rise/run), so this is
+ * a direct sample rather than a separate atan/sin computation.
+ */
+function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
+  const t = distanceToT(edge, clamp(distanceAlongEdge, 0, edge.length));
+  edge.spline.getTangentAt(t, _gradeTangent);
+  return _gradeTangent.y;
+}
+
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
-  const v0 = mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05);
+  const v0 = Math.min(
+    mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05),
+    curvatureSpeedCapFtps(edge, v.distanceAlongEdge)
+  );
   const deltaV = v.speed - gapInfo.leaderSpeed;
   const params = {
     a: v.maxAccel,
@@ -590,7 +679,11 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
     v0,
     delta: IDM_DEFAULTS.delta,
   };
-  return clamp(idmAccel(v.speed, gapInfo.gap, deltaV, v0, params), -20, params.a);
+  const gradeAccel = gradeAccelFtps2(
+    edgeSinThetaAt(edge, v.distanceAlongEdge),
+    climbSensitivityFromWeightToPower(v.weightToPowerLbPerHp)
+  );
+  return clamp(idmAccel(v.speed, gapInfo.gap, deltaV, v0, params) + gradeAccel, -20, params.a);
 }
 
 // ---------------------------------------------------------------------------
@@ -613,7 +706,11 @@ function pairAccel(followerV: VehicleState, followerDist: number, leader: Vehicl
     v0,
     delta: IDM_DEFAULTS.delta,
   };
-  return clamp(idmAccel(followerV.speed, gap, followerV.speed - leaderSpeed, v0, params), -20, params.a);
+  const gradeAccel = gradeAccelFtps2(
+    edgeSinThetaAt(edge, followerDist),
+    climbSensitivityFromWeightToPower(followerV.weightToPowerLbPerHp)
+  );
+  return clamp(idmAccel(followerV.speed, gap, followerV.speed - leaderSpeed, v0, params) + gradeAccel, -20, params.a);
 }
 
 function tryLaneChange(v: VehicleState, edge: Edge3D) {
@@ -647,6 +744,13 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
       mergeUrgency = clamp(1 - distanceToNode / 500, 0.15, 1);
     }
   }
+
+  // A sedan stuck behind a truck that's crawling well under the sedan's own
+  // desired speed (typically a heavy semi losing the fight against a steep
+  // grade) gets an extra shove toward overtaking, on top of whatever
+  // incentive MOBIL's own acceleration-gain math already produces.
+  const followerV0 = mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05);
+  const truckOvertakeBias = !v.isTruck && oldLeader?.isTruck && oldLeader.speed < followerV0 * 0.6 ? 6 : 0;
 
   let bestLane = -1;
   let bestIncentive = -Infinity;
@@ -684,7 +788,9 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
     const oldFollowerAccelAfter = oldFollower ? pairAccel(oldFollower, oldFollower.distanceAlongEdge, oldLeader, edge) : 0;
 
     const candidateDirection = candidateLane > v.laneIndex ? 1 : -1;
-    const extraBias = requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * 8 : 0;
+    const extraBias =
+      (requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * 8 : 0) +
+      truckOvertakeBias;
 
     const inputs: MobilInputs = {
       currentAccel: v.accel,
@@ -776,11 +882,25 @@ function step(dt: number) {
   }
 
   const toRemove: number[] = [];
+  const gridlockRemoved = new Set<number>();
   for (const v of vehicles.values()) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
 
     v.speed = clamp(v.speed + v.accel * dt, 0, MAX_SPEED_FTPS);
+
+    if (v.speed < STUCK_SPEED_THRESHOLD_FTPS) {
+      v.stuckTimeS += dt;
+    } else {
+      v.stuckTimeS = 0;
+    }
+    if (v.stuckTimeS >= GRIDLOCK_DESPAWN_S) {
+      toRemove.push(v.id);
+      gridlockRemoved.add(v.id);
+      gridlockPenaltyTotal++;
+      continue;
+    }
+
     const deltaDist = v.speed * dt;
     v.distanceAlongEdge += deltaDist;
 
@@ -808,7 +928,12 @@ function step(dt: number) {
   for (const id of toRemove) {
     const v = vehicles.get(id);
     if (v) {
-      despawnTimestamps.push(simTime);
+      // Only trips that actually reached their destination count toward
+      // throughput — a gridlock-forced removal is a penalty, not a completion.
+      if (!gridlockRemoved.has(id)) {
+        despawnTimestamps.push(simTime);
+        completedTripsTotal++;
+      }
       releaseVehicle(v);
     }
     vehicles.delete(id);
@@ -825,26 +950,28 @@ function step(dt: number) {
 // Output buffer writing
 // ---------------------------------------------------------------------------
 
+/** Green(blue) >80% of the limit, amber 40-80%, red below 40% — matches the spec's 3-tier congestion coloring, substituting blue for green so the free-flow/stopped contrast survives red-green colorblindness. */
 function speedColorInto(ratio: number, out: THREE.Color) {
   const r = clamp(ratio, 0, 1.2);
-  if (r >= 0.75) {
+  if (r > 0.8) {
     out.copy(COLOR_FREE);
-  } else if (r <= 0.2) {
-    out.copy(COLOR_STOP);
-  } else if (r <= 0.5) {
-    out.lerpColors(COLOR_STOP, COLOR_SLOW, (r - 0.2) / 0.3);
+  } else if (r >= 0.4) {
+    out.copy(COLOR_SLOW);
   } else {
-    out.lerpColors(COLOR_SLOW, COLOR_FREE, (r - 0.5) / 0.25);
+    out.copy(COLOR_STOP);
   }
 }
 
 const edgeSpeedRatioSum = new Map<string, number>();
 const edgeSpeedRatioCount = new Map<string, number>();
+const edgeSpeedSumMph = new Map<string, number>();
 
-function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: number } {
-  if (!network) return { activeCount: 0, avgSpeedFtS: 0 };
+function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: number; gridlockMarkers: [number, number, number][] } {
+  if (!network) return { activeCount: 0, avgSpeedFtS: 0, gridlockMarkers: [] };
   edgeSpeedRatioSum.clear();
   edgeSpeedRatioCount.clear();
+  edgeSpeedSumMph.clear();
+  const gridlockMarkers: [number, number, number][] = [];
   let i = 0;
   let speedSum = 0;
   for (const v of vehicles.values()) {
@@ -852,27 +979,56 @@ function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: numb
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
 
+    // Trucks get a taller, slightly wider box on top of their already-longer
+    // length, so an 18-wheeler reads as a distinct bulkier silhouette next
+    // to a sedan using nothing but the one shared box geometry.
+    const widthScale = v.isTruck ? 1.15 : 1;
+    const heightScale = v.isTruck ? 1.55 : 1;
+
     const t = distanceToT(edge, v.distanceAlongEdge);
     laneCenterPointAt(edge, t, v.laneIndex, _tangent, _right, _pos);
-    _pos.y += VEHICLE_HEIGHT_FT / 2;
+    // The box's local origin is its center, so its footprint sits at ground
+    // level only if we lift it by half of its *scaled* height — using the
+    // unscaled height here would leave taller (truck) boxes sunk into the
+    // pavement by the difference.
+    _pos.y += (VEHICLE_HEIGHT_FT * heightScale) / 2;
+
+    if (v.stuckTimeS >= GRIDLOCK_WARNING_S) {
+      gridlockMarkers.push([_pos.x, _pos.y, _pos.z]);
+    }
 
     _quat.setFromUnitVectors(FORWARD_AXIS, _tangent);
-    _scale.set(1, 1, v.length / VEHICLE_LENGTH_FT);
+    _scale.set(widthScale, heightScale, v.length / VEHICLE_LENGTH_FT);
     _matrix.compose(_pos, _quat, _scale);
     _matrix.toArray(buf.matrices, i * 16);
 
     const speedLimitFtps = mphToFtps(edge.speedLimitMph);
     const ratio = v.speed / speedLimitFtps;
-    speedColorInto(ratio, _color);
-    _color.toArray(buf.colors, i * 3);
+    if (heatmapColorMode) {
+      speedColorInto(ratio, _color);
+      _color.toArray(buf.colors, i * 3);
+    } else {
+      buf.colors[i * 3] = v.bodyColorR;
+      buf.colors[i * 3 + 1] = v.bodyColorG;
+      buf.colors[i * 3 + 2] = v.bodyColorB;
+    }
+
+    // Dim cruising glow that brightens toward white-hot as deceleration
+    // ramps from light braking (-1 ft/s^2) up to the hard-brake threshold,
+    // so a following driver (or player) can read braking intensity at a glance.
+    const brakeT = clamp((-v.accel - 1) / (-HARD_BRAKE_ACCEL_THRESHOLD - 1), 0, 1);
+    buf.taillightColors[i * 3] = 0.55 + brakeT * 1.05;
+    buf.taillightColors[i * 3 + 1] = 0.05 + brakeT * 0.2;
+    buf.taillightColors[i * 3 + 2] = 0.05 + brakeT * 0.2;
 
     edgeSpeedRatioSum.set(edge.id, (edgeSpeedRatioSum.get(edge.id) ?? 0) + ratio);
     edgeSpeedRatioCount.set(edge.id, (edgeSpeedRatioCount.get(edge.id) ?? 0) + 1);
+    edgeSpeedSumMph.set(edge.id, (edgeSpeedSumMph.get(edge.id) ?? 0) + ftpsToMph(v.speed));
 
     speedSum += v.speed;
     i++;
   }
-  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0 };
+  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0, gridlockMarkers };
 }
 
 function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
@@ -880,6 +1036,17 @@ function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
   for (const [edgeId, sum] of edgeSpeedRatioSum) {
     const count = edgeSpeedRatioCount.get(edgeId) ?? 1;
     result.push([edgeId, sum / count]);
+  }
+  return result;
+}
+
+function computeEdgeTrafficStatsList(): EdgeTrafficStats[] {
+  if (!network) return [];
+  const result: EdgeTrafficStats[] = [];
+  for (const edge of network.edges) {
+    const count = edgeSpeedRatioCount.get(edge.id) ?? 0;
+    const avgSpeedMph = count > 0 ? (edgeSpeedSumMph.get(edge.id) ?? 0) / count : 0;
+    result.push(computeEdgeTrafficStats(edge.id, count, avgSpeedMph, edge.length, edge.lanes, edge.roadClassId));
   }
   return result;
 }
@@ -923,26 +1090,32 @@ function updateCongestionState(deltaSimTime: number) {
 
 function postSnapshot() {
   const buf = acquireBufferSet();
-  const { activeCount, avgSpeedFtS } = writeSnapshot(buf);
+  const { activeCount, avgSpeedFtS, gridlockMarkers } = writeSnapshot(buf);
   const deltaSimTime = Math.max(0, simTime - lastSnapshotSimTime);
   lastSnapshotSimTime = simTime;
   updateCongestionState(deltaSimTime);
   const matricesBuffer = buf.matrices.buffer as ArrayBuffer;
   const colorsBuffer = buf.colors.buffer as ArrayBuffer;
+  const taillightColorsBuffer = buf.taillightColors.buffer as ArrayBuffer;
   const message: WorkerOutMessage = {
     type: "tick",
     matrices: matricesBuffer,
     colors: colorsBuffer,
+    taillightColors: taillightColorsBuffer,
     activeCount,
     simTime,
     avgSpeedFtS,
     throughputLastMinute: despawnTimestamps.length,
     spawnedTotal,
+    completedTripsTotal,
     contracts: computeContracts(),
     edgeSpeedRatios: computeEdgeSpeedRatios(),
     problemEdgeIds: Array.from(problemEdges),
+    edgeTrafficStats: computeEdgeTrafficStatsList(),
+    gridlockPenaltyTotal,
+    gridlockMarkers,
   };
-  ctx.postMessage(message, [matricesBuffer, colorsBuffer]);
+  ctx.postMessage(message, [matricesBuffer, colorsBuffer, taillightColorsBuffer]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1019,10 +1192,14 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
         nextSpawnTimeByEntry.set(msg.edgeId, sampleExponentialInterarrival(msg.vehiclesPerHour));
       }
       break;
+    case "setColorMode":
+      heatmapColorMode = msg.heatmap;
+      break;
     case "returnBuffers":
       bufferPool.push({
         matrices: new Float32Array(msg.matrices),
         colors: new Float32Array(msg.colors),
+        taillightColors: new Float32Array(msg.taillightColors),
       });
       break;
   }

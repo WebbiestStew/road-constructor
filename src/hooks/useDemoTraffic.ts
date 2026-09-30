@@ -24,7 +24,7 @@ const DEMO_SPEED = 2;
 export function useDemoTraffic(network: NetworkSnapshot, active: boolean, visible: boolean) {
   const snapshotRef = useRef<VehicleSnapshot | null>(null);
   const workerRef = useRef<Worker | null>(null);
-  const pendingReturnRef = useRef<{ matrices: ArrayBuffer; colors: ArrayBuffer } | null>(null);
+  const pendingReturnRef = useRef<{ matrices: ArrayBuffer; colors: ArrayBuffer; taillightColors: ArrayBuffer } | null>(null);
   const versionRef = useRef(0);
   const lastStatsRef = useRef(0);
   const [stats, setStats] = useState<DemoStats>({ cars: 0, avgSpeedMph: 0, throughputPerMinute: 0 });
@@ -42,16 +42,22 @@ export function useDemoTraffic(network: NetworkSnapshot, active: boolean, visibl
       const pending = pendingReturnRef.current;
       if (pending) {
         worker.postMessage(
-          { type: "returnBuffers", matrices: pending.matrices, colors: pending.colors } satisfies WorkerInMessage,
-          [pending.matrices, pending.colors]
+          {
+            type: "returnBuffers",
+            matrices: pending.matrices,
+            colors: pending.colors,
+            taillightColors: pending.taillightColors,
+          } satisfies WorkerInMessage,
+          [pending.matrices, pending.colors, pending.taillightColors]
         );
       }
-      pendingReturnRef.current = { matrices: msg.matrices, colors: msg.colors };
+      pendingReturnRef.current = { matrices: msg.matrices, colors: msg.colors, taillightColors: msg.taillightColors };
 
       versionRef.current += 1;
       snapshotRef.current = {
         matrices: new Float32Array(msg.matrices),
         colors: new Float32Array(msg.colors),
+        taillightColors: new Float32Array(msg.taillightColors),
         activeCount: msg.activeCount,
         version: versionRef.current,
       };

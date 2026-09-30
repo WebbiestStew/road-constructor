@@ -73,6 +73,24 @@ export function IconPause(props: IconProps) {
   );
 }
 
+export function IconArrowLeft(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M19 12H5" />
+      <path d="M11 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
+export function IconReset(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 12a8 8 0 1 1 2.6 5.9" />
+      <path d="M4 19v-5h5" />
+    </svg>
+  );
+}
+
 export function IconCoin(props: IconProps) {
   return (
     <svg {...base} {...props}>
@@ -150,6 +168,14 @@ export function IconRoundabout(props: IconProps) {
       <path d="M12 2.5v3.4M12 18.1v3.4M2.5 12h3.4M18.1 12h3.4" opacity={0.35} />
       <path d="M17.3 8.2a7.5 7.5 0 1 1-2.6-2.9" />
       <path d="M17.8 4.2l.6 3.8-3.8-.4" />
+    </svg>
+  );
+}
+
+export function IconCheck(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 12.5l4.5 4.5L19 7" />
     </svg>
   );
 }
@@ -266,11 +292,74 @@ export function IconHeatmap(props: IconProps) {
   );
 }
 
+export function IconRideAlong(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3.5 8.5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2z" />
+      <path d="M15.5 10.8l4-2.3v7l-4-2.3" />
+    </svg>
+  );
+}
+
 export function IconSpeakerOff(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M4.5 9.5v5h3.2L13 19V5l-5.3 4.5z" />
       <path d="M16 9.5l4.5 5M20.5 9.5L16 14.5" />
+    </svg>
+  );
+}
+
+export function IconSun(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 3v2.2M12 18.8V21M4.4 4.4l1.55 1.55M18.05 18.05L19.6 19.6M3 12h2.2M18.8 12H21M4.4 19.6l1.55-1.55M18.05 5.95L19.6 4.4" />
+    </svg>
+  );
+}
+
+export function IconTurnaround(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M10 5v9a5.5 5.5 0 0 0 11 0v-2" />
+      <path d="M5.5 9L10 4.5 14.5 9" />
+    </svg>
+  );
+}
+
+export function IconStar(props: IconProps) {
+  return (
+    <svg {...base} {...props} fill="currentColor" stroke="none">
+      <path d="M12 2.8l2.7 5.9 6.4.6-4.8 4.4 1.4 6.4L12 16.9 6.3 20.1l1.4-6.4-4.8-4.4 6.4-.6z" />
+    </svg>
+  );
+}
+
+export function IconShare(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="18" cy="5" r="2.4" />
+      <circle cx="6" cy="12" r="2.4" />
+      <circle cx="18" cy="19" r="2.4" />
+      <path d="M8.1 10.8l7.8-4.2M8.1 13.2l7.8 4.2" />
+    </svg>
+  );
+}
+
+export function IconMoon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M20 14.2A8.2 8.2 0 1 1 9.8 4a6.7 6.7 0 0 0 10.2 10.2z" />
+    </svg>
+  );
+}
+
+export function IconNight(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M19 13.6A7.4 7.4 0 1 1 10.4 5a6 6 0 0 0 8.6 8.6z" />
+      <path d="M18.5 3.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -304,7 +393,7 @@ export function IconJunction(props: IconProps) {
   );
 }
 
-export function IconArrowLeft(props: IconProps) {
+export function IconTurnLeft(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M17 20v-7a4 4 0 0 0-4-4H6" />
@@ -313,7 +402,7 @@ export function IconArrowLeft(props: IconProps) {
   );
 }
 
-export function IconArrowUp(props: IconProps) {
+export function IconGoStraight(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M12 21V4" />
@@ -322,7 +411,7 @@ export function IconArrowUp(props: IconProps) {
   );
 }
 
-export function IconArrowRight(props: IconProps) {
+export function IconTurnRight(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M7 20v-7a4 4 0 0 1 4-4h7" />

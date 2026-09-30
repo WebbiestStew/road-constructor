@@ -312,7 +312,7 @@ function Sections() {
               <h3 className="font-display mt-1 text-xl font-extrabold uppercase text-[#241b3d]">{s.name}</h3>
               <p className="mt-1 text-sm font-semibold text-zinc-700">{s.tagline}</p>
               <p className="mt-3 text-xs font-bold text-zinc-500">
-                Goal: {s.targetThroughputPerMinute} cars/min · {s.targetAvgSpeedMph} mph avg ·{" "}
+                Goal: {s.targetAvgSpeedMph} mph avg · {s.durationS}s ·{" "}
                 {s.kind === "manage" ? "roads locked" : `$${(s.startingBudget / 1000).toFixed(0)}k budget`}
               </p>
             </div>

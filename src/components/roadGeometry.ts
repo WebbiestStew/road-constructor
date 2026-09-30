@@ -29,7 +29,9 @@ export function sweepProfileAlongCurve(
   centerlineOffsetFt: number,
   profile: ProfilePoint[],
   segments: number,
-  closed = false
+  closed = false,
+  tStart = 0,
+  tEnd = 1
 ): THREE.BufferGeometry {
   const tangentScratch = new THREE.Vector3();
   const rightScratch = new THREE.Vector3();
@@ -38,7 +40,7 @@ export function sweepProfileAlongCurve(
 
   const rings: THREE.Vector3[][] = [];
   for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
+    const t = tStart + (tEnd - tStart) * (i / segments);
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
     const railOrigin = pointScratch.clone().addScaledVector(rightScratch, centerlineOffsetFt);
@@ -73,9 +75,24 @@ export function sweepProfileAlongCurve(
   return geometry;
 }
 
-/** Builds the flat paved asphalt ribbon for an edge, spanning all lanes plus shoulders. */
-export function buildAsphaltRibbon(edge: Edge3D, shoulderFt = 4): THREE.BufferGeometry {
+/**
+ * Builds the paved asphalt surface for an edge, spanning all lanes plus
+ * shoulders. Flat by default (a single top face); pass `deckThicknessFt` for
+ * an elevated edge to instead extrude it into a solid slab with visible
+ * side faces and an underside, like a real bridge deck instead of an
+ * infinitely thin plane.
+ */
+export function buildAsphaltRibbon(edge: Edge3D, shoulderFt = 4, deckThicknessFt = 0): THREE.BufferGeometry {
   const halfWidth = (edge.lanes * edge.laneWidthFt) / 2 + shoulderFt;
+  if (deckThicknessFt > 0) {
+    const profile: ProfilePoint[] = [
+      { x: -halfWidth, y: 0 },
+      { x: halfWidth, y: 0 },
+      { x: halfWidth, y: -deckThicknessFt },
+      { x: -halfWidth, y: -deckThicknessFt },
+    ];
+    return sweepProfileAlongCurve(edge, 0, profile, segmentsForLength(edge.length), true);
+  }
   const profile: ProfilePoint[] = [
     { x: -halfWidth, y: 0 },
     { x: halfWidth, y: 0 },
@@ -97,13 +114,59 @@ export function buildSolidStripe(
   return sweepProfileAlongCurve(edge, lateralOffsetFt, profile, segmentsForLength(edge.length, 12));
 }
 
+/** Builds a solid stop-bar stripe spanning the full paved width, a short distance before the edge's end — the painted line drivers hold behind at a junction. */
+export function buildStopBar(
+  edge: Edge3D,
+  distanceBeforeEndFt = 4,
+  thicknessFt = 1.5,
+  verticalOffsetFt = 0.035
+): THREE.BufferGeometry {
+  const halfWidth = (edge.lanes * edge.laneWidthFt) / 2;
+  const profile: ProfilePoint[] = [
+    { x: -halfWidth, y: verticalOffsetFt },
+    { x: halfWidth, y: verticalOffsetFt },
+  ];
+  const distEnd = Math.max(thicknessFt, edge.length - distanceBeforeEndFt);
+  const distStart = Math.max(0, distEnd - thicknessFt);
+  const tStart = clamp01(distStart / edge.length);
+  const tEnd = clamp01(distEnd / edge.length);
+  return sweepProfileAlongCurve(edge, 0, profile, 2, false, tStart, tEnd);
+}
+
+/** Builds a "ladder" crosswalk: several longitudinal bars spread across the paved width, in a short band before the edge's end. */
+export function buildCrosswalkBars(
+  edge: Edge3D,
+  distanceBeforeEndFt = 18,
+  bandLengthFt = 10,
+  barWidthFt = 2,
+  gapFt = 2.2,
+  verticalOffsetFt = 0.035
+): THREE.BufferGeometry[] {
+  const halfWidth = (edge.lanes * edge.laneWidthFt) / 2;
+  const distEnd = Math.max(bandLengthFt, edge.length - distanceBeforeEndFt);
+  const distStart = Math.max(0, distEnd - bandLengthFt);
+  const tStart = clamp01(distStart / edge.length);
+  const tEnd = clamp01(distEnd / edge.length);
+
+  const bars: THREE.BufferGeometry[] = [];
+  const step = barWidthFt + gapFt;
+  for (let x = -halfWidth + barWidthFt / 2 + 0.5; x <= halfWidth - barWidthFt / 2 - 0.5; x += step) {
+    const profile: ProfilePoint[] = [
+      { x: -barWidthFt / 2, y: verticalOffsetFt },
+      { x: barWidthFt / 2, y: verticalOffsetFt },
+    ];
+    bars.push(sweepProfileAlongCurve(edge, x, profile, 2, false, tStart, tEnd));
+  }
+  return bars;
+}
+
 /** Builds a dashed stripe (lane separators) at a given lateral offset, merged into one geometry. */
 export function buildDashedStripe(
   edge: Edge3D,
   lateralOffsetFt: number,
   widthFt = 0.4,
   dashLenFt = 10,
-  gapLenFt = 20,
+  gapLenFt = 30,
   verticalOffsetFt = 0.03
 ): THREE.BufferGeometry {
   const totalLen = edge.length;
@@ -229,7 +292,90 @@ export function buildJerseyBarrier(edge: Edge3D, lateralOffsetFt: number): THREE
   return sweepProfileAlongCurve(edge, lateralOffsetFt, JERSEY_PROFILE, segmentsForLength(edge.length, 12), true);
 }
 
+/** Simpler bridge parapet cross-section (in feet) — a plain vertical concrete rail, shorter than a full Jersey barrier, for non-freeway elevated roads. */
+const PARAPET_PROFILE: ProfilePoint[] = [
+  { x: -0.6, y: 0 },
+  { x: 0.6, y: 0 },
+  { x: 0.5, y: 2.2 },
+  { x: -0.5, y: 2.2 },
+];
+
+export function buildParapet(edge: Edge3D, lateralOffsetFt: number): THREE.BufferGeometry {
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, PARAPET_PROFILE, segmentsForLength(edge.length, 12), true);
+}
+
+/**
+ * Builds a soft dark "contact shadow" ribbon projected flat onto the
+ * ground (y ~ 0), following an elevated edge's own XZ footprint but a bit
+ * wider than the deck above it — a cheap, always-visible stand-in for a
+ * real shadow under a bridge deck, independent of whatever postprocessing
+ * (or lack of it) the renderer has available.
+ */
+export function buildGroundShadowRibbon(edge: Edge3D, extraWidthFt = 4): THREE.BufferGeometry {
+  const halfWidth = (edge.lanes * edge.laneWidthFt) / 2 + extraWidthFt;
+  const tangentScratch = new THREE.Vector3();
+  const rightScratch = new THREE.Vector3();
+  const pointScratch = new THREE.Vector3();
+  const segments = segmentsForLength(edge.length);
+
+  const rings: [THREE.Vector3, THREE.Vector3][] = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    edgePointAt(edge, t, pointScratch);
+    edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
+    const ground = new THREE.Vector3(pointScratch.x, 0.05, pointScratch.z);
+    rings.push([
+      ground.clone().addScaledVector(rightScratch, -halfWidth),
+      ground.clone().addScaledVector(rightScratch, halfWidth),
+    ]);
+  }
+
+  const positions: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const [a, b] = rings[i];
+    const [d, c] = rings[i + 1];
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    positions.push(a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** Builds a thin dark expansion-joint line across the full deck width at a fixed distance from the edge's start — marks a bridge segment boundary (e.g. at each pier). */
+export function buildExpansionJoint(edge: Edge3D, distanceFromStartFt: number, thicknessFt = 0.25): THREE.BufferGeometry {
+  const halfWidth = (edge.lanes * edge.laneWidthFt) / 2 + 1;
+  const profile: ProfilePoint[] = [
+    { x: -halfWidth, y: 0.02 },
+    { x: halfWidth, y: 0.02 },
+  ];
+  const distStart = Math.max(0, distanceFromStartFt - thicknessFt / 2);
+  const distEnd = Math.min(edge.length, distanceFromStartFt + thicknessFt / 2);
+  const tStart = clamp01(distStart / edge.length);
+  const tEnd = clamp01(distEnd / edge.length);
+  return sweepProfileAlongCurve(edge, 0, profile, 2, false, tStart, tEnd);
+}
+
+/**
+ * A tapered rectangular concrete bent column — wider at the footing than
+ * under the cap beam, like a real bridge pier. Built as a 4-sided prism
+ * (a "cylinder" with 4 radial segments is just a square prism) rotated 45°
+ * so its flat faces line up with the cap beam's axes instead of a diamond.
+ * The `radius` of an N=4 cylinder is measured to its corner, so half-widths
+ * are scaled by sqrt(2) to land the flat faces at the requested width.
+ */
+export function buildTaperedPierColumn(topHalfWidthFt: number, baseHalfWidthFt: number, heightFt: number): THREE.BufferGeometry {
+  const geo = new THREE.CylinderGeometry(topHalfWidthFt * Math.SQRT2, baseHalfWidthFt * Math.SQRT2, heightFt, 4, 1);
+  geo.rotateY(Math.PI / 4);
+  return geo;
+}
+
 export interface PierDescriptor {
+  /** Distance along the edge's centerline, feet — used to align an expansion joint with each pier. */
+  distanceFt: number;
   /** World-space position of the pier cap beam center, feet. */
   capPosition: [number, number, number];
   /** Rotation about Y (radians) aligning the cap beam across the roadway. */
@@ -263,6 +409,7 @@ export function computePierDescriptors(edge: Edge3D, intervalFt = 90): PierDescr
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
     const rotationY = Math.atan2(rightScratch.x, rightScratch.z);
     descriptors.push({
+      distanceFt: dist,
       capPosition: [pointScratch.x, pointScratch.y - 1.2, pointScratch.z],
       rotationY,
       capLength: pavedHalfWidth * 2,

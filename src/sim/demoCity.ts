@@ -28,7 +28,7 @@ export function getDemoCity(): DemoCity {
   if (cached) return cached;
   const b = new Builder();
 
-  const VIADUCT_Y = ELEVATION_BY_ID.viaduct.elevationFt;
+  const VIADUCT_Y = ELEVATION_BY_ID.tier2.elevationFt;
 
   // ---- Stage 0: the avenue (N-S, x = 0) ----------------------------------
   const RING_CENTER: [number, number] = [0, -700];
@@ -119,12 +119,12 @@ export function getDemoCity(): DemoCity {
     const ys = [0, 0, VIADUCT_Y, VIADUCT_Y, 0, 0];
     const ids = xs.map((x, i) => b.node(`m${dir}${i}`, x, z, ys[i]));
     oneWay(`mo${dir}1`, ids[0], ids[1], "ground", ENTRY(1400));
-    oneWay(`mo${dir}2`, ids[1], ids[2], "viaduct", undefined, b.ramp(ids[1], ids[2], 4));
-    oneWay(`mo${dir}3`, ids[2], ids[3], "viaduct", undefined, [
+    oneWay(`mo${dir}2`, ids[1], ids[2], "tier2", undefined, b.ramp(ids[1], ids[2], 4));
+    oneWay(`mo${dir}3`, ids[2], ids[3], "tier2", undefined, [
       [216 * sign * -1, VIADUCT_Y, z],
       [216 * sign, VIADUCT_Y, z],
     ]);
-    oneWay(`mo${dir}4`, ids[3], ids[4], "viaduct", undefined, b.ramp(ids[3], ids[4], 4));
+    oneWay(`mo${dir}4`, ids[3], ids[4], "tier2", undefined, b.ramp(ids[3], ids[4], 4));
     oneWay(`mo${dir}5`, ids[4], ids[5], "ground", DEST);
   };
   carriageway("e", CARRIAGEWAY_OFFSET);

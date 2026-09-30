@@ -1,102 +1,93 @@
+import { z } from "zod";
 import type { NetworkSnapshot } from "@/sim/types";
 
 const STORAGE_KEY = "road-constructor:autosave:v1";
-const CORRUPT_BACKUP_KEY = "road-constructor:autosave:corrupt";
-
-/** Bump when the saved shape changes, and add a migration step in `migrate`. */
-export const CURRENT_SAVE_VERSION = 2;
 
 export interface PersistedPayload {
-  app: "road-constructor";
-  version: typeof CURRENT_SAVE_VERSION;
+  version: 1;
   network: NetworkSnapshot;
   budget: number;
   nextNodeSeq: number;
   nextEdgeSeq: number;
 }
 
-function isPoint3(value: unknown): boolean {
-  return Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === "number" && Number.isFinite(n));
-}
+// ---------------------------------------------------------------------------
+// Zod schema mirroring NetworkSnapshot/NodeSpec/EdgeSpec (src/sim/types.ts).
+// Used to validate anything coming from outside this session's own state —
+// an imported file or, especially, a share-link hash someone else's browser
+// produced — before it's ever handed to assembleNetwork or the store.
+// ---------------------------------------------------------------------------
 
-function isNetworkSnapshot(value: unknown): value is NetworkSnapshot {
-  if (!value || typeof value !== "object") return false;
-  const { nodes, edges } = value as Record<string, unknown>;
-  if (!Array.isArray(nodes) || !Array.isArray(edges)) return false;
+const vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
 
-  const nodeIds = new Set<string>();
-  for (const n of nodes) {
-    if (!n || typeof n !== "object") return false;
-    const node = n as Record<string, unknown>;
-    if (typeof node.id !== "string" || !isPoint3(node.position)) return false;
-    nodeIds.add(node.id);
-  }
-  for (const e of edges) {
-    if (!e || typeof e !== "object") return false;
-    const edge = e as Record<string, unknown>;
-    if (typeof edge.id !== "string") return false;
-    if (typeof edge.fromNodeId !== "string" || !nodeIds.has(edge.fromNodeId)) return false;
-    if (typeof edge.toNodeId !== "string" || !nodeIds.has(edge.toNodeId)) return false;
-    if (!Array.isArray(edge.interiorPoints) || !edge.interiorPoints.every(isPoint3)) return false;
-    if (typeof edge.roadClassId !== "string" || typeof edge.elevationLevelId !== "string") return false;
-    for (const k of ["lanes", "laneWidthFt", "speedLimitMph"] as const) {
-      if (typeof edge[k] !== "number" || !Number.isFinite(edge[k])) return false;
-    }
-    if (edge.laneMoves !== undefined) {
-      const ok =
-        Array.isArray(edge.laneMoves) &&
-        edge.laneMoves.every(
-          (lane) => Array.isArray(lane) && lane.every((m) => m === "left" || m === "straight" || m === "right")
-        );
-      if (!ok) return false;
-    }
-  }
-  return true;
-}
+const signalControlSchema = z.object({
+  type: z.literal("signal"),
+  groupA: z.array(z.string()),
+  groupB: z.array(z.string()),
+  greenDurationS: z.number(),
+  allRedDurationS: z.number(),
+});
 
-/** Upgrades any known older save to the current shape; returns null if unrecognised or from a newer build. */
-function migrate(value: unknown): PersistedPayload | null {
-  if (!value || typeof value !== "object") return null;
-  const v = value as Record<string, unknown>;
-  if (typeof v.version !== "number" || v.version < 1 || v.version > CURRENT_SAVE_VERSION) return null;
-  if (
-    !isNetworkSnapshot(v.network) ||
-    typeof v.budget !== "number" ||
-    !Number.isFinite(v.budget) ||
-    typeof v.nextNodeSeq !== "number" ||
-    typeof v.nextEdgeSeq !== "number"
-  ) {
-    return null;
-  }
-  // v1 -> v2: identical data, v2 only adds the `app` tag.
-  return {
-    app: "road-constructor",
-    version: CURRENT_SAVE_VERSION,
-    network: v.network,
-    budget: v.budget,
-    nextNodeSeq: v.nextNodeSeq,
-    nextEdgeSeq: v.nextEdgeSeq,
-  };
+const junctionControlSchema = z.union([signalControlSchema, z.object({ type: z.literal("priority") })]);
+
+const nodeSchema = z.object({
+  id: z.string(),
+  position: vec3Schema,
+  control: junctionControlSchema.optional(),
+});
+
+const zoneSchema = z.union([
+  z.object({ type: z.literal("entry"), demandVehPerHour: z.number() }),
+  z.object({ type: z.literal("destination"), targetSpeedMph: z.number() }),
+]);
+
+const roadClassIdSchema = z.enum(["lane", "street", "avenue", "highway", "motorway"]);
+const elevationLevelIdSchema = z.enum(["tunnel", "cutting", "ground", "tier1", "tier2", "tier3"]);
+
+const edgeSchema = z.object({
+  id: z.string(),
+  fromNodeId: z.string(),
+  toNodeId: z.string(),
+  interiorPoints: z.array(vec3Schema),
+  roadClassId: roadClassIdSchema,
+  elevationLevelId: elevationLevelIdSchema,
+  lanes: z.number(),
+  laneWidthFt: z.number(),
+  speedLimitMph: z.number(),
+  zone: zoneSchema.optional(),
+  isRoundaboutRing: z.boolean().optional(),
+  isTexasTurnaround: z.boolean().optional(),
+  /** Player-set lane arrows: per lane, the moves it may make at the end of the road. */
+  laneMoves: z.array(z.array(z.enum(["left", "straight", "right"]))).optional(),
+});
+
+const networkSnapshotSchema = z.object({
+  nodes: z.array(nodeSchema),
+  edges: z.array(edgeSchema),
+});
+
+const persistedPayloadSchema = z.object({
+  version: z.literal(1),
+  network: networkSnapshotSchema,
+  budget: z.number(),
+  nextNodeSeq: z.number(),
+  nextEdgeSeq: z.number(),
+});
+
+function isValidPayload(value: unknown): value is PersistedPayload {
+  return persistedPayloadSchema.safeParse(value).success;
 }
 
 export function loadAutosave(): PersistedPayload | null {
   if (typeof window === "undefined") return null;
-  let raw: string | null = null;
   try {
-    raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const payload = migrate(JSON.parse(raw));
-    if (payload) return payload;
+    const parsed = JSON.parse(raw);
+    return isValidPayload(parsed) ? parsed : null;
   } catch {
-    // fall through to the backup path below
+    return null;
   }
-  // Unreadable or from a newer build: keep the raw text so it isn't lost when the next autosave overwrites it.
-  try {
-    if (raw) window.localStorage.setItem(CORRUPT_BACKUP_KEY, raw);
-  } catch {
-    // ignore
-  }
-  return null;
 }
 
 export function saveAutosave(payload: PersistedPayload): void {
@@ -132,7 +123,59 @@ export function downloadNetworkFile(payload: PersistedPayload): void {
 
 export function parseNetworkFile(text: string): PersistedPayload | null {
   try {
-    return migrate(JSON.parse(text));
+    const parsed = JSON.parse(text);
+    return isValidPayload(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// URL share/permalink: the same PersistedPayload, gzip-compressed and
+// base64url-encoded into a `#data=...` URL hash fragment so a whole network
+// can be shared as a link with no server-side storage.
+// ---------------------------------------------------------------------------
+
+async function gzipCompress(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([data as BlobPart]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buffer = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buffer);
+}
+
+async function gzipDecompress(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const buffer = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buffer);
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(b64url: string): Uint8Array {
+  const padded = b64url.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(b64url.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** Serializes a network payload into a compact, URL-hash-safe string. */
+export async function encodePayloadToShareHash(payload: PersistedPayload): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const compressed = await gzipCompress(bytes);
+  return bytesToBase64Url(compressed);
+}
+
+/** Reverses `encodePayloadToShareHash`, returning null for anything malformed or corrupted. */
+export async function decodeShareHash(hash: string): Promise<PersistedPayload | null> {
+  try {
+    const bytes = base64UrlToBytes(hash);
+    const decompressed = await gzipDecompress(bytes);
+    const parsed = JSON.parse(new TextDecoder().decode(decompressed));
+    return isValidPayload(parsed) ? parsed : null;
   } catch {
     return null;
   }

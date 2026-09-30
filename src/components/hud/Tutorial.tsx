@@ -19,7 +19,7 @@ const STEPS: Step[] = [
   {
     icon: IconWarning,
     title: "Find the jam",
-    body: "Move around with WASD (Shift to go faster, Q/E to rotate). Traffic runs live. Flashing markers show roads that are badly jammed, and the Heatmap button colors every road by how fast it's really moving. Fix the worst spot first.",
+    body: "Move around with WASD (Shift to go faster, [ and ] to rotate). Traffic runs live. Flashing markers show roads that are badly jammed, and the Heatmap button colors every road by how fast it's really moving. Fix the worst spot first.",
   },
   {
     icon: IconLanes,

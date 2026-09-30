@@ -2,13 +2,20 @@
 
 import * as THREE from "three";
 import { create } from "zustand";
+import { assembleNetwork, assembleNetworkCached, computeSignalPhaseGroups, planTexasTurnaround } from "@/sim/network";
 import { assembleCached } from "@/sim/assembleCache";
-import { computeSignalPhaseGroups } from "@/sim/network";
+import { findClearanceViolations } from "@/sim/clearance";
 import {
   DEMOLISH_REFUND_FRACTION,
+  HOTKEY_TIER_IDS,
   ROAD_CLASSES,
   ROUNDABOUT_LANE_WIDTH_FT,
   ROUNDABOUT_SPEED_MPH,
+  TEXAS_TURNAROUND_COST_MULTIPLIER,
+  TEXAS_TURNAROUND_LANE_WIDTH_FT,
+  TEXAS_TURNAROUND_MIN_RADIUS_FT,
+  TEXAS_TURNAROUND_SEARCH_RADIUS_FT,
+  TEXAS_TURNAROUND_SPEED_MPH,
   type ElevationLevelId,
   type RoadClassId,
   estimateEdgeCost,
@@ -21,12 +28,16 @@ import type {
   NodeSpec,
   ZoneSpec,
 } from "@/sim/types";
-import { CURRENT_SAVE_VERSION, loadAutosave, saveAutosave, type PersistedPayload } from "./persistence";
+import {
+  loadAutosave,
+  saveAutosave,
+  type PersistedPayload,
+} from "./persistence";
 import { playDemolish, playPlaceRoad } from "@/lib/sound";
-import type { ScenarioDef } from "@/sim/scenarios";
+import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
-export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "lanes" | "speed" | "junction";
+export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction";
 
 /** Tools that change how traffic is managed rather than what is built — these work while traffic is running. */
 export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction"];
@@ -43,14 +54,20 @@ export const STARTING_BUDGET = 2_000_000;
 function edgeLengthFt(
   fromPos: [number, number, number],
   toPos: [number, number, number],
-  interiorPoints: [number, number, number][]
+  interiorPoints: [number, number, number][],
 ): number {
-  const points = [new THREE.Vector3(...fromPos), ...interiorPoints.map((p) => new THREE.Vector3(...p)), new THREE.Vector3(...toPos)];
+  const points = [
+    new THREE.Vector3(...fromPos),
+    ...interiorPoints.map((p) => new THREE.Vector3(...p)),
+    new THREE.Vector3(...toPos),
+  ];
   const curve = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
   return curve.getLength();
 }
 
-function reversePoints(points: [number, number, number][]): [number, number, number][] {
+function reversePoints(
+  points: [number, number, number][],
+): [number, number, number][] {
   return [...points].reverse();
 }
 
@@ -72,6 +89,22 @@ interface EditorState {
   twoWay: boolean;
   heatmapEnabled: boolean;
   setHeatmapEnabled: (v: boolean) => void;
+  timeOfDay: "day" | "dusk" | "night";
+  setTimeOfDay: (v: "day" | "dusk" | "night") => void;
+  /** Chase/ride-along camera: locks the view behind a live vehicle instead of the free orthographic overview. Only meaningful in Simulate mode. */
+  rideAlongActive: boolean;
+  setRideAlongActive: (v: boolean) => void;
+
+  /** Transient user-facing message (e.g. a rejected clearance-violating road) — cleared automatically after a few seconds. */
+  buildWarning: string | null;
+  setBuildWarning: (message: string | null) => void;
+
+  /** A one-shot request for the in-canvas camera controller to recenter on a network's bounding box center (e.g. right after loading a shared layout). */
+  pendingCameraFit: { centerX: number; centerZ: number; radiusFt?: number } | null;
+  requestCameraFit: (bounds: { centerX: number; centerZ: number; radiusFt?: number }) => void;
+  clearPendingCameraFit: () => void;
+  /** Steps the currently-selected elevation up/down the At-Grade -> Tier 3 ladder by one 20ft rung (the Q/E hotkeys). Has no effect while Tunnel/Cutting is selected. */
+  stepElevation: (direction: -1 | 1) => void;
 
   nodes: NodeSpec[];
   edges: EdgeSpec[];
@@ -102,12 +135,22 @@ interface EditorState {
   cancelDrawChain: () => void;
 
   createNodeAt: (position: [number, number, number]) => string;
-  findNearbyNode: (position: [number, number, number], snapFt: number) => string | null;
+  findNearbyNode: (
+    position: [number, number, number],
+    snapFt: number,
+  ) => string | null;
 
   /** Draws a road from an existing node to a new/target point, extending the chain. Returns the terminal node id. */
-  drawTo: (fromNodeId: string, toNodeId: string | null, toPosition: [number, number, number]) => string;
+  drawTo: (
+    fromNodeId: string,
+    toNodeId: string | null,
+    toPosition: [number, number, number],
+  ) => string;
 
-  splitEdgeAt: (edgeId: string, worldPosition: [number, number, number]) => string;
+  splitEdgeAt: (
+    edgeId: string,
+    worldPosition: [number, number, number],
+  ) => string;
 
   deleteEdge: (edgeId: string) => void;
   deleteNode: (nodeId: string) => void;
@@ -132,10 +175,27 @@ interface EditorState {
   /** Replaces a junction node with an auto-generated roundabout ring, re-pointing its existing approach roads to the ring. */
   convertNodeToRoundabout: (nodeId: string, radiusFt?: number) => void;
 
+  /**
+   * Splits the clicked edge and the nearest opposing (roughly anti-parallel)
+   * frontage edge within range, then connects the two split points with a
+   * one-way 180° slip-lane loop — a Texas turnaround. Sets `buildWarning`
+   * and does nothing if no suitable opposing frontage road is nearby.
+   */
+  createTexasTurnaround: (edgeId: string, clickPoint: [number, number, number]) => void;
+
   clearNetwork: () => void;
   getSnapshot: () => NetworkSnapshot;
   exportPayload: () => PersistedPayload;
   importPayload: (payload: PersistedPayload) => void;
+  /**
+   * Applies any autosaved network, once, from a client-only effect after
+   * mount — never at store-creation time. The store's initial state must be
+   * identical on the server-rendered HTML and the client's first render (no
+   * `localStorage` access), or React logs a hydration mismatch the moment a
+   * returning player (who has autosave data) loads or reloads the page. A
+   * silent no-op if there's nothing saved.
+   */
+  hydrateAutosave: () => void;
 
   activeScenarioId: string | null;
   /** True in a manage-only city: roads can't be built or changed, only traffic management tools work. */
@@ -144,13 +204,18 @@ interface EditorState {
   simEpoch: number;
   loadScenario: (scenario: ScenarioDef) => void;
   exitScenario: () => void;
+  /** Clears the active scenario and grants an effectively-infinite budget, for continuing to play a won layout without constraints. */
+  enterSandboxMode: () => void;
 }
 
-function findCounterpart(edges: EdgeSpec[], edge: EdgeSpec): EdgeSpec | undefined {
-  return edges.find((e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId);
+function findCounterpart(
+  edges: EdgeSpec[],
+  edge: EdgeSpec,
+): EdgeSpec | undefined {
+  return edges.find(
+    (e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId,
+  );
 }
-
-const autosaved = loadAutosave();
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   mode: "build",
@@ -160,18 +225,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   twoWay: true,
   heatmapEnabled: false,
   setHeatmapEnabled: (v) => set({ heatmapEnabled: v }),
+  timeOfDay: "day",
+  setTimeOfDay: (v) => set({ timeOfDay: v }),
+  rideAlongActive: false,
+  setRideAlongActive: (v) => set({ rideAlongActive: v }),
 
-  nodes: autosaved?.network.nodes ?? [],
-  edges: autosaved?.network.edges ?? [],
-  nodesById: new Map((autosaved?.network.nodes ?? []).map((n) => [n.id, n])),
-  edgesById: new Map((autosaved?.network.edges ?? []).map((e) => [e.id, e])),
+  buildWarning: null,
+  setBuildWarning: (message) => set({ buildWarning: message }),
 
-  budget: autosaved?.budget ?? STARTING_BUDGET,
+  pendingCameraFit: null,
+  requestCameraFit: (bounds) => set({ pendingCameraFit: bounds }),
+  clearPendingCameraFit: () => set({ pendingCameraFit: null }),
+  stepElevation: (direction) => {
+    const current = get().selectedElevationId;
+    const idx = HOTKEY_TIER_IDS.indexOf(current);
+    if (idx === -1) return; // Tunnel/Cutting aren't on the hotkey ladder
+    const nextIdx = Math.max(0, Math.min(HOTKEY_TIER_IDS.length - 1, idx + direction));
+    set({ selectedElevationId: HOTKEY_TIER_IDS[nextIdx] });
+  },
+
+  // Always the same hard defaults here, matching the statically prerendered
+  // HTML exactly — any autosave is applied post-mount by hydrateAutosave()
+  // instead, never read at store-creation time (see that action's doc
+  // comment for why).
+  nodes: [],
+  edges: [],
+  nodesById: new Map(),
+  edgesById: new Map(),
+
+  budget: STARTING_BUDGET,
   selection: null,
   drawFromNodeId: null,
 
-  nextNodeSeq: autosaved?.nextNodeSeq ?? 1,
-  nextEdgeSeq: autosaved?.nextEdgeSeq ?? 1,
+  nextNodeSeq: 1,
+  nextEdgeSeq: 1,
 
   past: [],
   future: [],
@@ -184,7 +271,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextNodeSeq: s.nextNodeSeq,
       nextEdgeSeq: s.nextEdgeSeq,
     };
-    set((state) => ({ past: [...state.past.slice(-(MAX_HISTORY - 1)), entry], future: [] }));
+    set((state) => ({
+      past: [...state.past.slice(-(MAX_HISTORY - 1)), entry],
+      future: [],
+    }));
   },
   undo: () => {
     const s = get();
@@ -241,8 +331,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((s) => ({
       mode,
       drawFromNodeId: null,
-      // Build tools don't exist while traffic is running; land on the selector instead.
-      tool: mode === "simulate" && !MANAGER_TOOLS.includes(s.tool) ? "inspect" : s.tool,
+      // Build tools don't exist while traffic runs (or in a locked city); keep a manager tool, else land on the selector.
+      tool:
+        mode === "simulate"
+          ? MANAGER_TOOLS.includes(s.tool)
+            ? s.tool
+            : "inspect"
+          : s.buildLocked
+            ? s.tool
+            : "draw",
+      selection: null,
+      rideAlongActive: mode === "simulate" ? s.rideAlongActive : false,
     })),
   setTool: (tool) =>
     set((s) => (s.buildLocked && !MANAGER_TOOLS.includes(tool) ? s : { tool, drawFromNodeId: null, selection: null })),
@@ -288,6 +387,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const fromNode = state.nodesById.get(fromNodeId);
     if (!fromNode) return fromNodeId;
 
+    const targetPosition = toNodeId ? state.nodesById.get(toNodeId)!.position : toPosition;
+    const roadClass = ROAD_CLASSES[state.selectedRoadClassId];
+
+    // Check clearance against the *existing* network before touching any
+    // state — a rejected road shouldn't leave a dangling orphan node behind.
+    const candidateNodeId = toNodeId ?? "__candidate__";
+    const candidateForwardId = "__candidate_fwd__";
+    const candidateBackwardId = "__candidate_bwd__";
+    const candidateNodes: NodeSpec[] = toNodeId
+      ? state.nodes
+      : [...state.nodes, { id: candidateNodeId, position: toPosition }];
+    const candidateEdges: EdgeSpec[] = [
+      ...state.edges,
+      {
+        id: candidateForwardId,
+        fromNodeId,
+        toNodeId: candidateNodeId,
+        interiorPoints: [],
+        roadClassId: state.selectedRoadClassId,
+        elevationLevelId: state.selectedElevationId,
+        lanes: roadClass.lanesPerDirection,
+        laneWidthFt: roadClass.laneWidthFt,
+        speedLimitMph: roadClass.speedLimitMph,
+      },
+      ...(state.twoWay
+        ? [
+            {
+              id: candidateBackwardId,
+              fromNodeId: candidateNodeId,
+              toNodeId: fromNodeId,
+              interiorPoints: [],
+              roadClassId: state.selectedRoadClassId,
+              elevationLevelId: state.selectedElevationId,
+              lanes: roadClass.lanesPerDirection,
+              laneWidthFt: roadClass.laneWidthFt,
+              speedLimitMph: roadClass.speedLimitMph,
+            } satisfies EdgeSpec,
+          ]
+        : []),
+    ];
+    const candidateNetwork = assembleNetwork({ nodes: candidateNodes, edges: candidateEdges });
+    const newViolation = findClearanceViolations(candidateNetwork).find(
+      (v) => v.edgeAId === candidateForwardId || v.edgeBId === candidateForwardId
+    );
+    if (newViolation) {
+      get().setBuildWarning(
+        `Blocked: only ${newViolation.clearanceFt.toFixed(1)} ft clearance over the road below — needs 16.5 ft.`
+      );
+      return fromNodeId;
+    }
+
     let targetNodeId: string;
     if (toNodeId) {
       get().pushHistoryEntry();
@@ -297,13 +447,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     const targetNode = get().nodesById.get(targetNodeId)!;
 
-    const roadClass = ROAD_CLASSES[state.selectedRoadClassId];
     const lengthFt = edgeLengthFt(fromNode.position, targetNode.position, []);
     const cost = estimateEdgeCost(
       state.selectedRoadClassId,
       state.selectedElevationId,
       lengthFt,
-      roadClass.lanesPerDirection
+      roadClass.lanesPerDirection,
     );
     const totalCost = state.twoWay ? cost * 2 : cost;
 
@@ -416,19 +565,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
-    const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-    const cost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
+    const lengthFt =
+      node && toNode
+        ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+        : 0;
+    const cost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      edge.lanes,
+    );
     set((s) => {
       const edges = s.edges.filter((e) => e.id !== edgeId);
       const edgesById = new Map(s.edgesById);
       edgesById.delete(edgeId);
-      return { edges, edgesById, budget: s.budget + cost * DEMOLISH_REFUND_FRACTION };
+      return {
+        edges,
+        edgesById,
+        budget: s.budget + cost * DEMOLISH_REFUND_FRACTION,
+      };
     });
     playDemolish();
   },
 
   deleteNode: (nodeId) => {
-    const connected = get().edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
+    const connected = get().edges.filter(
+      (e) => e.fromNodeId === nodeId || e.toNodeId === nodeId,
+    );
     if (connected.length === 0) get().pushHistoryEntry();
     for (const e of connected) get().deleteEdge(e.id);
     set((s) => {
@@ -447,9 +610,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
-    const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-    const oldCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
-    const newCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, clamped);
+    const lengthFt =
+      node && toNode
+        ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+        : 0;
+    const oldCost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      edge.lanes,
+    );
+    const newCost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      clamped,
+    );
     // Lane arrows are per lane, so they no longer line up once the count changes.
     const updated: EdgeSpec = { ...edge, lanes: clamped, laneMoves: undefined };
     set((s) => {
@@ -475,8 +651,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       get().pushHistoryEntry();
       const node = state.nodesById.get(edge.fromNodeId);
       const toNode = state.nodesById.get(edge.toNodeId);
-      const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-      const cost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
+      const lengthFt =
+        node && toNode
+          ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+          : 0;
+      const cost = estimateEdgeCost(
+        edge.roadClassId,
+        edge.elevationLevelId,
+        lengthFt,
+        edge.lanes,
+      );
       const backward: EdgeSpec = {
         id: `e${get().nextEdgeSeq}`,
         fromNodeId: edge.toNodeId,
@@ -492,7 +676,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const edges = [...s.edges, backward];
         const edgesById = new Map(s.edgesById);
         edgesById.set(backward.id, backward);
-        return { edges, edgesById, nextEdgeSeq: s.nextEdgeSeq + 1, budget: s.budget - cost };
+        return {
+          edges,
+          edgesById,
+          nextEdgeSeq: s.nextEdgeSeq + 1,
+          budget: s.budget - cost,
+        };
       });
     }
   },
@@ -503,10 +692,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     const node = get().nodesById.get(edge.fromNodeId);
     const toNode = get().nodesById.get(edge.toNodeId);
-    const lengthFt = node && toNode ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints) : 0;
-    const oldCost = estimateEdgeCost(edge.roadClassId, edge.elevationLevelId, lengthFt, edge.lanes);
+    const lengthFt =
+      node && toNode
+        ? edgeLengthFt(node.position, toNode.position, edge.interiorPoints)
+        : 0;
+    const oldCost = estimateEdgeCost(
+      edge.roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      edge.lanes,
+    );
     const cls = ROAD_CLASSES[roadClassId];
-    const newCost = estimateEdgeCost(roadClassId, edge.elevationLevelId, lengthFt, cls.lanesPerDirection);
+    const newCost = estimateEdgeCost(
+      roadClassId,
+      edge.elevationLevelId,
+      lengthFt,
+      cls.lanesPerDirection,
+    );
     const updated: EdgeSpec = {
       ...edge,
       roadClassId,
@@ -528,7 +730,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     let zone: ZoneSpec | undefined;
     if (!edge.zone) zone = { type: "entry", demandVehPerHour: 600 };
-    else if (edge.zone.type === "entry") zone = { type: "destination", targetSpeedMph: 25 };
+    else if (edge.zone.type === "entry")
+      zone = { type: "destination", targetSpeedMph: 25 };
     else zone = undefined;
     const updated: EdgeSpec = { ...edge, zone };
     set((s) => {
@@ -542,7 +745,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setEntryDemand: (edgeId, vehiclesPerHour) => {
     const edge = get().edgesById.get(edgeId);
     if (!edge || edge.zone?.type !== "entry") return;
-    const updated: EdgeSpec = { ...edge, zone: { type: "entry", demandVehPerHour: vehiclesPerHour } };
+    const updated: EdgeSpec = {
+      ...edge,
+      zone: { type: "entry", demandVehPerHour: vehiclesPerHour },
+    };
     set((s) => {
       const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
       const edgesById = new Map(s.edgesById);
@@ -554,7 +760,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setDestinationTarget: (edgeId, targetSpeedMph) => {
     const edge = get().edgesById.get(edgeId);
     if (!edge || edge.zone?.type !== "destination") return;
-    const updated: EdgeSpec = { ...edge, zone: { type: "destination", targetSpeedMph } };
+    const updated: EdgeSpec = {
+      ...edge,
+      zone: { type: "destination", targetSpeedMph },
+    };
     set((s) => {
       const edges = s.edges.map((e) => (e.id === edgeId ? updated : e));
       const edgesById = new Map(s.edgesById);
@@ -570,8 +779,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().pushHistoryEntry();
     let resolvedControl = control;
     if (control?.type === "signal") {
-      const { groupA, groupB } = computeSignalPhaseGroups(nodeId, state.edges, state.nodesById);
-      resolvedControl = { type: "signal", groupA, groupB, greenDurationS: 20, allRedDurationS: 2 };
+      const { groupA, groupB } = computeSignalPhaseGroups(
+        nodeId,
+        state.edges,
+        state.nodesById,
+      );
+      resolvedControl = {
+        type: "signal",
+        groupA,
+        groupB,
+        greenDurationS: 20,
+        allRedDurationS: 2,
+      };
     }
     const updated: NodeSpec = { ...node, control: resolvedControl };
     set((s) => {
@@ -678,7 +897,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const node = state.nodesById.get(nodeId);
     if (!node) return;
 
-    const connected = state.edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
+    const connected = state.edges.filter(
+      (e) => e.fromNodeId === nodeId || e.toNodeId === nodeId,
+    );
     if (connected.length === 0) return;
     get().pushHistoryEntry();
 
@@ -694,15 +915,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const angleOf = (otherId: string) => {
       const other = state.nodesById.get(otherId);
       if (!other) return 0;
-      return Math.atan2(other.position[2] - node.position[2], other.position[0] - node.position[0]);
+      return Math.atan2(
+        other.position[2] - node.position[2],
+        other.position[0] - node.position[0],
+      );
     };
 
     const legs = Array.from(legMap.entries())
-      .map(([otherId, legEdges]) => ({ otherId, angle: angleOf(otherId), edges: legEdges }))
+      .map(([otherId, legEdges]) => ({
+        otherId,
+        angle: angleOf(otherId),
+        edges: legEdges,
+      }))
       .sort((a, b) => a.angle - b.angle);
 
     const radius = radiusFt ?? Math.max(45, legs.length * 16);
     const y = node.position[1];
+    // The ring's own capacity shouldn't be a hard single-lane bottleneck
+    // regardless of how busy the roads feeding it are — scale it with the
+    // widest connected approach (capped at 2, since a roundabout wider than
+    // that starts fighting the simulation's generic lane-changing logic,
+    // which isn't roundabout-aware).
+    const maxApproachLanes = Math.max(1, ...connected.map((e) => e.lanes));
+    const ringLanes = Math.max(1, Math.min(2, maxApproachLanes));
 
     let nodeSeq = state.nextNodeSeq;
     const ringNodes: NodeSpec[] = legs.map((leg) => {
@@ -717,7 +952,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     legs.forEach((leg, i) => {
       const ringNodeId = ringNodes[i].id;
       for (const e of leg.edges) {
-        if (e.toNodeId === nodeId) repointedById.set(e.id, { ...e, toNodeId: ringNodeId });
+        if (e.toNodeId === nodeId)
+          repointedById.set(e.id, { ...e, toNodeId: ringNodeId });
         else repointedById.set(e.id, { ...e, fromNodeId: ringNodeId });
       }
     });
@@ -731,15 +967,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const a = legs[i];
       const fromNode = ringNodes[i];
       const toNode = ringNodes[(i + 1) % legs.length];
-      const delta = (((legs[(i + 1) % legs.length].angle - a.angle) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+      const delta =
+        (((legs[(i + 1) % legs.length].angle - a.angle) % (Math.PI * 2)) +
+          Math.PI * 2) %
+        (Math.PI * 2);
       const midAngle = a.angle + delta / 2;
       const midPoint: [number, number, number] = [
         node.position[0] + Math.cos(midAngle) * radius,
         y,
         node.position[2] + Math.sin(midAngle) * radius,
       ];
-      const length = edgeLengthFt(fromNode.position, toNode.position, [midPoint]);
-      ringCost += estimateEdgeCost("lane", "ground", length, 1);
+      const length = edgeLengthFt(fromNode.position, toNode.position, [
+        midPoint,
+      ]);
+      ringCost += estimateEdgeCost("lane", "ground", length, ringLanes);
       ringEdges.push({
         id: `e${edgeSeq++}`,
         fromNodeId: fromNode.id,
@@ -747,7 +988,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         interiorPoints: [midPoint],
         roadClassId: "lane",
         elevationLevelId: "ground",
-        lanes: 1,
+        lanes: ringLanes,
         laneWidthFt: ROUNDABOUT_LANE_WIDTH_FT,
         speedLimitMph: ROUNDABOUT_SPEED_MPH,
         isRoundaboutRing: true,
@@ -780,6 +1021,53 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
+  createTexasTurnaround: (edgeId, clickPoint) => {
+    const state = get();
+    const network = assembleNetworkCached(state.nodes, state.edges);
+    const plan = planTexasTurnaround(network, edgeId, new THREE.Vector3(...clickPoint));
+
+    if (!plan) {
+      get().setBuildWarning(
+        `No opposing frontage road found within ${TEXAS_TURNAROUND_SEARCH_RADIUS_FT} ft — build one running the opposite direction nearby.`
+      );
+      return;
+    }
+
+    const nodeAId = get().splitEdgeAt(edgeId, plan.nodeAPoint);
+    const nodeBId = get().splitEdgeAt(plan.targetEdgeId, plan.nodeBPoint);
+
+    const interiorPoints = [plan.controlPoint1, plan.controlPoint2];
+    const cost = Math.round(ROAD_CLASSES.lane.costPerFtPerLane * plan.lengthFt * TEXAS_TURNAROUND_COST_MULTIPLIER);
+
+    const turnaroundEdge: EdgeSpec = {
+      id: `e${get().nextEdgeSeq}`,
+      fromNodeId: nodeAId,
+      toNodeId: nodeBId,
+      interiorPoints,
+      roadClassId: "lane",
+      elevationLevelId: "ground",
+      lanes: 1,
+      laneWidthFt: TEXAS_TURNAROUND_LANE_WIDTH_FT,
+      speedLimitMph: TEXAS_TURNAROUND_SPEED_MPH,
+      isTexasTurnaround: true,
+    };
+
+    set((s) => {
+      const edges = [...s.edges, turnaroundEdge];
+      const edgesById = new Map(s.edgesById);
+      edgesById.set(turnaroundEdge.id, turnaroundEdge);
+      return {
+        edges,
+        edgesById,
+        nextEdgeSeq: s.nextEdgeSeq + 1,
+        budget: s.budget - cost,
+        selection: null,
+      };
+    });
+
+    playPlaceRoad();
+  },
+
   clearNetwork: () => {
     get().pushHistoryEntry();
     set({
@@ -803,8 +1091,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   exportPayload: () => {
     const s = get();
     return {
-      app: "road-constructor",
-      version: CURRENT_SAVE_VERSION,
+      version: 1,
       network: { nodes: s.nodes, edges: s.edges },
       budget: s.budget,
       nextNodeSeq: s.nextNodeSeq,
@@ -824,6 +1111,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextEdgeSeq: payload.nextEdgeSeq,
       selection: null,
       drawFromNodeId: null,
+    });
+  },
+
+  hydrateAutosave: () => {
+    const payload = loadAutosave();
+    if (!payload) return;
+    // No history entry pushed (unlike importPayload) — this is the very
+    // first thing to touch the network after mount, so there's no prior
+    // state worth making undoable back to.
+    set({
+      nodes: payload.network.nodes,
+      edges: payload.network.edges,
+      nodesById: new Map(payload.network.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(payload.network.edges.map((e) => [e.id, e])),
+      budget: payload.budget,
+      nextNodeSeq: payload.nextNodeSeq,
+      nextEdgeSeq: payload.nextEdgeSeq,
     });
   },
 
@@ -847,6 +1151,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tool: scenario.kind === "manage" ? "inspect" : get().tool,
       buildLocked: scenario.kind === "manage",
       simEpoch: get().simEpoch + 1,
+      // Frame the whole city: zoom out to the farthest node.
+      pendingCameraFit: {
+        centerX: 0,
+        centerZ: 0,
+        radiusFt: scenario.startingNetwork.nodes.reduce((r, n) => Math.max(r, Math.hypot(n.position[0], n.position[2])), 0),
+      },
       activeScenarioId: scenario.id,
       past: [],
       future: [],
@@ -854,6 +1164,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   exitScenario: () => set({ activeScenarioId: null, buildLocked: false }),
+  enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, budget: SANDBOX_BUDGET }),
 }));
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -861,8 +1172,7 @@ useEditorStore.subscribe((state) => {
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     saveAutosave({
-      app: "road-constructor",
-      version: CURRENT_SAVE_VERSION,
+      version: 1,
       network: { nodes: state.nodes, edges: state.edges },
       budget: state.budget,
       nextNodeSeq: state.nextNodeSeq,

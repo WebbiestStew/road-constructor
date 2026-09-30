@@ -10,6 +10,7 @@ const HINTS: Record<EditorTool, string> = {
   lanes: "↔️ Click a road that splits at a junction, then tap arrows to choose where each lane can go.",
   speed: "⚡ Click a road and pick a speed limit. Slow stretches back traffic up.",
   junction: "🚦 Click a junction to set priority or a traffic light, and tune its timing.",
+  turnaround: "🔁 Click a frontage road — we'll loop a one-way Texas turnaround to the nearest opposing road within 220 ft.",
 };
 
 export default function HintBar() {
@@ -19,14 +20,14 @@ export default function HintBar() {
   const text =
     mode === "build" || tool !== "inspect"
       ? HINTS[tool]
-      : "🚗 Watch it flow, pick a traffic tool on the left to fix problems, or hit Pause to stare at the chaos.";
+      : "🚗 Watch it flow, pick a traffic tool on the left to fix problems, or click a road for live LOS/speed stats. Space to pause.";
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2">
-      <div className="hud-panel flex items-center gap-2 rounded-full px-4 py-2 text-[11px] text-zinc-700">
+      <div className="hud-panel flex max-w-64 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded-2xl px-4 py-2 text-center text-[11px] text-zinc-700 sm:max-w-none sm:rounded-full">
         <span>{text}</span>
-        <span className="text-zinc-400">&middot;</span>
-        <span className="whitespace-nowrap text-zinc-500">WASD move &middot; Q/E rotate &middot; right-drag orbit &middot; scroll zoom</span>
+        <span className="hidden text-zinc-400 sm:inline">&middot;</span>
+        <span className="hidden whitespace-nowrap text-zinc-500 sm:inline">WASD move &middot; [ ] rotate &middot; right-drag orbit &middot; scroll zoom</span>
       </div>
     </div>
   );

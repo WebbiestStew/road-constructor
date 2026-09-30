@@ -13,7 +13,7 @@ export default function BudgetBar() {
   const fraction = Math.min(1, Math.max(0, spent / STARTING_BUDGET));
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2">
+    <div className="pointer-events-none absolute left-1/2 top-24 z-20 -translate-x-1/2 lg:top-4">
       <div className="hud-panel flex flex-col gap-1 rounded-2xl px-4 py-2">
         <div className="flex items-baseline gap-1.5">
           <span

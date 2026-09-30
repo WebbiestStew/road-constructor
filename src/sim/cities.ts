@@ -102,8 +102,8 @@ function leftOnlyLane(b: Builder, fromNode: string, toNode: string) {
 
 /**
  * Harbor Drive: one long waterfront avenue with five signalized cross streets in a row.
- *  - Speed limits: the stretch between the second and third lights is posted 15 mph.
- *  - Signals: the second and fourth lights flip every 4 seconds.
+ *  - Speed limits: the two middle blocks are posted 15 mph.
+ *  - Signals: the three middle lights flip every 3 seconds.
  *  - Lane arrows: three approaches to the centre light have a left-only lane.
  */
 export function buildHarborDrive(spec: FaultSpec = true): NetworkSnapshot {
@@ -121,7 +121,10 @@ export function buildHarborDrive(spec: FaultSpec = true): NetworkSnapshot {
   main(west, junction(0), { forward: ENTRY(660), backward: DEST });
   const segments = xs.slice(0, -1).map((_, i) => main(junction(i), junction(i + 1)));
   main(junction(xs.length - 1), east, { forward: DEST, backward: ENTRY(660) });
-  if (f.speed) limitRoad(b, segments[1], 15);
+  if (f.speed) {
+    limitRoad(b, segments[1], 15);
+    limitRoad(b, segments[2], 15);
+  }
 
   xs.forEach((x, i) => {
     const north = b.node(`hN${i}`, x, -900);
@@ -130,58 +133,12 @@ export function buildHarborDrive(spec: FaultSpec = true): NetworkSnapshot {
     b.road(0, `cs${i}`, junction(i), south, "street", "ground", { forward: DEST, backward: ENTRY(230) });
   });
 
-  xs.forEach((_, i) => addSignal(b, junction(i), f.signal && (i === 1 || i === 3) ? 4 : 20, 2));
+  xs.forEach((_, i) => addSignal(b, junction(i), f.signal && i >= 1 && i <= 3 ? 3 : 20, 2));
 
   if (f.arrows) {
     leftOnlyLane(b, junction(1), junction(2));
     leftOnlyLane(b, junction(3), junction(2));
     leftOnlyLane(b, "hW", junction(0));
-  }
-  return { nodes: [...b.nodes.values()], edges: b.edges };
-}
-
-/**
- * Old Town: a tight three-by-three grid of narrow one-lane streets. Every corner has a traffic light.
- *  - Signals: the four corner lights flip every 3 seconds, so they spend most of their time on clearance.
- * Less is more here — some of these lights do more harm than good, so dropping them to priority helps.
- */
-export function buildOldTown(spec: FaultSpec = true): NetworkSnapshot {
-  const f = faultsOf(spec);
-  const b = new Builder();
-  const gap = 300;
-  const coords = [-gap, 0, gap];
-  const name = (i: number, j: number) => `o${i}${j}`;
-  coords.forEach((x, i) => coords.forEach((z, j) => b.node(name(i, j), x, z)));
-
-  let seq = 0;
-  // Horizontal and vertical streets between neighbouring corners.
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 3; j++) {
-      if (i < 2) {
-        b.road(0, `oh${seq++}`, name(i, j), name(i + 1, j), "street");
-      }
-      if (j < 2) b.road(0, `ov${seq++}`, name(i, j), name(i, j + 1), "street");
-    }
-  }
-  // Streets out of town from each outer corner side.
-  const reach = 1100;
-  const demand = 630;
-  coords.forEach((c, k) => {
-    const n = b.node(`on${k}`, c, -reach);
-    b.road(0, `on${k}`, n, name(k, 0), "street", "ground", { forward: ENTRY(demand), backward: DEST });
-    const s = b.node(`os${k}`, c, reach);
-    b.road(0, `os${k}`, name(k, 2), s, "street", "ground", { forward: DEST, backward: ENTRY(demand) });
-    const w = b.node(`ow${k}`, -reach, c);
-    b.road(0, `ow${k}`, w, name(0, k), "street", "ground", { forward: ENTRY(demand), backward: DEST });
-    const e = b.node(`oe${k}`, reach, c);
-    b.road(0, `oe${k}`, name(2, k), e, "street", "ground", { forward: DEST, backward: ENTRY(demand) });
-  });
-
-  for (let i = 0; i < 3; i++) {
-    for (let j = 0; j < 3; j++) {
-      const id = name(i, j);
-      addSignal(b, id, f.signal && (id === "o00" || id === "o22" || id === "o02" || id === "o20") ? 3 : 20, 2);
-    }
   }
   return { nodes: [...b.nodes.values()], edges: b.edges };
 }

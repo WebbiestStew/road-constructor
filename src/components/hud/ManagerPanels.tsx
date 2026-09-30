@@ -6,9 +6,9 @@ import { ROAD_CLASSES } from "@/sim/roadClasses";
 import { LANE_MOVES, type LaneMove } from "@/sim/types";
 import { SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
 import {
-  IconArrowLeft,
-  IconArrowRight,
-  IconArrowUp,
+  IconTurnLeft,
+  IconTurnRight,
+  IconGoStraight,
   IconClose,
   IconJunction,
   IconLanes,
@@ -22,9 +22,9 @@ import {
 type IconType = ComponentType<SVGProps<SVGSVGElement>>;
 
 const MOVE_ICON: Record<LaneMove, IconType> = {
-  left: IconArrowLeft,
-  straight: IconArrowUp,
-  right: IconArrowRight,
+  left: IconTurnLeft,
+  straight: IconGoStraight,
+  right: IconTurnRight,
 };
 const MOVE_LABEL: Record<LaneMove, string> = { left: "Left", straight: "Straight", right: "Right" };
 

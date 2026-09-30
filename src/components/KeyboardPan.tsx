@@ -10,13 +10,15 @@ const FAST_MULTIPLIER = 2.6;
 const ROTATE_SPEED_RAD_PER_S = 1.1;
 
 const PAN_KEYS = new Set(["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"]);
+const ROTATE_LEFT = "[";
+const ROTATE_RIGHT = "]";
 
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _offset = new THREE.Vector3();
 
 /**
- * WASD / arrow keys pan the camera across the ground, Shift goes faster, and Q/E orbit. Moves the camera
+ * WASD / arrow keys pan the camera across the ground, Shift goes faster, and [ / ] orbit (Q/E are taken by elevation). Moves the camera
  * and the orbit target together so mouse orbiting keeps working from the new spot. Renders nothing.
  */
 export default function KeyboardPan() {
@@ -31,7 +33,7 @@ export default function KeyboardPan() {
     const down = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       const k = e.key.toLowerCase();
-      if (PAN_KEYS.has(k) || k === "q" || k === "e") {
+      if (PAN_KEYS.has(k) || k === ROTATE_LEFT || k === ROTATE_RIGHT) {
         heldKeys.add(k);
         e.preventDefault();
       }
@@ -79,7 +81,7 @@ export default function KeyboardPan() {
       controls.target.add(_offset);
     }
 
-    const spin = (keys.has("e") ? 1 : 0) - (keys.has("q") ? 1 : 0);
+    const spin = (keys.has(ROTATE_RIGHT) ? 1 : 0) - (keys.has(ROTATE_LEFT) ? 1 : 0);
     if (spin !== 0) {
       _offset.copy(camera.position).sub(controls.target);
       _offset.applyAxisAngle(camera.up, spin * ROTATE_SPEED_RAD_PER_S * dt);

@@ -1,5 +1,11 @@
 import * as THREE from "three";
-import { ROAD_CLASSES, ROUNDABOUT_PRIORITY } from "./roadClasses";
+import {
+  ROAD_CLASSES,
+  ROUNDABOUT_PRIORITY,
+  TEXAS_TURNAROUND_MIN_RADIUS_FT,
+  TEXAS_TURNAROUND_PRIORITY,
+  TEXAS_TURNAROUND_SEARCH_RADIUS_FT,
+} from "./roadClasses";
 import { mphToFtps } from "./types";
 import type {
   Edge3D,
@@ -18,15 +24,127 @@ export function createEmptyNetworkSnapshot(): NetworkSnapshot {
   return { nodes: [], edges: [] };
 }
 
-function buildSpline(spec: EdgeSpec, nodesById: Map<string, NodeSpec>): THREE.CatmullRomCurve3 {
+/** Points a plain node-to-node ramp is subdivided into so its elevation can ease in/out instead of jumping to a new grade in one straight line. */
+const VERTICAL_CURVE_STEPS = 6;
+/** Elevation delta (ft) below which a straight segment reads as flat enough that a vertical curve would be pointless. */
+const VERTICAL_CURVE_THRESHOLD_FT = 0.5;
+
+/** Builds a `nodeId -> distinct neighbor node ids` map from every edge's endpoints, direction-agnostic (a two-way pair of edges between the same two nodes still counts as one neighbor). Used to tell a plain "bend point" mid-road (exactly one neighbor on each side) apart from a dead end or a real multi-way junction, which should keep a straight, unsmoothed approach. */
+function buildNeighborsByNode(edges: EdgeSpec[]): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    let set = map.get(a);
+    if (!set) {
+      set = new Set();
+      map.set(a, set);
+    }
+    set.add(b);
+  };
+  for (const e of edges) {
+    link(e.fromNodeId, e.toNodeId);
+    link(e.toNodeId, e.fromNodeId);
+  }
+  return map;
+}
+
+/** If `nodeId` has exactly one neighbor other than `exclude`, returns that neighbor's id — otherwise null (a dead end, or a real junction with no single unambiguous "through" direction). */
+function singleOtherNeighbor(
+  neighborsByNode: Map<string, Set<string>>,
+  nodeId: string,
+  exclude: string
+): string | null {
+  const neighbors = neighborsByNode.get(nodeId);
+  if (!neighbors || neighbors.size !== 2) return null;
+  for (const id of neighbors) {
+    if (id !== exclude) return id;
+  }
+  return null;
+}
+
+function buildSpline(
+  spec: EdgeSpec,
+  nodesById: Map<string, NodeSpec>,
+  neighborsByNode: Map<string, Set<string>>
+): THREE.CatmullRomCurve3 {
   const fromNode = nodesById.get(spec.fromNodeId);
   const toNode = nodesById.get(spec.toNodeId);
   if (!fromNode || !toNode) {
     throw new Error(`Edge ${spec.id} references unknown node`);
   }
-  const points: THREE.Vector3[] = [new THREE.Vector3(...fromNode.position)];
+  const from = fromNode.position;
+  const to = toNode.position;
+
+  // A plain node-to-node ramp with a real elevation change gets a smooth
+  // (ease-in/out) vertical curve instead of one straight linear grade line,
+  // so the deck doesn't kink where it meets a flat approach at either end —
+  // the "sharp kink" a real vertical curve (PVC/PVT) is designed to remove.
+  // Edges with player-placed interior points keep their authored shape.
+  if (spec.interiorPoints.length === 0 && Math.abs(to[1] - from[1]) > VERTICAL_CURVE_THRESHOLD_FT) {
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i <= VERTICAL_CURVE_STEPS; i++) {
+      const t = i / VERTICAL_CURVE_STEPS;
+      const eased = t * t * (3 - 2 * t); // smoothstep: zero slope at both ends
+      points.push(
+        new THREE.Vector3(
+          from[0] + (to[0] - from[0]) * t,
+          from[1] + (to[1] - from[1]) * eased,
+          from[2] + (to[2] - from[2]) * t
+        )
+      );
+    }
+    return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
+  }
+
+  // A flat (or near-flat) edge with no authored shape gets its endpoint
+  // tangents blended with whatever road continues past each end — a plain
+  // "bend point" the player tapped into a road while drawing keeps
+  // travelling smoothly through it instead of the pavement kinking to a
+  // sharp vertex where two dead-straight edges meet. A dead end or a real
+  // multi-way junction has no single unambiguous "continuing" direction, so
+  // that end is left as a straight approach exactly as before — only a
+  // node with precisely one neighbor on the far side counts as a bend.
+  if (spec.interiorPoints.length === 0) {
+    const fromV = new THREE.Vector3(...from);
+    const toV = new THREE.Vector3(...to);
+    const prevNeighborId = singleOtherNeighbor(neighborsByNode, spec.fromNodeId, spec.toNodeId);
+    const nextNeighborId = singleOtherNeighbor(neighborsByNode, spec.toNodeId, spec.fromNodeId);
+    const prevNode = prevNeighborId ? nodesById.get(prevNeighborId) : undefined;
+    const nextNode = nextNeighborId ? nodesById.get(nextNeighborId) : undefined;
+
+    if (prevNode || nextNode) {
+      const chordLength = toV.distanceTo(fromV);
+      const straightDir = toV.clone().sub(fromV).normalize();
+      // Tangent direction follows the neighboring segment (Catmull-Rom
+      // style: "prev -> to" / "from -> next"), but its magnitude is scaled
+      // to this edge's own length rather than the neighbor's — otherwise a
+      // long lead-in segment feeding a short one would wildly overshoot the
+      // control points and bulge or loop the curve.
+      const startDir = prevNode
+        ? toV.clone().sub(new THREE.Vector3(...prevNode.position)).normalize()
+        : straightDir;
+      const endDir = nextNode
+        ? new THREE.Vector3(...nextNode.position).sub(fromV).normalize()
+        : straightDir;
+
+      const control1 = fromV.clone().addScaledVector(startDir, chordLength / 3);
+      const control2 = toV.clone().addScaledVector(endDir, -chordLength / 3);
+      const bezier = new THREE.CubicBezierCurve3(fromV, control1, control2, toV);
+
+      // Resample as a CatmullRomCurve3 (rather than returning the Bezier
+      // directly) so every downstream consumer of Edge3D.spline keeps
+      // working against the exact same curve type unchanged.
+      const sampleCount = 12;
+      const sampled: THREE.Vector3[] = [];
+      for (let i = 0; i <= sampleCount; i++) {
+        sampled.push(bezier.getPoint(i / sampleCount));
+      }
+      return new THREE.CatmullRomCurve3(sampled, false, "catmullrom", 0.5);
+    }
+  }
+
+  const points: THREE.Vector3[] = [new THREE.Vector3(...from)];
   for (const p of spec.interiorPoints) points.push(new THREE.Vector3(...p));
-  points.push(new THREE.Vector3(...toNode.position));
+  points.push(new THREE.Vector3(...to));
   return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
 }
 
@@ -48,9 +166,10 @@ function computeIsElevated(curve: THREE.CatmullRomCurve3): boolean {
  */
 export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   const nodesById = new Map(snapshot.nodes.map((n) => [n.id, n]));
+  const neighborsByNode = buildNeighborsByNode(snapshot.edges);
 
   const edges: Edge3D[] = snapshot.edges.map((spec) => {
-    const spline = buildSpline(spec, nodesById);
+    const spline = buildSpline(spec, nodesById, neighborsByNode);
     const length = spline.getLength();
     const roadClass = ROAD_CLASSES[spec.roadClassId];
     return {
@@ -64,11 +183,16 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       length,
       roadClassId: spec.roadClassId,
       elevationLevelId: spec.elevationLevelId,
-      priority: spec.isRoundaboutRing ? ROUNDABOUT_PRIORITY : roadClass.priority,
+      priority: spec.isRoundaboutRing
+        ? ROUNDABOUT_PRIORITY
+        : spec.isTexasTurnaround
+          ? TEXAS_TURNAROUND_PRIORITY
+          : roadClass.priority,
       isFreeway: spec.roadClassId === "highway" || spec.roadClassId === "motorway",
       isElevated: computeIsElevated(spline),
       zone: spec.zone,
       isRoundaboutRing: spec.isRoundaboutRing ?? false,
+      isTexasTurnaround: spec.isTexasTurnaround ?? false,
       nextEdgeIds: [],
       manualLaneMoves: spec.laneMoves ?? null,
       nextMoves: new Map(),
@@ -90,6 +214,32 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   }
 
   return { nodesById, edges, edgesById };
+}
+
+// ---------------------------------------------------------------------------
+// A one-slot memoization cache for assembleNetwork, keyed by the exact
+// `nodes`/`edges` array references. RoadNetworkMesh, InfoPanel's live edge
+// and junction inspectors, and JointClackDetector each independently call
+// assembleNetwork off the same editor-store arrays, which — for anything
+// past a small network — is real, duplicated O(edges^2) work (the diverge-
+// lane assignment pass) done up to four times per store update instead of
+// once. Since the store's `nodes`/`edges` are only ever replaced wholesale
+// (never mutated in place), a same-reference check is a safe, exact cache
+// hit test — no risk of serving stale data.
+// ---------------------------------------------------------------------------
+let cachedNodes: NodeSpec[] | null = null;
+let cachedEdges: EdgeSpec[] | null = null;
+let cachedNetwork: RoadNetwork | null = null;
+
+/** Same result as `assembleNetwork({ nodes, edges })`, but reuses the last computed network when both array references are unchanged since the last call — see the module-level comment above. */
+export function assembleNetworkCached(nodes: NodeSpec[], edges: EdgeSpec[]): RoadNetwork {
+  if (cachedNetwork && cachedNodes === nodes && cachedEdges === edges) {
+    return cachedNetwork;
+  }
+  cachedNodes = nodes;
+  cachedEdges = edges;
+  cachedNetwork = assembleNetwork({ nodes, edges });
+  return cachedNetwork;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -255,6 +405,148 @@ export function computeRoute(
   }
   path.reverse();
   return path;
+}
+
+export interface EdgePointHit {
+  t: number;
+  point: THREE.Vector3;
+  distSq: number;
+}
+
+/**
+ * Finds the closest point on an edge's centerline to a given world point via
+ * coarse-then-fine sampling. One-off editor interaction (e.g. clicking a
+ * road to anchor a Texas turnaround) — never called in the simulation's
+ * per-tick hot path, so a few dozen curve samples is a fine cost.
+ */
+export function findClosestPointOnEdge(edge: Edge3D, point: THREE.Vector3, coarseSteps = 40): EdgePointHit {
+  let bestT = 0;
+  let bestDistSq = Infinity;
+  const p = new THREE.Vector3();
+  for (let i = 0; i <= coarseSteps; i++) {
+    const t = i / coarseSteps;
+    edge.spline.getPointAt(t, p);
+    const d = p.distanceToSquared(point);
+    if (d < bestDistSq) {
+      bestDistSq = d;
+      bestT = t;
+    }
+  }
+
+  let lo = Math.max(0, bestT - 1 / coarseSteps);
+  let hi = Math.min(1, bestT + 1 / coarseSteps);
+  const fineSteps = 10;
+  for (let iter = 0; iter < 3; iter++) {
+    for (let i = 0; i <= fineSteps; i++) {
+      const t = lo + ((hi - lo) * i) / fineSteps;
+      edge.spline.getPointAt(t, p);
+      const d = p.distanceToSquared(point);
+      if (d < bestDistSq) {
+        bestDistSq = d;
+        bestT = t;
+      }
+    }
+    const newSpan = (hi - lo) / fineSteps;
+    lo = Math.max(0, bestT - newSpan);
+    hi = Math.min(1, bestT + newSpan);
+  }
+
+  const point3 = new THREE.Vector3();
+  edge.spline.getPointAt(bestT, point3);
+  return { t: bestT, point: point3, distSq: bestDistSq };
+}
+
+export interface TexasTurnaroundPlan {
+  /** The opposing (roughly anti-parallel) edge the loop merges back into. */
+  targetEdgeId: string;
+  nodeAPoint: [number, number, number];
+  nodeBPoint: [number, number, number];
+  controlPoint1: [number, number, number];
+  controlPoint2: [number, number, number];
+  lengthFt: number;
+}
+
+const _turnaroundUp = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Pure geometry planner shared by the live hover preview and the actual
+ * Texas turnaround build action: given a clicked/hovered edge and an anchor
+ * point on it, finds the nearest opposing (anti-parallel) frontage edge
+ * within range and computes the looped slip-lane path connecting them.
+ * Returns null if no suitable opposing edge exists nearby — never mutates
+ * anything.
+ */
+export function planTexasTurnaround(
+  network: RoadNetwork,
+  edgeId: string,
+  anchorPoint: THREE.Vector3
+): TexasTurnaroundPlan | null {
+  const edgeA = network.edgesById.get(edgeId);
+  if (!edgeA) return null;
+
+  const hitA = findClosestPointOnEdge(edgeA, anchorPoint);
+  const dirA = edgeA.spline.getTangentAt(hitA.t);
+  const right = new THREE.Vector3().crossVectors(dirA, _turnaroundUp).normalize();
+
+  let best: { edgeId: string; point: THREE.Vector3; dir: THREE.Vector3; distSq: number } | null = null;
+  for (const candidate of network.edges) {
+    if (candidate.id === edgeA.id) continue;
+    if (candidate.isRoundaboutRing || candidate.isTexasTurnaround) continue;
+    if (
+      candidate.fromNodeId === edgeA.fromNodeId ||
+      candidate.fromNodeId === edgeA.toNodeId ||
+      candidate.toNodeId === edgeA.fromNodeId ||
+      candidate.toNodeId === edgeA.toNodeId
+    ) {
+      continue; // already meets edge A at a shared node — not a separate frontage road
+    }
+    const hit = findClosestPointOnEdge(candidate, hitA.point);
+    if (hit.distSq > TEXAS_TURNAROUND_SEARCH_RADIUS_FT * TEXAS_TURNAROUND_SEARCH_RADIUS_FT) continue;
+    const candidateDir = candidate.spline.getTangentAt(hit.t);
+    if (dirA.dot(candidateDir) > -0.7) continue; // must run roughly the opposite direction
+    if (!best || hit.distSq < best.distSq) {
+      best = { edgeId: candidate.id, point: hit.point, dir: candidateDir, distSq: hit.distSq };
+    }
+  }
+
+  if (!best) return null;
+
+  const dirB = best.dir;
+  const nodeAPos = hitA.point;
+  const nodeBPos = best.point;
+
+  const lateralGapFt = Math.hypot(nodeBPos.x - nodeAPos.x, nodeBPos.z - nodeAPos.z);
+  const loopRadiusFt = Math.max(TEXAS_TURNAROUND_MIN_RADIUS_FT, lateralGapFt / 2 + 10);
+  const lateralSign =
+    Math.sign((nodeBPos.x - nodeAPos.x) * right.x + (nodeBPos.z - nodeAPos.z) * right.z) || 1;
+
+  const controlPoint1: [number, number, number] = [
+    nodeAPos.x + dirA.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
+    nodeAPos.y,
+    nodeAPos.z + dirA.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
+  ];
+  const controlPoint2: [number, number, number] = [
+    nodeBPos.x - dirB.x * loopRadiusFt * 0.6 + right.x * lateralSign * loopRadiusFt,
+    nodeBPos.y,
+    nodeBPos.z - dirB.z * loopRadiusFt * 0.6 + right.z * lateralSign * loopRadiusFt,
+  ];
+
+  const points = [
+    new THREE.Vector3(nodeAPos.x, nodeAPos.y, nodeAPos.z),
+    new THREE.Vector3(...controlPoint1),
+    new THREE.Vector3(...controlPoint2),
+    new THREE.Vector3(nodeBPos.x, nodeBPos.y, nodeBPos.z),
+  ];
+  const lengthFt = new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5).getLength();
+
+  return {
+    targetEdgeId: best.edgeId,
+    nodeAPoint: [nodeAPos.x, nodeAPos.y, nodeAPos.z],
+    nodeBPoint: [nodeBPos.x, nodeBPos.y, nodeBPos.z],
+    controlPoint1,
+    controlPoint2,
+    lengthFt,
+  };
 }
 
 function angleDiff(a: number, b: number): number {
