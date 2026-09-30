@@ -73,15 +73,29 @@ interface TreeInstance {
   color: string;
 }
 
-function generateTrees(): TreeInstance[] {
+/** [ax, az, bx, bz] road centerline segments that trees must stay clear of. */
+export type AvoidSegment = [number, number, number, number];
+
+function distToSegment(px: number, pz: number, [ax, az, bx, bz]: AvoidSegment): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const lenSq = dx * dx + dz * dz;
+  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / lenSq));
+  return Math.hypot(px - (ax + t * dx), pz - (az + t * dz));
+}
+
+function generateTrees(count: number, avoid: AvoidSegment[], clearance: number): TreeInstance[] {
   const trees: TreeInstance[] = [];
-  for (let i = 0; i < TREE_COUNT; i++) {
+  for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
     const radius = TREE_CLEAR_RADIUS + Math.sqrt(Math.random()) * (TREE_FIELD_RADIUS - TREE_CLEAR_RADIUS);
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    if (avoid.some((seg) => distToSegment(x, z, seg) < clearance)) continue;
     const isBlossom = Math.random() < 0.08;
     const palette = isBlossom ? BLOSSOM_COLORS : TREE_COLORS;
     trees.push({
-      position: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius],
+      position: [x, 0, z],
       scale: 7 + Math.random() * 9,
       rotationY: Math.random() * Math.PI * 2,
       color: palette[Math.floor(Math.random() * palette.length)],
@@ -120,8 +134,8 @@ function TreeInstancedGroup({ color, instances }: { color: string; instances: Tr
   );
 }
 
-function TreeField() {
-  const trees = useMemo(() => generateTrees(), []);
+function TreeField({ count, avoid, clearance }: { count: number; avoid: AvoidSegment[]; clearance: number }) {
+  const trees = useMemo(() => generateTrees(count, avoid, clearance), [count, avoid, clearance]);
   const grouped = useMemo(() => {
     const byColor = new Map<string, TreeInstance[]>();
     for (const t of trees) {
@@ -141,7 +155,17 @@ function TreeField() {
   );
 }
 
-export default function Terrain() {
+const NO_AVOID: AvoidSegment[] = [];
+
+export default function Terrain({
+  treeCount = TREE_COUNT,
+  avoid = NO_AVOID,
+  clearance = 0,
+}: {
+  treeCount?: number;
+  avoid?: AvoidSegment[];
+  clearance?: number;
+} = {}) {
   const texture = useMemo(() => createGroundTexture(), []);
 
   return (
@@ -150,7 +174,7 @@ export default function Terrain() {
         <planeGeometry args={[GROUND_SIZE, GROUND_SIZE]} />
         <meshStandardMaterial map={texture} roughness={1} metalness={0} />
       </mesh>
-      <TreeField />
+      <TreeField count={treeCount} avoid={avoid} clearance={clearance} />
     </group>
   );
 }

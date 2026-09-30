@@ -4,7 +4,6 @@
   --background: #d7c9f2;
   --foreground: #241b3d;
   --font-sans: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-display, var(--font-ui)), "Arial Narrow", system-ui, sans-serif;
 }
 
 html,
@@ -17,12 +16,22 @@ body {
   overscroll-behavior: none;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
 
 .font-display {
-  font-family: var(--font-display);
+  font-family: var(--font-display), "Arial Narrow", system-ui, sans-serif;
 }
 
 #sim-root {
@@ -207,4 +216,72 @@ input[type="range"]::-moz-range-thumb {
   height: 8px;
   border-radius: 2px;
   animation: confetti-fall 900ms ease-in forwards;
+}
+
+/* --- Landing page --- */
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 95, 168, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(255, 95, 168, 0);
+  }
+}
+
+@keyframes nudge-down {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(6px);
+  }
+}
+
+.fade-up {
+  opacity: 0;
+  animation: fade-up 700ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.chunky-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 2.5px solid #2b1c40;
+  border-radius: 999px;
+  font-weight: 800;
+  box-shadow: 0 5px 0 #2b1c40;
+  transition:
+    transform 110ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 110ms ease;
+}
+
+.chunky-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 #2b1c40;
+}
+
+.chunky-btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #2b1c40;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-up {
+    animation: none;
+    opacity: 1;
+  }
 }
