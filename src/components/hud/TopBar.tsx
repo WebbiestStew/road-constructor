@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { downloadNetworkFile, parseNetworkFile } from "@/state/persistence";
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
+import { setQuality, useQuality } from "@/lib/quality";
 import {
   IconDownload,
   IconHeatmap,
@@ -19,13 +21,18 @@ import {
 } from "./icons";
 
 const SPEED_OPTIONS = [1, 2, 5, 10];
+const VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
+/** Set NEXT_PUBLIC_FEEDBACK_URL (issue tracker, form, mailto:) to show the feedback link. */
+const FEEDBACK_URL = process.env.NEXT_PUBLIC_FEEDBACK_URL;
 
 export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const mode = useEditorStore((s) => s.mode);
   const setMode = useEditorStore((s) => s.setMode);
+  const buildLocked = useEditorStore((s) => s.buildLocked);
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const setHeatmapEnabled = useEditorStore((s) => s.setHeatmapEnabled);
   const [muted, setMutedState] = useState(false);
+  const quality = useQuality();
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMutedState(isMuted()));
@@ -56,17 +63,28 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
 
   return (
     <div className="pointer-events-auto absolute left-4 top-4 z-20 flex items-center gap-1 rounded-full p-1.5 hud-panel">
-      <div className="flex items-center gap-1.5 pl-1.5 pr-2.5">
+      <Link href="/" title="Back to home" className="flex items-center gap-1.5 pl-1.5 pr-2.5">
         <span className="hover-wiggle flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-pink-500 text-white shadow-sm">
           <IconRoad className="h-4 w-4" />
         </span>
         <span className="font-display hidden text-base font-extrabold tracking-tight text-[#241b3d] sm:inline">
           Road Constructor
         </span>
-      </div>
+        <span
+          title={VERSION ? `Beta v${VERSION}` : "Beta"}
+          className="rounded-full bg-[#241b3d] px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-white"
+        >
+          Beta
+        </span>
+      </Link>
 
       <div className="h-6 w-px bg-black/10" />
 
+      {buildLocked ? (
+        <span className="rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 px-3.5 py-1.5 text-xs font-bold text-white shadow">
+          Traffic Manager 🚦
+        </span>
+      ) : (
       <div className="flex items-center gap-1 rounded-full bg-black/5 p-1">
         <button
           type="button"
@@ -91,8 +109,9 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           Open to Traffic 🚦
         </button>
       </div>
+      )}
 
-      {mode === "build" && (
+      {mode === "build" && !buildLocked && (
         <>
           <div className="h-6 w-px bg-black/10" />
           <div className="flex items-center gap-0.5">
@@ -193,6 +212,25 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       >
         {muted ? <IconSpeakerOff className="h-3.5 w-3.5" /> : <IconSpeakerOn className="h-3.5 w-3.5" />}
       </button>
+      <button
+        type="button"
+        onClick={() => setQuality(quality === "high" ? "low" : "high")}
+        title={quality === "high" ? "Graphics: High — click for Low (faster)" : "Graphics: Low — click for High"}
+        className="flex h-7 items-center justify-center rounded-full px-2 text-[10px] font-extrabold uppercase text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+      >
+        {quality === "high" ? "HQ" : "LQ"}
+      </button>
+      {FEEDBACK_URL && (
+        <a
+          href={FEEDBACK_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Send beta feedback"
+          className="flex h-7 items-center justify-center rounded-full px-2 text-[11px] font-bold text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+        >
+          Feedback
+        </a>
+      )}
       <button
         type="button"
         onClick={requestOpenTutorial}

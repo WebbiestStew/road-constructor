@@ -3,12 +3,11 @@
 import type { ComponentType, SVGProps } from "react";
 import { ELEVATION_LEVELS, ROAD_CLASS_LIST } from "@/sim/roadClasses";
 import { useEditorStore, type EditorTool } from "@/state/editorStore";
-import { IconDelete, IconDraw, IconInspect, IconZone } from "./icons";
+import { IconDelete, IconDraw, IconZone } from "./icons";
 
 const TOOLS: { id: EditorTool; icon: ComponentType<SVGProps<SVGSVGElement>>; label: string }[] = [
   { id: "draw", icon: IconDraw, label: "Draw" },
   { id: "delete", icon: IconDelete, label: "Delete" },
-  { id: "inspect", icon: IconInspect, label: "Inspect" },
   { id: "zone", icon: IconZone, label: "Zone" },
 ];
 
@@ -130,8 +129,9 @@ export default function ToolDock() {
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
   const setTool = useEditorStore((s) => s.setTool);
+  const buildLocked = useEditorStore((s) => s.buildLocked);
 
-  if (mode !== "build") return null;
+  if (mode !== "build" || buildLocked) return null;
 
   return (
     <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">

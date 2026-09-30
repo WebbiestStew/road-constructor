@@ -1,15 +1,20 @@
 "use client";
 
-import type { ComponentType, SVGProps } from "react";
-import { ROAD_CLASS_LIST } from "@/sim/roadClasses";
+import { useState, type ComponentType, type SVGProps } from "react";
+import { ROAD_CLASSES, ROAD_CLASS_LIST } from "@/sim/roadClasses";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
+import { JunctionCard, LaneManagerCard, SpeedLimitCard, ToolHintCard } from "./ManagerPanels";
 import {
   IconCar,
   IconClock,
   IconClose,
   IconFlag,
   IconGauge,
+  IconInspect,
+  IconJunction,
+  IconLanes,
+  IconSpeedSign,
   IconRoundabout,
   IconSignal,
   IconWarning,
@@ -67,14 +72,11 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
 function SelectionInspector() {
   const selection = useEditorStore((s) => s.selection);
   const edgesById = useEditorStore((s) => s.edgesById);
-  const nodesById = useEditorStore((s) => s.nodesById);
   const edges = useEditorStore((s) => s.edges);
   const setEdgeLanes = useEditorStore((s) => s.setEdgeLanes);
   const setEdgeOneWay = useEditorStore((s) => s.setEdgeOneWay);
   const setEdgeRoadClass = useEditorStore((s) => s.setEdgeRoadClass);
   const deleteEdge = useEditorStore((s) => s.deleteEdge);
-  const setNodeControl = useEditorStore((s) => s.setNodeControl);
-  const convertNodeToRoundabout = useEditorStore((s) => s.convertNodeToRoundabout);
   const setSelection = useEditorStore((s) => s.setSelection);
 
   if (!selection) return null;
@@ -157,77 +159,7 @@ function SelectionInspector() {
     );
   }
 
-  const node = nodesById.get(selection.id);
-  if (!node) return null;
-  const isSignal = node.control?.type === "signal";
-  const legCount = new Set(
-    edges
-      .filter((e) => e.fromNodeId === node.id || e.toNodeId === node.id)
-      .map((e) => (e.fromNodeId === node.id ? e.toNodeId : e.fromNodeId))
-  ).size;
-
-  return (
-    <div className="hud-panel flex flex-col gap-3 rounded-2xl p-3.5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-zinc-800">Junction</span>
-        <button type="button" onClick={() => setSelection(null)} className="text-zinc-400 hover:text-zinc-700">
-          <IconClose className="h-3.5 w-3.5" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-1.5">
-        <button
-          type="button"
-          onClick={() => setNodeControl(node.id, undefined)}
-          className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-bold transition active:scale-95 ${
-            !isSignal
-              ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm"
-              : "bg-black/5 text-zinc-600 hover:bg-black/10"
-          }`}
-        >
-          <IconYield className="h-4 w-4" />
-          Priority
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setNodeControl(node.id, {
-              type: "signal",
-              groupA: [],
-              groupB: [],
-              greenDurationS: 20,
-              allRedDurationS: 2,
-            })
-          }
-          className={`flex flex-col items-center gap-1 rounded-xl py-2.5 text-[11px] font-bold transition active:scale-95 ${
-            isSignal
-              ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm"
-              : "bg-black/5 text-zinc-600 hover:bg-black/10"
-          }`}
-        >
-          <IconSignal className="h-4 w-4" />
-          Signal
-        </button>
-      </div>
-
-      <p className="text-[11px] leading-snug text-zinc-500">
-        {isSignal
-          ? "Approaches are auto-grouped into two phases by heading; 20s green + 2s all-red each."
-          : "Higher-class roads get right of way; equal-class approaches yield to whoever arrives first."}
-      </p>
-
-      <button
-        type="button"
-        disabled={legCount < 2}
-        onClick={() => convertNodeToRoundabout(node.id)}
-        className="flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 px-2.5 py-1.5 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
-      >
-        <IconRoundabout className="h-3.5 w-3.5" />
-        Make roundabout 🔄
-      </button>
-      {legCount < 2 && <p className="text-[11px] text-zinc-500">Needs at least 2 connected roads.</p>}
-    </div>
-  );
+  return <JunctionCard allowRebuild />;
 }
 
 function BuildInfo() {
@@ -237,7 +169,7 @@ function BuildInfo() {
   if (!selection) return null;
 
   return (
-    <div className="flex w-72 flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <SelectionInspector />
 
       <button
@@ -253,6 +185,71 @@ function BuildInfo() {
   );
 }
 
+/** Read-only look at a road while traffic runs: what it is and how it's actually flowing. */
+function RoadInfoCard({ sim }: { sim: UseTrafficSimulationReturn }) {
+  const selection = useEditorStore((s) => s.selection);
+  const edgesById = useEditorStore((s) => s.edgesById);
+  const setSelection = useEditorStore((s) => s.setSelection);
+  if (selection?.kind !== "edge") return null;
+  const edge = edgesById.get(selection.id);
+  if (!edge) return null;
+  const ratio = sim.metrics.edgeSpeedRatios.find(([id]) => id === edge.id)?.[1];
+  const cls = ROAD_CLASSES[edge.roadClassId];
+  return (
+    <div className="hud-panel flex flex-col gap-2 rounded-2xl p-3.5 text-xs text-zinc-600">
+      <div className="flex items-center justify-between">
+        <span className="font-display text-sm font-extrabold uppercase text-[#241b3d]">{cls.label}</span>
+        <button type="button" onClick={() => setSelection(null)} className="text-zinc-400 hover:text-zinc-700">
+          <IconClose className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="flex justify-between"><span>Lanes</span><b className="text-zinc-900">{edge.lanes}</b></div>
+      <div className="flex justify-between"><span>Speed limit</span><b className="text-zinc-900">{edge.speedLimitMph} mph</b></div>
+      <div className="flex justify-between">
+        <span>Traffic moving at</span>
+        <b className="text-zinc-900">{ratio === undefined ? "no data yet" : `${Math.round(ratio * edge.speedLimitMph)} mph`}</b>
+      </div>
+      <p className="text-[11px] leading-snug text-zinc-500">Use Lane arrows, Speed limits or Junctions on the left to change how this flows.</p>
+    </div>
+  );
+}
+
+function ManagerCards({ sim }: { sim: UseTrafficSimulationReturn }) {
+  const mode = useEditorStore((s) => s.mode);
+  const buildLocked = useEditorStore((s) => s.buildLocked);
+  const tool = useEditorStore((s) => s.tool);
+  const selection = useEditorStore((s) => s.selection);
+  const [wholeRoad, setWholeRoad] = useState(true);
+
+  if (tool === "lanes") {
+    return selection?.kind === "edge" ? (
+      <LaneManagerCard />
+    ) : (
+      <ToolHintCard icon={IconLanes} title="Lane arrows" body="Click a road that splits at a junction, then choose which lanes may turn left, go straight or turn right." />
+    );
+  }
+  if (tool === "speed") {
+    return selection?.kind === "edge" ? (
+      <SpeedLimitCard wholeRoad={wholeRoad} setWholeRoad={setWholeRoad} />
+    ) : (
+      <ToolHintCard icon={IconSpeedSign} title="Speed limits" body="Click a road, then pick a limit. Slow stretches back traffic up; fast ones move it along." />
+    );
+  }
+  if (tool === "junction") {
+    return selection?.kind === "node" ? (
+      <JunctionCard allowRebuild />
+    ) : (
+      <ToolHintCard icon={IconJunction} title="Junctions" body="Click a glowing junction to switch between priority and a traffic light, and tune the light's timing." />
+    );
+  }
+  if (tool === "inspect") {
+    if (mode === "build" && !buildLocked) return <BuildInfo />;
+    if (selection?.kind === "edge") return <RoadInfoCard sim={sim} />;
+    return <ToolHintCard icon={IconInspect} title="Select" body="Click a road to see how it's flowing, or pick a traffic tool to start fixing things." />;
+  }
+  return null;
+}
+
 function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const { metrics, setDemand } = sim;
   const edges = useEditorStore((s) => s.edges);
@@ -263,7 +260,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const contractsByEdge = new Map(metrics.contracts.map((c) => [c.edgeId, c]));
 
   return (
-    <div className="hud-panel flex w-80 flex-col gap-4 rounded-2xl p-3.5">
+    <div className="hud-panel flex flex-col gap-4 rounded-2xl p-3.5">
       <div className="grid grid-cols-2 gap-2">
         <StatCard
           icon={IconCar}
@@ -387,8 +384,9 @@ export default function InfoPanel({ sim }: { sim: UseTrafficSimulationReturn }) 
   const mode = useEditorStore((s) => s.mode);
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-20 z-20">
-      {mode === "build" ? <BuildInfo /> : <SimulateInfo sim={sim} />}
+    <div className="pointer-events-auto absolute right-4 top-20 z-20 flex max-h-[calc(100vh-6rem)] w-80 flex-col gap-3 overflow-y-auto hud-scrollbar">
+      {mode === "simulate" && <SimulateInfo sim={sim} />}
+      <ManagerCards sim={sim} />
     </div>
   );
 }

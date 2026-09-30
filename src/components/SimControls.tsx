@@ -9,8 +9,10 @@ import InfoPanel from "./hud/InfoPanel";
 import Minimap from "./hud/Minimap";
 import PlayButton from "./hud/PlayButton";
 import ScenarioHud from "./hud/ScenarioHud";
+import ManagerRail from "./hud/ManagerRail";
 import ToolDock from "./hud/ToolDock";
 import TopBar from "./hud/TopBar";
+import QualityNotice from "./hud/QualityNotice";
 import Tutorial from "./hud/Tutorial";
 
 export default function SimControls({
@@ -25,12 +27,14 @@ export default function SimControls({
       <TopBar sim={sim} />
       <BudgetBar />
       <PlayButton sim={sim} />
+      <ManagerRail />
       <ToolDock />
       <InfoPanel sim={sim} />
       <HintBar />
       <Minimap />
       <Confetti sim={sim} />
       <ScenarioHud runner={scenarioRunner} />
+      <QualityNotice />
       <Tutorial />
     </div>
   );

@@ -19,6 +19,7 @@ export default function RoadEditor() {
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
   const nodes = useEditorStore((s) => s.nodes);
+  const edges = useEditorStore((s) => s.edges);
   const drawFromNodeId = useEditorStore((s) => s.drawFromNodeId);
   const selectedElevationId = useEditorStore((s) => s.selectedElevationId);
   const selectedRoadClassId = useEditorStore((s) => s.selectedRoadClassId);
@@ -56,7 +57,21 @@ export default function RoadEditor() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  if (mode !== "build") return null;
+  const isBuild = mode === "build";
+  // While traffic runs, only the junction tool needs clickable markers, and only where roads actually meet.
+  if (!isBuild && tool !== "junction") return null;
+  const junctionNodeIds = new Set<string>();
+  if (!isBuild) {
+    const neighbours = new Map<string, Set<string>>();
+    for (const e of edges) {
+      for (const [a, b] of [[e.fromNodeId, e.toNodeId], [e.toNodeId, e.fromNodeId]]) {
+        const set = neighbours.get(a) ?? new Set<string>();
+        set.add(b);
+        neighbours.set(a, set);
+      }
+    }
+    for (const n of nodes) if ((neighbours.get(n.id)?.size ?? 0) >= 3 || n.control) junctionNodeIds.add(n.id);
+  }
 
   const elevationFt = ELEVATION_BY_ID[selectedElevationId].elevationFt;
 
@@ -92,6 +107,7 @@ export default function RoadEditor() {
   ) => {
     event.stopPropagation();
     const store = useEditorStore.getState();
+    if (store.mode !== "build" && store.tool !== "junction" && store.tool !== "inspect") return;
     if (store.tool === "draw") {
       if (store.drawFromNodeId) {
         store.drawTo(store.drawFromNodeId, nodeId, position);
@@ -100,7 +116,7 @@ export default function RoadEditor() {
       }
     } else if (store.tool === "delete") {
       store.deleteNode(nodeId);
-    } else if (store.tool === "inspect") {
+    } else if (store.tool === "inspect" || store.tool === "junction") {
       store.setSelection({ kind: "node", id: nodeId });
     }
   };
@@ -129,18 +145,20 @@ export default function RoadEditor() {
 
   return (
     <group>
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, -0.05, 0]}
-        onPointerMove={handlePointerMove}
-        onClick={handleClick}
-        onContextMenu={handleContextMenu}
-      >
-        <planeGeometry args={[30000, 30000]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
-      </mesh>
+      {isBuild && (
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, -0.05, 0]}
+          onPointerMove={handlePointerMove}
+          onClick={handleClick}
+          onContextMenu={handleContextMenu}
+        >
+          <planeGeometry args={[30000, 30000]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
 
-      {nodes.map((node) => {
+      {nodes.filter((n) => isBuild || junctionNodeIds.has(n.id)).map((node) => {
         const isDrawSource = node.id === drawFromNodeId;
         const isSelected = selection?.kind === "node" && selection.id === node.id;
         const isSignal = node.control?.type === "signal";
@@ -157,7 +175,7 @@ export default function RoadEditor() {
             position={[node.position[0], node.position[1] + NODE_HEIGHT_FT / 2, node.position[2]]}
             onClick={handleNodeClick(node.id, node.position)}
           >
-            <cylinderGeometry args={[NODE_RADIUS_FT, NODE_RADIUS_FT, NODE_HEIGHT_FT, 20]} />
+            <cylinderGeometry args={[isBuild ? NODE_RADIUS_FT : NODE_RADIUS_FT * 1.8, isBuild ? NODE_RADIUS_FT : NODE_RADIUS_FT * 1.8, NODE_HEIGHT_FT, 20]} />
             <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
           </mesh>
         );

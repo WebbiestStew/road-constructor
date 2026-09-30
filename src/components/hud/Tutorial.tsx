@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ComponentType, type SVGProps } from "react";
 import { hasSeenTutorial, markTutorialSeen, subscribeOpenTutorial } from "@/lib/tutorial";
-import { IconCoin, IconDraw, IconFlag, IconPlay, IconRoad, IconZone } from "./icons";
+import { IconDraw, IconJunction, IconLanes, IconRoad, IconSpeedSign, IconWarning } from "./icons";
 
 interface Step {
   icon: ComponentType<SVGProps<SVGSVGElement>>;
@@ -14,32 +14,32 @@ const STEPS: Step[] = [
   {
     icon: IconRoad,
     title: "Welcome to Road Constructor 🛣️",
-    body: "Build a road network, open it to traffic, and see if it actually works. This quick tour covers the basics — you can reopen it anytime from the ? button.",
+    body: "The city is already built. Your job is to make the traffic work. This quick tour covers the tools; you can reopen it anytime from the ? button.",
+  },
+  {
+    icon: IconWarning,
+    title: "Find the jam",
+    body: "Move around with WASD (Shift to go faster, Q/E to rotate). Traffic runs live. Flashing markers show roads that are badly jammed, and the Heatmap button colors every road by how fast it's really moving. Fix the worst spot first.",
+  },
+  {
+    icon: IconLanes,
+    title: "Lane arrows (L)",
+    body: "Click a road that splits at a junction and choose which lanes can turn left, go straight or turn right. A lane that only turns left can starve everyone going straight.",
+  },
+  {
+    icon: IconSpeedSign,
+    title: "Speed limits (P)",
+    body: "Pick a road and post a limit. Drivers cruise near it, so one slow stretch backs up the whole road behind it. Tick \"whole road\" to change it end to end.",
+  },
+  {
+    icon: IconJunction,
+    title: "Junctions (J)",
+    body: "Switch a junction between priority and a traffic light, and tune how long each direction stays green. Everything updates while cars are driving — no restarts.",
   },
   {
     icon: IconDraw,
-    title: "Draw roads",
-    body: "Pick the Draw tool, click to start a road, click again to keep extending it. Click an existing road to tap a junction into it. Press Escape to stop the current chain.",
-  },
-  {
-    icon: IconZone,
-    title: "Mark entries & destinations",
-    body: "Switch to the Zone tool and click a road to cycle it: none → Entry (cars spawn here) → Destination (cars head here, with a target speed) → none.",
-  },
-  {
-    icon: IconCoin,
-    title: "Mind the budget",
-    body: "Every road costs money based on class, lanes, and length. Demolishing a road refunds half its cost — use the Delete tool if you need to rethink something.",
-  },
-  {
-    icon: IconPlay,
-    title: "Open to Traffic",
-    body: "Hit the green play button to simulate. Watch cars flow, adjust entry demand, and check whether each destination is hitting its target speed.",
-  },
-  {
-    icon: IconFlag,
-    title: "More to explore",
-    body: "Undo/redo (Ctrl+Z), export/import your network, a traffic heatmap toggle, and timed Campaign scenarios with scoring are all in the top bar and bottom-left corner.",
+    title: "Sandbox: build your own",
+    body: "From the campaign menu you can also build from scratch with a budget: draw roads, mark entries and destinations, then open to traffic and try your own fix.",
   },
 ];
 
@@ -126,7 +126,7 @@ export default function Tutorial() {
             onClick={() => (isLast ? close() : setStep((s) => s + 1))}
             className="flex-1 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
           >
-            {isLast ? "Let's build! 🚧" : "Next ▶"}
+            {isLast ? "Let's go! 🚦" : "Next ▶"}
           </button>
         </div>
       </div>

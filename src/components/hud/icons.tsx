@@ -274,3 +274,59 @@ export function IconSpeakerOff(props: IconProps) {
     </svg>
   );
 }
+
+export function IconLanes(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4.5 21V3M19.5 21V3" />
+      <path d="M12 20v-9" />
+      <path d="M12 11L8.5 7.5M12 11l3.5-3.5" />
+      <path d="M8.5 7.5V10M15.5 7.5V10" />
+    </svg>
+  );
+}
+
+export function IconSpeedSign(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 12l4-3.2" />
+      <path d="M7 15.5a6 6 0 0 1 10 0" />
+    </svg>
+  );
+}
+
+export function IconJunction(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" />
+    </svg>
+  );
+}
+
+export function IconArrowLeft(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M17 20v-7a4 4 0 0 0-4-4H6" />
+      <path d="M10 5L6 9l4 4" />
+    </svg>
+  );
+}
+
+export function IconArrowUp(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 21V4" />
+      <path d="M6 10l6-6 6 6" />
+    </svg>
+  );
+}
+
+export function IconArrowRight(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M7 20v-7a4 4 0 0 1 4-4h7" />
+      <path d="M14 5l4 4-4 4" />
+    </svg>
+  );
+}

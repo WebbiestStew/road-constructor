@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { SCENARIOS } from "@/sim/scenarios";
+import { SCENARIOS, type ScenarioDef } from "@/sim/scenarios";
+import { useEditorStore } from "@/state/editorStore";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import { IconClock, IconFlag } from "./icons";
 
@@ -10,6 +11,24 @@ function formatMMSS(seconds: number): string {
   const mins = Math.floor(s / 60);
   const secs = s % 60;
   return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onStart(s.id)}
+      className="flex flex-col gap-1 rounded-xl border-2 border-transparent bg-black/[0.03] p-3 text-left transition hover:border-violet-400 hover:bg-violet-50 active:scale-[0.99]"
+    >
+      <span className="font-display text-sm font-bold text-[#241b3d]">{s.name}</span>
+      <span className="text-xs font-semibold text-violet-600">{s.tagline}</span>
+      <span className="text-[11px] leading-snug text-zinc-500">{s.briefing}</span>
+      <span className="mt-1 flex gap-3 text-[10.5px] font-bold uppercase tracking-wide text-zinc-400">
+        <span>⏱ {s.durationS}s</span>
+        {s.kind === "manage" ? <span>🔒 build locked</span> : <span>💰 ${(s.startingBudget / 1000).toFixed(0)}k</span>}
+      </span>
+    </button>
+  );
 }
 
 function ScenarioPicker({
@@ -37,21 +56,13 @@ function ScenarioPicker({
           </button>
         </div>
 
-        {SCENARIOS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => onStart(s.id)}
-            className="flex flex-col gap-1 rounded-xl border-2 border-transparent bg-black/[0.03] p-3 text-left transition hover:border-violet-400 hover:bg-violet-50 active:scale-[0.99]"
-          >
-            <span className="font-display text-sm font-bold text-[#241b3d]">{s.name}</span>
-            <span className="text-xs font-semibold text-violet-600">{s.tagline}</span>
-            <span className="text-[11px] leading-snug text-zinc-500">{s.briefing}</span>
-            <span className="mt-1 flex gap-3 text-[10.5px] font-bold uppercase tracking-wide text-zinc-400">
-              <span>⏱ {s.durationS}s</span>
-              <span>💰 ${(s.startingBudget / 1000).toFixed(0)}k</span>
-            </span>
-          </button>
+        <h3 className="text-[10.5px] font-extrabold uppercase tracking-wide text-emerald-600">Traffic Manager — the city is built, fix the flow</h3>
+        {SCENARIOS.filter((s) => s.kind === "manage").map((s) => (
+          <ScenarioCard key={s.id} s={s} onStart={onStart} />
+        ))}
+        <h3 className="mt-1 text-[10.5px] font-extrabold uppercase tracking-wide text-violet-600">Build &amp; fix — design your own solution</h3>
+        {SCENARIOS.filter((s) => s.kind !== "manage").map((s) => (
+          <ScenarioCard key={s.id} s={s} onStart={onStart} />
         ))}
 
         {hasActiveScenario && (
@@ -96,8 +107,12 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
         <div className="flex w-full flex-col gap-1.5">
           <StatRow label="Avg speed" value={`${results.avgSpeedMph.toFixed(0)} mph`} />
           <StatRow label="Throughput" value={`${results.throughputPerMinute.toFixed(0)} /min`} />
-          <StatRow label="Contracts met" value={`${results.contractsMet} / ${results.contractsTotal}`} />
-          <StatRow label="Budget left" value={`$${Math.max(0, results.budgetRemaining).toLocaleString()}`} />
+          {scenario.kind !== "manage" && (
+            <StatRow label="Contracts met" value={`${results.contractsMet} / ${results.contractsTotal}`} />
+          )}
+          {scenario.kind !== "manage" && (
+            <StatRow label="Budget left" value={`$${Math.max(0, results.budgetRemaining).toLocaleString()}`} />
+          )}
         </div>
 
         <div className="mt-2 flex w-full gap-2">
@@ -128,9 +143,48 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
   );
 }
 
+/** First-visit menu over an empty map: pick a pre-built city to manage, or start from scratch. */
+function StartMenu({ onStart, onClose }: { onStart: (id: string) => void; onClose: () => void }) {
+  const cities = SCENARIOS.filter((s) => s.kind === "manage");
+  return (
+    <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+      <div className="hud-panel flex max-h-[90vh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-2xl p-6">
+        <div>
+          <h2 className="font-display text-2xl font-extrabold uppercase text-[#241b3d]">What are we doing today?</h2>
+          <p className="mt-1 text-sm font-semibold text-zinc-600">
+            Skip the city-building. Jump into a city that&apos;s already jammed and fix how traffic flows.
+          </p>
+        </div>
+        {cities.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onStart(s.id)}
+            className="flex flex-col gap-1 rounded-xl border-[3px] border-[#2b1c40] bg-gradient-to-br from-emerald-300 to-teal-400 p-4 text-left shadow-[0_4px_0_#2b1c40] transition hover:-translate-y-0.5 active:translate-y-0.5"
+          >
+            <span className="font-display text-lg font-extrabold uppercase text-[#10332b]">🚦 {s.name}</span>
+            <span className="text-sm font-bold text-[#10332b]/80">{s.tagline}</span>
+            <span className="text-xs font-semibold text-[#10332b]/70">Traffic Manager · roads are locked · {s.durationS}s shift</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-xl border-2 border-dashed border-[#2b1c40]/30 p-3 text-sm font-bold text-[#43305f] transition hover:bg-black/5"
+        >
+          🏗️ Sandbox — build my own roads
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerReturn }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [startDismissed, setStartDismissed] = useState(false);
+  const isEmptyMap = useEditorStore((s) => s.nodes.length === 0);
   const { scenario } = runner;
+  const showStartMenu = isEmptyMap && !scenario && !startDismissed && !pickerOpen;
 
   return (
     <>
@@ -153,6 +207,16 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
           )}
         </button>
       </div>
+
+      {showStartMenu && (
+        <StartMenu
+          onStart={(id) => {
+            const def = SCENARIOS.find((s) => s.id === id);
+            if (def) runner.startScenario(def);
+          }}
+          onClose={() => setStartDismissed(true)}
+        />
+      )}
 
       {pickerOpen && !runner.results && (
         <ScenarioPicker
