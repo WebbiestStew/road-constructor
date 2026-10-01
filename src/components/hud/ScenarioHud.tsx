@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { SCENARIOS, type ScenarioDef } from "@/sim/scenarios";
-import { useEditorStore } from "@/state/editorStore";
+import { isSandboxBudget, useEditorStore } from "@/state/editorStore";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import { playFailTone, playVictoryFanfare } from "@/lib/sound";
 import { IconClock, IconFlag, IconStar } from "./icons";
@@ -32,12 +32,27 @@ function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) =>
   );
 }
 
+function SandboxCard({ onSandbox }: { onSandbox: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSandbox}
+      className="flex flex-col gap-1 rounded-xl border-[3px] border-[#2b1c40] bg-gradient-to-br from-amber-200 to-orange-300 p-3.5 text-left shadow-[0_3px_0_#2b1c40] transition hover:-translate-y-0.5 active:translate-y-0.5"
+    >
+      <span className="font-display text-sm font-extrabold uppercase text-[#3b2410]">♾️ Sandbox</span>
+      <span className="text-xs font-bold text-[#3b2410]/80">An empty map and no money limit. Build whatever you like.</span>
+    </button>
+  );
+}
+
 function ScenarioPicker({
   onStart,
   onClose,
   hasActiveScenario,
   onFreeBuild,
+  onSandbox,
 }: {
+  onSandbox: () => void;
   onStart: (id: string) => void;
   onClose: () => void;
   hasActiveScenario: boolean;
@@ -57,6 +72,7 @@ function ScenarioPicker({
           </button>
         </div>
 
+        <SandboxCard onSandbox={onSandbox} />
         <h3 className="text-[10.5px] font-extrabold uppercase tracking-wide text-emerald-600">
           Traffic Manager — the city is built, fix the flow
         </h3>
@@ -186,7 +202,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
 }
 
 /** First-visit menu over an empty map: pick a pre-built city to manage, or start from scratch. */
-function StartMenu({ onStart, onClose }: { onStart: (id: string) => void; onClose: () => void }) {
+function StartMenu({ onStart, onSandbox }: { onStart: (id: string) => void; onSandbox: () => void }) {
   const cities = SCENARIOS.filter((s) => s.kind === "manage");
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
@@ -211,10 +227,11 @@ function StartMenu({ onStart, onClose }: { onStart: (id: string) => void; onClos
         ))}
         <button
           type="button"
-          onClick={onClose}
-          className="rounded-xl border-2 border-dashed border-[#2b1c40]/30 p-3 text-sm font-bold text-[#43305f] transition hover:bg-black/5"
+          onClick={onSandbox}
+          className="flex flex-col items-center gap-0.5 rounded-xl border-[3px] border-[#2b1c40] bg-gradient-to-br from-amber-200 to-orange-300 p-3.5 shadow-[0_4px_0_#2b1c40] transition hover:-translate-y-0.5 active:translate-y-0.5"
         >
-          🏗️ Sandbox — build my own roads
+          <span className="font-display text-base font-extrabold uppercase text-[#3b2410]">♾️ Sandbox</span>
+          <span className="text-xs font-bold text-[#3b2410]/80">Build your own roads with no money limit</span>
         </button>
       </div>
     </div>
@@ -225,8 +242,19 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
   const [pickerOpen, setPickerOpen] = useState(false);
   const [startDismissed, setStartDismissed] = useState(false);
   const isEmptyMap = useEditorStore((s) => s.nodes.length === 0);
+  const startSandbox = useEditorStore((s) => s.startSandbox);
+  const inSandbox = useEditorStore((s) => isSandboxBudget(s.budget));
   const { scenario } = runner;
-  const showStartMenu = isEmptyMap && !scenario && !startDismissed && !pickerOpen;
+  // /play?sandbox=1 (from the landing page) drops straight into a fresh, unlimited Sandbox.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("sandbox")) return;
+    startSandbox();
+    params.delete("sandbox");
+    const query = params.toString();
+    history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : "") + window.location.hash);
+  }, [startSandbox]);
+  const showStartMenu = isEmptyMap && !scenario && !startDismissed && !pickerOpen && !inSandbox;
 
   return (
     <>
@@ -262,7 +290,10 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
             const def = SCENARIOS.find((s) => s.id === id);
             if (def) runner.startScenario(def);
           }}
-          onClose={() => setStartDismissed(true)}
+          onSandbox={() => {
+            startSandbox();
+            setStartDismissed(true);
+          }}
         />
       )}
 
@@ -277,6 +308,10 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
           onClose={() => setPickerOpen(false)}
           onFreeBuild={() => {
             runner.exitToFreeBuild();
+            setPickerOpen(false);
+          }}
+          onSandbox={() => {
+            startSandbox();
             setPickerOpen(false);
           }}
         />

@@ -165,6 +165,13 @@ function Hero() {
             <PlayLink>
               <IconPlay className="h-5 w-5" /> Play now
             </PlayLink>
+            <Link
+              href="/play?sandbox=1"
+              className="chunky-btn bg-white px-5 py-3 text-base text-[#241b3d]"
+              title="An empty map and no money limit"
+            >
+              ♾️ Sandbox
+            </Link>
             <a href="#how" className="text-sm font-extrabold text-[#43305f] underline decoration-2 underline-offset-4">
               How it works
             </a>
@@ -257,7 +264,7 @@ const FEATURES = [
   { icon: IconSignal, title: "Signal timing", body: "Tune green times per junction or drop the light for priority. Changes apply instantly." },
   { icon: IconHeatmap, title: "Heatmap & jam markers", body: "See where traffic flows and where it dies, in colorblind-safe colors." },
   { icon: IconGauge, title: "Real traffic models", body: "IDM car-following and MOBIL lane changes, the models real traffic engineers use." },
-  { icon: IconRoad, title: "Sandbox too", body: "Want to build? A budgeted sandbox lets you draw roads, bridges and roundabouts from scratch." },
+  { icon: IconRoad, title: "Unlimited sandbox", body: "Want to build? An empty map with no money limit: draw roads, bridges, viaducts and roundabouts from scratch." },
 ] as const;
 
 function Sections() {

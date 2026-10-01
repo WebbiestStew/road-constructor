@@ -1,6 +1,6 @@
 "use client";
 
-import { STARTING_BUDGET, useEditorStore } from "@/state/editorStore";
+import { STARTING_BUDGET, isSandboxBudget, useEditorStore } from "@/state/editorStore";
 
 function formatMoney(n: number): string {
   const sign = n < 0 ? "-" : "";
@@ -11,6 +11,20 @@ export default function BudgetBar() {
   const budget = useEditorStore((s) => s.budget);
   const spent = STARTING_BUDGET - budget;
   const fraction = Math.min(1, Math.max(0, spent / STARTING_BUDGET));
+
+  if (isSandboxBudget(budget)) {
+    return (
+      <div className="pointer-events-none absolute right-[4.75rem] top-4 z-20">
+        <div className="hud-panel flex items-center gap-2 rounded-2xl px-4 py-2.5">
+          <span className="font-display text-2xl font-extrabold leading-none text-emerald-600">∞</span>
+          <div className="flex flex-col leading-tight">
+            <span className="font-display text-sm font-extrabold uppercase text-[#241b3d]">Sandbox</span>
+            <span className="text-[10.5px] font-semibold text-zinc-500">No money limit</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-none absolute right-[4.75rem] top-4 z-20">

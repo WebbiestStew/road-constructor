@@ -49,6 +49,9 @@ export type Selection =
   | { kind: "edge"; id: string }
   | null;
 
+/** Sandbox grants this much, which nobody can spend; anything above half of it is treated as "unlimited" by the UI. */
+export const isSandboxBudget = (budget: number) => budget > SANDBOX_BUDGET / 2;
+
 export const STARTING_BUDGET = 2_000_000;
 
 function edgeLengthFt(
@@ -206,6 +209,8 @@ interface EditorState {
   exitScenario: () => void;
   /** Clears the active scenario and grants an effectively-infinite budget, for continuing to play a won layout without constraints. */
   enterSandboxMode: () => void;
+  /** Starts a clean Sandbox: empty map, nothing locked, and no money limit. */
+  startSandbox: () => void;
 }
 
 function findCounterpart(
@@ -1165,6 +1170,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   exitScenario: () => set({ activeScenarioId: null, buildLocked: false }),
   enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, budget: SANDBOX_BUDGET }),
+  startSandbox: () => {
+    get().clearNetwork();
+    set({
+      activeScenarioId: null,
+      buildLocked: false,
+      budget: SANDBOX_BUDGET,
+      mode: "build",
+      tool: "draw",
+      selection: null,
+      drawFromNodeId: null,
+      pendingCameraFit: { centerX: 0, centerZ: 0 },
+    });
+  },
 }));
 
 let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
