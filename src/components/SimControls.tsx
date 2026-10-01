@@ -19,6 +19,9 @@ import ManagerRail from "./hud/ManagerRail";
 import ToolDock from "./hud/ToolDock";
 import TopBar from "./hud/TopBar";
 import QualityNotice from "./hud/QualityNotice";
+import ToastHost from "./hud/ToastHost";
+import FlowFeedback from "./hud/FlowFeedback";
+import ChaosDirector from "./hud/ChaosDirector";
 import Tutorial from "./hud/Tutorial";
 
 export default function SimControls({
@@ -47,6 +50,9 @@ export default function SimControls({
       <GridlockHonk sim={sim} />
       <ScenarioHud runner={scenarioRunner} />
       <QualityNotice />
+      <ToastHost />
+      <FlowFeedback sim={sim} />
+      <ChaosDirector sim={sim} />
       <Tutorial />
     </div>
   );

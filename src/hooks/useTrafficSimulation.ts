@@ -37,6 +37,7 @@ export interface SimMetricsState {
   edgeTrafficStats: EdgeTrafficStats[];
   gridlockPenaltyTotal: number;
   gridlockMarkers: [number, number, number][];
+  incidentMarkers: [number, number, number][];
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -52,6 +53,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   edgeTrafficStats: [],
   gridlockPenaltyTotal: 0,
   gridlockMarkers: [],
+  incidentMarkers: [],
 };
 
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
@@ -150,6 +152,7 @@ export function useTrafficSimulation() {
             edgeTrafficStats: stats.edgeTrafficStats,
             gridlockPenaltyTotal: stats.gridlockPenaltyTotal,
             gridlockMarkers: stats.gridlockMarkers,
+            incidentMarkers: stats.incidentMarkers,
           });
         }
       }
@@ -272,6 +275,11 @@ export function useTrafficSimulation() {
     } satisfies WorkerInMessage);
   }, []);
 
+  /** Breaks down one random moving car for a while, so traffic has to cope with a blockage (Chaos mode). */
+  const triggerBreakdown = useCallback((durationS: number) => {
+    workerRef.current?.postMessage({ type: "breakdown", durationS } satisfies WorkerInMessage);
+  }, []);
+
   /** Re-sends the current network to the worker with the same fixed seed, restarting traffic from a clean slate without leaving Simulate mode. */
   const resetTraffic = useCallback(() => {
     const worker = workerRef.current;
@@ -296,6 +304,7 @@ export function useTrafficSimulation() {
     setSpeedMultiplier,
     setDemand,
     resetTraffic,
+    triggerBreakdown,
   };
 }
 

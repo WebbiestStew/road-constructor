@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { SCENARIOS, type ScenarioDef } from "@/sim/scenarios";
 import { isSandboxBudget, useEditorStore } from "@/state/editorStore";
+import { totalStars, useProgress } from "@/lib/progress";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import { playFailTone, playVictoryFanfare } from "@/lib/sound";
 import { IconClock, IconFlag, IconStar } from "./icons";
@@ -15,13 +16,22 @@ function formatMMSS(seconds: number): string {
 }
 
 function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) => void }) {
+  const stars = useProgress()[s.id] ?? 0;
   return (
     <button
       type="button"
       onClick={() => onStart(s.id)}
       className="flex flex-col gap-1 rounded-xl border-2 border-transparent bg-black/[0.03] p-3 text-left transition hover:border-violet-400 hover:bg-violet-50 active:scale-[0.99]"
     >
-      <span className="font-display text-sm font-bold text-[#241b3d]">{s.name}</span>
+      <span className="flex items-center justify-between gap-2">
+        <span className="font-display text-sm font-bold text-[#241b3d]">{s.name}</span>
+        <span
+          className={`shrink-0 text-sm tracking-tight ${stars > 0 ? "text-amber-500" : "text-black/15"}`}
+          title={stars > 0 ? `Best: ${stars} star${stars > 1 ? "s" : ""}` : "Not cleared yet"}
+        >
+          {[1, 2, 3].map((i) => (i <= stars ? "★" : "☆")).join("")}
+        </span>
+      </span>
       <span className="text-xs font-semibold text-violet-600">{s.tagline}</span>
       <span className="text-[11px] leading-snug text-zinc-500">{s.briefing}</span>
       <span className="mt-1 flex gap-3 text-[10.5px] font-bold uppercase tracking-wide text-zinc-400">
@@ -243,6 +253,7 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
   const [startDismissed, setStartDismissed] = useState(false);
   const isEmptyMap = useEditorStore((s) => s.nodes.length === 0);
   const startSandbox = useEditorStore((s) => s.startSandbox);
+  const starTotal = totalStars(useProgress());
   const inSandbox = useEditorStore((s) => isSandboxBudget(s.budget));
   const { scenario } = runner;
   // /play?sandbox=1 (from the landing page) drops straight into a fresh, unlimited Sandbox.
@@ -279,6 +290,7 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
             <>
               <IconFlag className="h-3.5 w-3.5 text-violet-600" />
               Campaign
+              {starTotal > 0 && <span className="text-amber-500">★ {starTotal}</span>}
             </>
           )}
         </button>

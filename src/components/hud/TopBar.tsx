@@ -8,6 +8,7 @@ import { downloadNetworkFile, encodePayloadToShareHash, parseNetworkFile } from 
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
 import { nextQuality, setQuality, useQuality } from "@/lib/quality";
+import { setChaos, useChaos } from "@/lib/chaos";
 import {
   IconArrowLeft,
   IconDownload,
@@ -44,6 +45,8 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const mode = useEditorStore((s) => s.mode);
   const setMode = useEditorStore((s) => s.setMode);
   const buildLocked = useEditorStore((s) => s.buildLocked);
+  const scenarioActive = useEditorStore((s) => s.activeScenarioId !== null);
+  const chaos = useChaos();
   const quality = useQuality();
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const setHeatmapEnabled = useEditorStore((s) => s.setHeatmapEnabled);
@@ -283,6 +286,20 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
             <IconRideAlong className="h-3.5 w-3.5" />
             Ride Along
           </button>
+          {!scenarioActive && (
+            <button
+              type="button"
+              onClick={() => setChaos(!chaos)}
+              title="Chaos mode: random breakdowns and rush hours while traffic runs"
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                chaos
+                  ? "bg-gradient-to-br from-amber-400 to-red-500 text-white shadow"
+                  : "bg-black/5 text-zinc-600 hover:text-zinc-900"
+              }`}
+            >
+              🎲 Chaos{chaos ? " ON" : ""}
+            </button>
+          )}
         </>
       )}
 

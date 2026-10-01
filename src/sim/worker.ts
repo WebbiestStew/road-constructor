@@ -201,6 +201,7 @@ function acquireVehicle(): VehicleState {
     spawnTime: 0,
     wrongLaneWaitS: 0,
     stuckTimeS: 0,
+    frozenUntil: 0,
     isTruck: false,
     weightToPowerLbPerHp: 25,
     bodyColorR: 1,
@@ -395,6 +396,7 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.spawnTime = simTime;
   v.wrongLaneWaitS = 0;
   v.stuckTimeS = 0;
+  v.frozenUntil = 0;
 
   vehicles.set(v.id, v);
   spawnedTotal++;
@@ -874,11 +876,13 @@ function step(dt: number) {
     updateWrongLaneTimer(v, edge, dt);
     const gapInfo = findLeaderGapForVehicle(v, edge);
     v.accel = idmAccelForVehicle(v, edge, gapInfo);
+    if (v.frozenUntil > simTime) v.accel = -30; // broken down: hold still
   }
 
   for (const v of vehicles.values()) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
+    if (v.frozenUntil > simTime) continue;
     tryLaneChange(v, edge);
   }
 
@@ -888,6 +892,12 @@ function step(dt: number) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
 
+    if (v.frozenUntil > simTime) {
+      // A breakdown isn't gridlock: it must not tick toward the stuck-vehicle despawn.
+      v.speed = 0;
+      v.stuckTimeS = 0;
+      continue;
+    }
     v.speed = clamp(v.speed + v.accel * dt, 0, MAX_SPEED_FTPS);
 
     if (v.speed < STUCK_SPEED_THRESHOLD_FTPS) {
@@ -967,14 +977,18 @@ const edgeSpeedRatioSum = new Map<string, number>();
 const edgeSpeedRatioCount = new Map<string, number>();
 const edgeSpeedSumMph = new Map<string, number>();
 
-function writeSnapshot(buf: BufferSet, collectStats: boolean): { activeCount: number; avgSpeedFtS: number; gridlockMarkers: [number, number, number][] } {
-  if (!network) return { activeCount: 0, avgSpeedFtS: 0, gridlockMarkers: [] };
+function writeSnapshot(
+  buf: BufferSet,
+  collectStats: boolean
+): { activeCount: number; avgSpeedFtS: number; gridlockMarkers: [number, number, number][]; incidentMarkers: [number, number, number][] } {
+  if (!network) return { activeCount: 0, avgSpeedFtS: 0, gridlockMarkers: [], incidentMarkers: [] };
   if (collectStats) {
     edgeSpeedRatioSum.clear();
     edgeSpeedRatioCount.clear();
     edgeSpeedSumMph.clear();
   }
   const gridlockMarkers: [number, number, number][] = [];
+  const incidentMarkers: [number, number, number][] = [];
   let i = 0;
   let speedSum = 0;
   for (const v of vehicles.values()) {
@@ -996,7 +1010,10 @@ function writeSnapshot(buf: BufferSet, collectStats: boolean): { activeCount: nu
     // pavement by the difference.
     _pos.y += (VEHICLE_HEIGHT_FT * heightScale) / 2;
 
-    if (v.stuckTimeS >= GRIDLOCK_WARNING_S) {
+    const broken = v.frozenUntil > simTime;
+    if (broken) {
+      incidentMarkers.push([_pos.x, _pos.y, _pos.z]);
+    } else if (v.stuckTimeS >= GRIDLOCK_WARNING_S) {
       gridlockMarkers.push([_pos.x, _pos.y, _pos.z]);
     }
 
@@ -1007,7 +1024,12 @@ function writeSnapshot(buf: BufferSet, collectStats: boolean): { activeCount: nu
 
     const speedLimitFtps = mphToFtps(edge.speedLimitMph);
     const ratio = v.speed / speedLimitFtps;
-    if (heatmapColorMode) {
+    if (broken) {
+      // Hazard red, whatever the paint or heatmap would say.
+      buf.colors[i * 3] = 1;
+      buf.colors[i * 3 + 1] = 0.12;
+      buf.colors[i * 3 + 2] = 0.12;
+    } else if (heatmapColorMode) {
       speedColorInto(ratio, _color);
       _color.toArray(buf.colors, i * 3);
     } else {
@@ -1020,9 +1042,10 @@ function writeSnapshot(buf: BufferSet, collectStats: boolean): { activeCount: nu
     // ramps from light braking (-1 ft/s^2) up to the hard-brake threshold,
     // so a following driver (or player) can read braking intensity at a glance.
     const brakeT = clamp((-v.accel - 1) / (-HARD_BRAKE_ACCEL_THRESHOLD - 1), 0, 1);
-    buf.taillightColors[i * 3] = 0.55 + brakeT * 1.05;
-    buf.taillightColors[i * 3 + 1] = 0.05 + brakeT * 0.2;
-    buf.taillightColors[i * 3 + 2] = 0.05 + brakeT * 0.2;
+    const lightT = broken ? 1 : brakeT;
+    buf.taillightColors[i * 3] = 0.55 + lightT * 1.05;
+    buf.taillightColors[i * 3 + 1] = 0.05 + lightT * 0.2;
+    buf.taillightColors[i * 3 + 2] = 0.05 + lightT * 0.2;
 
     if (collectStats) {
       edgeSpeedRatioSum.set(edge.id, (edgeSpeedRatioSum.get(edge.id) ?? 0) + ratio);
@@ -1033,7 +1056,7 @@ function writeSnapshot(buf: BufferSet, collectStats: boolean): { activeCount: nu
     speedSum += v.speed;
     i++;
   }
-  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0, gridlockMarkers };
+  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0, gridlockMarkers, incidentMarkers };
 }
 
 function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
@@ -1103,7 +1126,7 @@ function postSnapshot(forceStats: boolean) {
   const now = performance.now();
   const withStats = forceStats || now - lastStatsPostMs >= STATS_INTERVAL_MS;
   const buf = acquireBufferSet();
-  const { activeCount, avgSpeedFtS, gridlockMarkers } = writeSnapshot(buf, withStats);
+  const { activeCount, avgSpeedFtS, gridlockMarkers, incidentMarkers } = writeSnapshot(buf, withStats);
   let stats: TickStats | undefined;
   if (withStats) {
     lastStatsPostMs = now;
@@ -1117,6 +1140,7 @@ function postSnapshot(forceStats: boolean) {
       edgeTrafficStats: computeEdgeTrafficStatsList(),
       gridlockPenaltyTotal,
       gridlockMarkers,
+      incidentMarkers,
     };
   }
   const matricesBuffer = buf.matrices.buffer as ArrayBuffer;
@@ -1211,6 +1235,23 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
         }
       }
       break;
+    case "breakdown": {
+      if (!network) break;
+      // Pick a moving car in the middle of a longish stretch (not on a ring, not right at a junction), so it
+      // blocks a lane without freezing a whole intersection at once.
+      const candidates: VehicleState[] = [];
+      for (const v of vehicles.values()) {
+        const edge = network.edgesById.get(v.edgeId);
+        if (!edge || edge.isRoundaboutRing || edge.length < 180 || v.frozenUntil > simTime || v.speed < 8) continue;
+        const f = v.distanceAlongEdge / edge.length;
+        if (f > 0.25 && f < 0.7) candidates.push(v);
+      }
+      if (candidates.length > 0) {
+        const pick = candidates[Math.floor(rng() * candidates.length)];
+        pick.frozenUntil = simTime + Math.max(5, msg.durationS);
+      }
+      break;
+    }
     case "setMaxVehicles":
       maxVehicles = Math.max(0, Math.min(MAX_VEHICLES, Math.floor(msg.value)));
       break;

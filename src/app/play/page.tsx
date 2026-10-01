@@ -283,6 +283,7 @@ export default function Play() {
           edgeSpeedRatios={sim.metrics.edgeSpeedRatios}
           problemEdgeIds={sim.metrics.problemEdgeIds}
           gridlockMarkers={sim.metrics.gridlockMarkers}
+          incidentMarkers={sim.metrics.incidentMarkers}
         />
         <Streetlights />
         <RoadEditor />

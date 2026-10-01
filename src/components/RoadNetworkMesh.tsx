@@ -1,9 +1,9 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Html, Line } from "@react-three/drei";
-import type { ThreeEvent } from "@react-three/fiber";
+import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork, assembleNetworkCached, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
@@ -26,6 +26,9 @@ import {
   computePierDescriptors,
   type PierDescriptor,
 } from "./roadGeometry";
+
+/** How long a freshly built road takes to rise into place. */
+const BUILD_RISE_MS = 520;
 
 const ASPHALT_COLOR = "#3a4155";
 const ASPHALT_SELECTED_COLOR = "#4a6a8f";
@@ -476,8 +479,11 @@ const EdgeGroup = memo(function EdgeGroup({
   hasStopBar,
   hasCrosswalk,
   decorative,
+  animateIn,
 }: {
   decorative?: boolean;
+  /** True once the initial load has settled: a road that mounts after that was just built, so it rises out of the ground. */
+  animateIn?: boolean;
   edge: Edge3D;
   badgeIndex?: number;
   typeIndex?: number;
@@ -488,6 +494,41 @@ const EdgeGroup = memo(function EdgeGroup({
   hasStopBar: boolean;
   hasCrosswalk: boolean;
 }) {
+  const groupRef = useRef<THREE.Group>(null);
+  // animateIn is captured once, at mount: later changes to it must not retrigger roads that already exist.
+  const animateAtMount = useRef(animateIn);
+  const bornAt = useRef<number | null>(null);
+  const centerXZ = useRef<[number, number]>([0, 0]);
+  useLayoutEffect(() => {
+    if (!animateAtMount.current || !groupRef.current) return;
+    const mid = edge.spline.getPointAt(0.5);
+    centerXZ.current = [mid.x, mid.z];
+    groupRef.current.scale.setScalar(0.02);
+    groupRef.current.position.set(mid.x * 0.98, 0, mid.z * 0.98);
+    bornAt.current = performance.now();
+    // Mount only: re-running when the edge object is rebuilt (e.g. after a speed-limit edit) would replay the build animation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useFrame(() => {
+    const g = groupRef.current;
+    const born = bornAt.current;
+    if (!g || born === null) return;
+    const t = Math.min(1, (performance.now() - born) / BUILD_RISE_MS);
+    if (t >= 1) {
+      g.scale.setScalar(1);
+      g.position.set(0, 0, 0);
+      bornAt.current = null;
+      return;
+    }
+    // Grow outward from the road's midpoint with a little overshoot, so a new road snaps into place with a
+    // satisfying settle. (Scaling about the midpoint, not just in height, is what makes a flat road visibly animate.)
+    const c = 1.70158;
+    const s = Math.max(0.02, 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2));
+    g.scale.setScalar(s);
+    const [cx, cz] = centerXZ.current;
+    g.position.set(cx * (1 - s), 0, cz * (1 - s));
+  });
+
   const geometries = useMemo(
     () => buildEdgeGeometries(edge, isTwoWay, hasStopBar, hasCrosswalk),
     [edge, isTwoWay, hasStopBar, hasCrosswalk]
@@ -540,7 +581,7 @@ const EdgeGroup = memo(function EdgeGroup({
   };
 
   return (
-    <group>
+    <group ref={groupRef}>
       <mesh
         geometry={geometries.ribbon}
         receiveShadow
@@ -677,6 +718,7 @@ export default function RoadNetworkMesh({
   edgeSpeedRatios,
   problemEdgeIds,
   gridlockMarkers,
+  incidentMarkers,
   networkOverride,
 }: {
   /** Render this fixed network instead of the editor's (used by the landing page): no zone badges, not clickable. */
@@ -685,6 +727,7 @@ export default function RoadNetworkMesh({
   edgeSpeedRatios?: EdgeSpeedRatio[];
   problemEdgeIds?: string[];
   gridlockMarkers?: [number, number, number][];
+  incidentMarkers?: [number, number, number][];
 }) {
   const storeNodes = useEditorStore((s) => s.nodes);
   const storeEdges = useEditorStore((s) => s.edges);
@@ -810,6 +853,13 @@ export default function RoadNetworkMesh({
 
   const showHeatmap = heatmapEnabled && mode === "simulate";
 
+  // Roads present at load (autosave, share link) just appear; only roads that arrive after this settles animate in.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setArmed(true), 1800);
+    return () => clearTimeout(id);
+  }, []);
+
   return (
     <group>
       {!decorative &&
@@ -842,6 +892,7 @@ export default function RoadNetworkMesh({
           hasStopBar={stopBarEdgeIdSet.has(edge.id)}
           hasCrosswalk={crosswalkEdgeIdSet.has(edge.id)}
           decorative={decorative}
+          animateIn={armed && !decorative}
         />
       ))}
 
@@ -859,6 +910,11 @@ export default function RoadNetworkMesh({
           .map((edge) => (
             <ProblemMarker key={`problem-${edge.id}`} edge={edge} />
           ))}
+
+      {mode === "simulate" &&
+        (incidentMarkers ?? []).map((position, i) => (
+          <GridlockMarker key={`incident-${i}`} position={position} />
+        ))}
 
       {mode === "simulate" &&
         (gridlockMarkers ?? []).map((position, i) => (

@@ -12,6 +12,8 @@ import {
 } from "@/sim/scenarios";
 import { assembleNetworkCached } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
+import { recordStars } from "@/lib/progress";
+import { pushToast } from "@/lib/toast";
 import type { UseTrafficSimulationReturn } from "./useTrafficSimulation";
 
 /**
@@ -93,6 +95,9 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
         evalProgress.detailLines
       );
       const raf = requestAnimationFrame(() => {
+        if (result.won && recordStars(scenario.id, result.stars)) {
+          pushToast(`⭐ ${"★".repeat(result.stars)} saved for ${scenario.name}`, "good");
+        }
         setResults(result);
         sim.setRunning(false);
       });

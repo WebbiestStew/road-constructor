@@ -181,6 +181,8 @@ export interface VehicleState {
   /** Destination edge ID this vehicle is trying to reach (for contract metrics). */
   destinationEdgeId: string;
   spawnTime: number;
+  /** Sim time until which this vehicle is broken down (stopped dead, hazards on). 0 = running normally. */
+  frozenUntil: number;
   /** Seconds spent stopped at the end of a road in a lane that may not make the turn it needs; past a limit it goes anyway so nothing deadlocks. */
   wrongLaneWaitS: number;
   /** Consecutive sim-seconds spent at near-zero speed — drives gridlock detection/despawn. */
@@ -206,6 +208,8 @@ export type WorkerInMessage =
   | { type: "setMaxVehicles"; value: number }
   /** Clears every vehicle, the clock, demand overrides and scoring samples — a fresh run. Send before `updateNetwork`. */
   | { type: "reset" }
+  /** Breaks down one random moving car on an open stretch of road for `durationS` sim-seconds, so traffic has to cope with a blockage. */
+  | { type: "breakdown"; durationS: number }
   /** Live tweaks while traffic is running: speed limits and lane arrows per edge, signal/priority control per node. */
   | { type: "patchEdges"; edges: { id: string; speedLimitMph: number; laneMoves: LaneMove[][] | null }[] }
   | { type: "patchNodes"; nodes: { id: string; control: JunctionControl | null }[] }
@@ -225,6 +229,8 @@ export interface ContractStatus {
 export type EdgeSpeedRatio = [edgeId: string, ratio: number];
 
 export interface TickStats {
+  /** World positions of vehicles currently broken down, for the warning marker. */
+  incidentMarkers: [number, number, number][];
   contracts: ContractStatus[];
   edgeSpeedRatios: EdgeSpeedRatio[];
   /** Edge IDs that have been badly congested (well under the speed limit) for a sustained stretch of time — surfaced as warning markers so players can spot trouble without reading stats. */
