@@ -22,6 +22,7 @@ import QualityNotice from "./hud/QualityNotice";
 import ToastHost from "./hud/ToastHost";
 import FlowFeedback from "./hud/FlowFeedback";
 import ChaosDirector from "./hud/ChaosDirector";
+import ScriptedEventAnnouncer from "./hud/ScriptedEventAnnouncer";
 import Tutorial from "./hud/Tutorial";
 
 export default function SimControls({
@@ -53,6 +54,7 @@ export default function SimControls({
       <ToastHost />
       <FlowFeedback sim={sim} />
       <ChaosDirector sim={sim} />
+      <ScriptedEventAnnouncer runner={scenarioRunner} />
       <Tutorial />
     </div>
   );

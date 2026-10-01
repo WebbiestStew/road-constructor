@@ -1,5 +1,5 @@
 import { buildHarborDrive, buildInterchangeSite, buildMidtown } from "./cities";
-import type { EdgeSpec, NetworkSnapshot, NodeSpec, RoadNetwork } from "./types";
+import type { EdgeSpec, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "./grade";
@@ -47,6 +47,8 @@ export interface ScenarioProgress {
   label: string;
   /** Multi-line breakdown shown on the results screen once the run ends. */
   detailLines: string[];
+  /** Challenge levels set their own star rating (from how many vehicles got through) instead of the speed/budget formula. */
+  stars?: 1 | 2 | 3;
 }
 
 /** A stateful per-run evaluator closure — each call to `createEvaluator()` gets its own private sustained-timer state, reset on every retry. */
@@ -67,6 +69,8 @@ export interface ScenarioDef {
    * flow with lane arrows, speed limits and junction control. Undefined = a normal build-and-fix level.
    */
   kind?: "manage";
+  /** Trouble that arrives at fixed moments of the run (a surge, a breakdown), so every attempt faces the same thing. */
+  scriptedEvents?: ScriptedEvent[];
   createEvaluator: () => ScenarioEvaluator;
   /** Decorative-only terrain dressing for the scenario's narrative (a river to bridge, a cliff to cut through). */
   terrainFeature?: { kind: "river" | "cliff"; x1: number; z1: number; x2: number; z2: number };
@@ -105,14 +109,16 @@ function computeManageStars(avgSpeedMph: number, targetAvgSpeedMph: number): 1 |
 export function finalizeScenario(
   scenario: ScenarioDef,
   won: boolean,
-  ctx: { avgSpeedMph: number; budgetRemaining: number },
+  ctx: { avgSpeedMph: number; budgetRemaining: number; starsOverride?: 1 | 2 | 3 },
   summaryLines: string[]
 ): ScenarioResult {
   const budgetRemainingFraction = ctx.budgetRemaining / scenario.startingBudget;
   return {
     won,
     stars: won
-      ? scenario.kind === "manage"
+      ? ctx.starsOverride !== undefined
+        ? ctx.starsOverride
+        : scenario.kind === "manage"
         ? computeManageStars(ctx.avgSpeedMph, scenario.targetAvgSpeedMph)
         : computeStars(budgetRemainingFraction, ctx.avgSpeedMph, scenario.targetAvgSpeedMph)
       : 0,
@@ -459,6 +465,36 @@ function createSpeedHoldEvaluator(opts: { warmupS: number; minMph: number; holdS
     };
   };
 }
+
+/**
+ * A score challenge: nothing to pass or fail, you play the whole run and your vehicles-moved total is the score.
+ * Stars compare it to `par`, the total a fully fixed city reaches in the headless sim (so 3 stars means you
+ * found essentially everything). Used for the scripted-trouble levels and the daily challenge, where the sim's
+ * run-to-run variation makes a hard pass line unfair.
+ */
+export function createChallengeEvaluator(par: number, durationS: number): () => ScenarioEvaluator {
+  return () => (ctx) => {
+    const done = ctx.elapsedS >= durationS - 0.5;
+    const stars: 1 | 2 | 3 = ctx.completedTripsTotal >= par * 0.97 ? 3 : ctx.completedTripsTotal >= par * 0.9 ? 2 : 1;
+    return {
+      won: done,
+      stars,
+      label: `${ctx.completedTripsTotal} moved · par ${par}`,
+      detailLines: [
+        `Vehicles moved: ${ctx.completedTripsTotal} (par ${par}, a fully fixed city)`,
+        `3 stars at ${Math.ceil(par * 0.97)}, 2 stars at ${Math.ceil(par * 0.9)}`,
+        `Gridlock penalties: ${ctx.gridlockPenaltyTotal}`,
+      ],
+    };
+  };
+}
+
+const SURGE_NIGHT: ScriptedEvent[] = [{ atS: 90, kind: "surge", multiplier: 1.8, durationS: 70 }];
+const ROUGH_MORNING: ScriptedEvent[] = [
+  { atS: 60, kind: "breakdown", durationS: 18 },
+  { atS: 130, kind: "breakdown", durationS: 18 },
+  { atS: 200, kind: "breakdown", durationS: 18 },
+];
 
 const MIDTOWN_NETWORK = buildMidtown(true);
 const HARBOR_NETWORK = buildHarborDrive(true);
@@ -1166,8 +1202,112 @@ export const SCENARIOS: ScenarioDef[] = [
     targetAvgSpeedMph: 26,
     createEvaluator: createTripsEvaluator(207),
   },
+  {
+    id: "game-night",
+    kind: "manage",
+    name: "Game Night",
+    tagline: "The stadium lets out and everyone drives at once.",
+    briefing:
+      "Midtown again, but at 90 seconds the game ends and demand surges 80% for over a minute. Fix the city's faults, then keep it flowing through the rush. This is a score challenge: every vehicle that gets through counts, and stars measure you against a fully fixed city.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: SURGE_NIGHT,
+    createEvaluator: createChallengeEvaluator(527, 300),
+  },
+  {
+    id: "rough-morning",
+    kind: "manage",
+    name: "Rough Morning",
+    tagline: "Three cars break down at the worst possible places.",
+    briefing:
+      "Midtown, with three breakdowns that each block a lane for 18 seconds. A good layout recovers fast: spare lanes, sensible limits and signals that keep the queue from locking up. Score challenge: vehicles moved against a fully fixed city.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: ROUGH_MORNING,
+    createEvaluator: createChallengeEvaluator(514, 300),
+  },
 ];
 
 export function getScenarioById(id: string): ScenarioDef | undefined {
+  if (id.startsWith(DAILY_PREFIX)) return buildDailyScenario(id.slice(DAILY_PREFIX.length));
   return SCENARIOS.find((s) => s.id === id);
+}
+
+// ---------------------------------------------------------------------------
+// Daily challenge: a new Midtown variant every calendar day, the same for everyone
+// ---------------------------------------------------------------------------
+
+export const DAILY_PREFIX = "daily-";
+
+function hashString(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function seededRng(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const dailyCache = new Map<string, ScenarioDef>();
+
+/** Par (vehicles moved in 300 s by a fully fixed Midtown) for each kind of trouble, measured in the headless sim. */
+const DAILY_PAR = { none: 520, surge: 527, breakdowns: 514 } as const;
+
+/**
+ * Builds the day's challenge from its date alone, so everyone gets the same one with no server: which of Midtown's
+ * faults are present (the slow limits always are, since they matter most), and what trouble arrives mid-run.
+ */
+export function buildDailyScenario(dateKey: string): ScenarioDef {
+  const cached = dailyCache.get(dateKey);
+  if (cached) return cached;
+
+  const rng = seededRng(hashString(`road-constructor:${dateKey}`));
+  let signal = rng() < 0.7;
+  let arrows = rng() < 0.7;
+  if (!signal && !arrows) signal = true;
+  const trouble = (["none", "surge", "breakdowns"] as const)[Math.floor(rng() * 3)];
+  const par = DAILY_PAR[trouble];
+
+  const weekday = new Date(`${dateKey}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+  const nouns = ["Gridlock", "Meltdown", "Madness", "Crawl", "Pile-up", "Standstill"];
+  const noun = nouns[Math.floor(rng() * nouns.length)];
+
+  const faults = ["a slow-posted block", ...(signal ? ["a badly timed light"] : []), ...(arrows ? ["wasted turn lanes"] : [])];
+  const troubleText =
+    trouble === "surge"
+      ? " Halfway through, a surge adds 80% more traffic."
+      : trouble === "breakdowns"
+        ? " Three cars will break down mid-run."
+        : " No surprises, just the city itself.";
+
+  const def: ScenarioDef = {
+    id: `${DAILY_PREFIX}${dateKey}`,
+    kind: "manage",
+    name: `${weekday} ${noun}`,
+    tagline: "Today's challenge: the same for everyone.",
+    briefing: `Midtown with ${faults.join(", ")}.${troubleText} Move as many vehicles as you can in five minutes; stars compare you to a fully fixed city.`,
+    startingNetwork: buildMidtown({ speed: true, signal, arrows }),
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: trouble === "surge" ? SURGE_NIGHT : trouble === "breakdowns" ? ROUGH_MORNING : undefined,
+    createEvaluator: createChallengeEvaluator(par, 300),
+  };
+  dailyCache.set(dateKey, def);
+  return def;
 }

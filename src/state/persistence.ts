@@ -26,6 +26,7 @@ const signalControlSchema = z.object({
   groupB: z.array(z.string()),
   greenDurationS: z.number(),
   allRedDurationS: z.number(),
+  offsetS: z.number().optional(),
 });
 
 const junctionControlSchema = z.union([signalControlSchema, z.object({ type: z.literal("priority") })]);

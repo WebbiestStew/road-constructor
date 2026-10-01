@@ -167,6 +167,8 @@ interface EditorState {
 
   setNodeControl: (nodeId: string, control: JunctionControl | undefined) => void;
   setSignalTiming: (nodeId: string, greenDurationS: number) => void;
+  /** Shifts where in its cycle a light starts, so neighbouring lights can be staggered into a green wave. */
+  setSignalOffset: (nodeId: string, offsetS: number) => void;
 
   /** Sets one lane's permitted moves (traffic management: free, works live). Seeds the other lanes from the automatic assignment. */
   setLaneMoves: (edgeId: string, laneIndex: number, moves: LaneMove[]) => void;
@@ -813,6 +815,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (green === node.control.greenDurationS) return;
     get().pushHistoryEntry();
     const updated: NodeSpec = { ...node, control: { ...node.control, greenDurationS: green } };
+    set((s) => {
+      const nodes = s.nodes.map((n) => (n.id === nodeId ? updated : n));
+      const nodesById = new Map(s.nodesById);
+      nodesById.set(nodeId, updated);
+      return { nodes, nodesById };
+    });
+  },
+
+  setSignalOffset: (nodeId, offsetS) => {
+    const node = get().nodesById.get(nodeId);
+    if (!node || node.control?.type !== "signal") return;
+    const cycle = 2 * (node.control.greenDurationS + node.control.allRedDurationS);
+    const offset = Math.max(0, Math.min(cycle - 1, Math.round(offsetS)));
+    if (offset === (node.control.offsetS ?? 0)) return;
+    get().pushHistoryEntry();
+    const updated: NodeSpec = { ...node, control: { ...node.control, offsetS: offset } };
     set((s) => {
       const nodes = s.nodes.map((n) => (n.id === nodeId ? updated : n));
       const nodesById = new Map(s.nodesById);

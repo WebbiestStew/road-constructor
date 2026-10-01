@@ -103,6 +103,12 @@ let completedTripsTotal = 0;
 let accumulator = 0;
 let lastWallTimeMs = 0;
 
+/** Multiplies every entry's spawn rate while a scripted surge is on. */
+let demandScale = 1;
+/** Scripted events not yet due, soonest first. A surge end is queued as its own entry when the surge starts. */
+type QueuedEvent = { atS: number; kind: "breakdown"; durationS: number } | { atS: number; kind: "surge"; multiplier: number } | { atS: number; kind: "surgeEnd" };
+let eventQueue: QueuedEvent[] = [];
+
 const vehicles = new Map<number, VehicleState>();
 const vehiclePool: VehicleState[] = [];
 const despawnTimestamps: number[] = [];
@@ -229,7 +235,7 @@ function randNormalish(mean: number, spread: number): number {
 
 function sampleExponentialInterarrival(vehiclesPerHour: number): number {
   if (vehiclesPerHour <= 0) return simTime + 1e9;
-  const ratePerSecond = vehiclesPerHour / 3600;
+  const ratePerSecond = (vehiclesPerHour * demandScale) / 3600;
   const u = Math.max(rng(), 1e-9);
   return simTime + -Math.log(1 - u) / ratePerSecond;
 }
@@ -306,6 +312,8 @@ function resetRun() {
   spawnedTotal = 0;
   completedTripsTotal = 0;
   gridlockPenaltyTotal = 0;
+  demandScale = 1;
+  eventQueue = [];
   despawnTimestamps.length = 0;
   demandByEntry.clear();
   nextSpawnTimeByEntry.clear();
@@ -443,6 +451,21 @@ function rebuildLaneOccupancy() {
 const JUNCTION_APPROACH_FT = 130;
 const JUNCTION_COMMIT_FT = 12;
 
+/** Where in its cycle a light starts: offsetS seconds in (green A, all-red, green B, all-red, repeat). */
+function initialSignalState(ctrl: { greenDurationS: number; allRedDurationS: number; offsetS?: number }): SignalPhaseState {
+  const g = ctrl.greenDurationS;
+  const r = ctrl.allRedDurationS;
+  const cycle = 2 * (g + r);
+  let t = cycle > 0 ? (((ctrl.offsetS ?? 0) % cycle) + cycle) % cycle : 0;
+  if (t < g) return { phase: "A", timer: t, nextPhase: "B" };
+  t -= g;
+  if (t < r) return { phase: "ALLRED", timer: t, nextPhase: "B" };
+  t -= r;
+  if (t < g) return { phase: "B", timer: t, nextPhase: "A" };
+  t -= g;
+  return { phase: "ALLRED", timer: t, nextPhase: "A" };
+}
+
 function updateSignalPhases(dt: number) {
   if (!network) return;
   for (const [nodeId, node] of network.nodesById) {
@@ -450,7 +473,7 @@ function updateSignalPhases(dt: number) {
     const ctrl = node.control;
     let state = signalPhaseState.get(nodeId);
     if (!state) {
-      state = { phase: "A", timer: 0, nextPhase: "B" };
+      state = initialSignalState(ctrl);
       signalPhaseState.set(nodeId, state);
     }
     state.timer += dt;
@@ -862,9 +885,47 @@ function computeContracts(): ContractStatus[] {
 
 const MAX_SPEED_FTPS = mphToFtps(90);
 
+/**
+ * Picks a moving car in the middle of a longish stretch (not on a ring, not right at a junction) and breaks it
+ * down, so it blocks a lane without freezing a whole intersection at once.
+ */
+function breakDownOneCar(durationS: number) {
+  if (!network) return;
+  const candidates: VehicleState[] = [];
+  for (const v of vehicles.values()) {
+    const edge = network.edgesById.get(v.edgeId);
+    if (!edge || edge.isRoundaboutRing || edge.length < 180 || v.frozenUntil > simTime || v.speed < 8) continue;
+    const f = v.distanceAlongEdge / edge.length;
+    if (f > 0.25 && f < 0.7) candidates.push(v);
+  }
+  if (candidates.length === 0) return;
+  const pick = candidates[Math.floor(rng() * candidates.length)];
+  pick.frozenUntil = simTime + Math.max(5, durationS);
+}
+
+/** Re-times every entry's next arrival under the current demand scale, so a surge starts (and ends) immediately. */
+function resampleSpawns() {
+  for (const [entryId, demand] of demandByEntry) nextSpawnTimeByEntry.set(entryId, sampleExponentialInterarrival(demand));
+}
+
+function runDueEvents() {
+  while (eventQueue.length > 0 && eventQueue[0].atS <= simTime) {
+    const e = eventQueue.shift()!;
+    if (e.kind === "breakdown") breakDownOneCar(e.durationS);
+    else if (e.kind === "surge") {
+      demandScale = e.multiplier;
+      resampleSpawns();
+    } else {
+      demandScale = 1;
+      resampleSpawns();
+    }
+  }
+}
+
 function step(dt: number) {
   if (!network) return;
   simTime += dt;
+  runDueEvents();
 
   updateSignalPhases(dt);
   rebuildLaneOccupancy();
@@ -1235,21 +1296,16 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
         }
       }
       break;
-    case "breakdown": {
-      if (!network) break;
-      // Pick a moving car in the middle of a longish stretch (not on a ring, not right at a junction), so it
-      // blocks a lane without freezing a whole intersection at once.
-      const candidates: VehicleState[] = [];
-      for (const v of vehicles.values()) {
-        const edge = network.edgesById.get(v.edgeId);
-        if (!edge || edge.isRoundaboutRing || edge.length < 180 || v.frozenUntil > simTime || v.speed < 8) continue;
-        const f = v.distanceAlongEdge / edge.length;
-        if (f > 0.25 && f < 0.7) candidates.push(v);
+    case "breakdown":
+      breakDownOneCar(msg.durationS);
+      break;
+    case "scheduleEvents": {
+      eventQueue = [];
+      for (const e of msg.events) {
+        eventQueue.push(e.kind === "breakdown" ? { atS: e.atS, kind: "breakdown", durationS: e.durationS } : { atS: e.atS, kind: "surge", multiplier: e.multiplier });
+        if (e.kind === "surge") eventQueue.push({ atS: e.atS + e.durationS, kind: "surgeEnd" });
       }
-      if (candidates.length > 0) {
-        const pick = candidates[Math.floor(rng() * candidates.length)];
-        pick.frozenUntil = simTime + Math.max(5, msg.durationS);
-      }
+      eventQueue.sort((a, b) => a.atS - b.atS);
       break;
     }
     case "setMaxVehicles":

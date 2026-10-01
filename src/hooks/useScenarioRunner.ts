@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   finalizeScenario,
+  DAILY_PREFIX,
   getScenarioById,
   SCENARIOS,
   type ScenarioDef,
@@ -13,6 +14,7 @@ import {
 import { assembleNetworkCached } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import { recordStars } from "@/lib/progress";
+import { dateKey, recordDaily } from "@/lib/daily";
 import { pushToast } from "@/lib/toast";
 import type { UseTrafficSimulationReturn } from "./useTrafficSimulation";
 
@@ -91,11 +93,15 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
       const result = finalizeScenario(
         scenario,
         evalProgress.won,
-        { avgSpeedMph: sim.metrics.avgSpeedMph, budgetRemaining },
+        { avgSpeedMph: sim.metrics.avgSpeedMph, budgetRemaining, starsOverride: evalProgress.stars },
         evalProgress.detailLines
       );
       const raf = requestAnimationFrame(() => {
-        if (result.won && recordStars(scenario.id, result.stars)) {
+        if (scenario.id.startsWith(DAILY_PREFIX)) {
+          // Dailies keep a best-of-the-day score and a streak instead of a permanent star rating.
+          const moved = sim.metrics.completedTripsTotal;
+          if (result.won && recordDaily(dateKey(), moved)) pushToast(`📅 New best for today: ${moved} vehicles moved`, "good");
+        } else if (result.won && recordStars(scenario.id, result.stars)) {
           pushToast(`⭐ ${"★".repeat(result.stars)} saved for ${scenario.name}`, "good");
         }
         setResults(result);
@@ -136,6 +142,11 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
   const nextScenario = useCallback(() => {
     if (!scenario) return;
     const idx = SCENARIOS.findIndex((s) => s.id === scenario.id);
+    // The daily challenge isn't part of the campaign order, so there's no "next level" after it.
+    if (idx < 0) {
+      exitToFreeBuild();
+      return;
+    }
     const next = SCENARIOS[idx + 1];
     if (next) startScenario(next);
     else exitToFreeBuild();

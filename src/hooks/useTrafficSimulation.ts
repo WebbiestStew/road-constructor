@@ -14,6 +14,7 @@ import type {
 import { ftpsToMph } from "@/sim/types";
 import type { EdgeTrafficStats } from "@/sim/los";
 import { useEditorStore } from "@/state/editorStore";
+import { getScenarioById } from "@/sim/scenarios";
 import { VEHICLE_CAP, useQuality } from "@/lib/quality";
 
 export interface VehicleSnapshot {
@@ -72,6 +73,13 @@ const DEFAULT_SEED = 1337;
  * this hook watches that store's `mode` and pushes a full network resync to
  * the worker whenever Build -> Simulate is crossed.
  */
+/** Hands the active level's scripted events (surges, breakdowns) to the worker, timed from the start of the run. */
+function postScenarioEvents(worker: Worker) {
+  const id = useEditorStore.getState().activeScenarioId;
+  const events = id ? getScenarioById(id)?.scriptedEvents : undefined;
+  if (events && events.length > 0) worker.postMessage({ type: "scheduleEvents", events } satisfies WorkerInMessage);
+}
+
 export function useTrafficSimulation() {
   const workerRef = useRef<Worker | null>(null);
   const snapshotRef = useRef<VehicleSnapshot | null>(null);
@@ -189,6 +197,7 @@ export function useTrafficSimulation() {
     // replay the same traffic and a fix can be judged against the last attempt.
     worker.postMessage({ type: "reset" } satisfies WorkerInMessage);
     worker.postMessage({ type: "updateNetwork", network: snapshot, seed: DEFAULT_SEED } satisfies WorkerInMessage);
+    postScenarioEvents(worker);
 
     const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}`;
     const nodeSig = (n: NodeSpec) => JSON.stringify(n.control ?? null);
@@ -291,6 +300,7 @@ export function useTrafficSimulation() {
       network: snapshot,
       seed: DEFAULT_SEED,
     } satisfies WorkerInMessage);
+    postScenarioEvents(worker);
   }, []);
 
   return {

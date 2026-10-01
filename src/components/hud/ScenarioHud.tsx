@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SCENARIOS, type ScenarioDef } from "@/sim/scenarios";
+import { SCENARIOS, buildDailyScenario, getScenarioById, type ScenarioDef } from "@/sim/scenarios";
+import { useDaily } from "@/lib/daily";
 import { isSandboxBudget, useEditorStore } from "@/state/editorStore";
 import { totalStars, useProgress } from "@/lib/progress";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
@@ -37,6 +38,29 @@ function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) =>
       <span className="mt-1 flex gap-3 text-[10.5px] font-bold uppercase tracking-wide text-zinc-400">
         <span>⏱ {s.durationS}s</span>
         {s.kind === "manage" ? <span>🔒 build locked</span> : <span>💰 ${(s.startingBudget / 1000).toFixed(0)}k</span>}
+        {s.scriptedEvents && <span className="text-orange-500">⚡ scripted trouble</span>}
+      </span>
+    </button>
+  );
+}
+
+/** Today's daily challenge: same for everyone, with your best score and streak. */
+function DailyCard({ onStart }: { onStart: (id: string) => void }) {
+  const { today, bestToday, streak } = useDaily();
+  const def = buildDailyScenario(today);
+  return (
+    <button
+      type="button"
+      onClick={() => onStart(def.id)}
+      className="flex flex-col gap-1 rounded-xl border-[3px] border-[#2b1c40] bg-gradient-to-br from-fuchsia-200 to-violet-300 p-3.5 text-left shadow-[0_3px_0_#2b1c40] transition hover:-translate-y-0.5 active:translate-y-0.5"
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="font-display text-sm font-extrabold uppercase text-[#2a1048]">📅 Daily: {def.name}</span>
+        {streak > 0 && <span className="shrink-0 text-xs font-extrabold text-orange-600">🔥 {streak}-day streak</span>}
+      </span>
+      <span className="text-[11px] font-semibold leading-snug text-[#2a1048]/80">{def.briefing}</span>
+      <span className="text-[10.5px] font-extrabold uppercase tracking-wide text-[#2a1048]/70">
+        {bestToday > 0 ? `Your best today: ${bestToday} moved` : "Not played yet today"} · new one at midnight
       </span>
     </button>
   );
@@ -82,6 +106,7 @@ function ScenarioPicker({
           </button>
         </div>
 
+        <DailyCard onStart={onStart} />
         <SandboxCard onSandbox={onSandbox} />
         <h3 className="text-[10.5px] font-extrabold uppercase tracking-wide text-emerald-600">
           Traffic Manager — the city is built, fix the flow
@@ -213,7 +238,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
 
 /** First-visit menu over an empty map: pick a pre-built city to manage, or start from scratch. */
 function StartMenu({ onStart, onSandbox }: { onStart: (id: string) => void; onSandbox: () => void }) {
-  const cities = SCENARIOS.filter((s) => s.kind === "manage");
+  const cities = SCENARIOS.filter((s) => s.kind === "manage" && !s.scriptedEvents);
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
       <div className="hud-panel flex max-h-[90vh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-2xl p-6">
@@ -223,6 +248,7 @@ function StartMenu({ onStart, onSandbox }: { onStart: (id: string) => void; onSa
             Skip the city-building. Jump into a city that&apos;s already jammed and fix how traffic flows.
           </p>
         </div>
+        <DailyCard onStart={onStart} />
         {cities.map((s) => (
           <button
             key={s.id}
@@ -299,7 +325,7 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
       {showStartMenu && (
         <StartMenu
           onStart={(id) => {
-            const def = SCENARIOS.find((s) => s.id === id);
+            const def = getScenarioById(id);
             if (def) runner.startScenario(def);
           }}
           onSandbox={() => {
@@ -313,7 +339,7 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
         <ScenarioPicker
           hasActiveScenario={!!scenario}
           onStart={(id) => {
-            const def = SCENARIOS.find((s) => s.id === id);
+            const def = getScenarioById(id);
             if (def) runner.startScenario(def);
             setPickerOpen(false);
           }}

@@ -231,6 +231,7 @@ export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
   const edges = useEditorStore((s) => s.edges);
   const setNodeControl = useEditorStore((s) => s.setNodeControl);
   const setSignalTiming = useEditorStore((s) => s.setSignalTiming);
+  const setSignalOffset = useEditorStore((s) => s.setSignalOffset);
   const convertNodeToRoundabout = useEditorStore((s) => s.convertNodeToRoundabout);
   const setSelection = useEditorStore((s) => s.setSelection);
 
@@ -285,6 +286,21 @@ export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
           />
           <p className="text-[11px] leading-snug text-zinc-500">
             Long greens move more cars per cycle but make side streets wait. Approaches are split into two phases by heading.
+          </p>
+          <div className="mt-1 flex items-center justify-between text-xs">
+            <span className="font-semibold text-zinc-600">Offset (green wave)</span>
+            <span className="font-bold tabular-nums text-zinc-900">{signal.offsetS ?? 0}s</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, 2 * (signal.greenDurationS + signal.allRedDurationS) - 1)}
+            step={1}
+            value={signal.offsetS ?? 0}
+            onChange={(e) => setSignalOffset(node.id, Number(e.target.value))}
+          />
+          <p className="text-[11px] leading-snug text-zinc-500">
+            Stagger neighbouring lights by the time a car takes to drive between them (distance ÷ speed limit) and cars hit a run of greens.
           </p>
         </div>
       ) : (

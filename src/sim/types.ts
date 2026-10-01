@@ -43,12 +43,20 @@ export interface SignalControl {
   groupB: string[];
   greenDurationS: number;
   allRedDurationS: number;
+  /** Seconds into the signal cycle this light starts at. Staggering neighbouring lights by their travel time makes a "green wave". Default 0. */
+  offsetS?: number;
 }
 
 /** A movement a lane may make at the end of its road. U-turns count as "left". */
 export type LaneMove = "left" | "straight" | "right";
 
 export const LANE_MOVES: LaneMove[] = ["left", "straight", "right"];
+
+/** Something that happens at an exact moment of a level's run, so every attempt faces the same trouble. */
+export type ScriptedEvent =
+  | { atS: number; kind: "breakdown"; durationS: number }
+  /** Every entry's demand is multiplied for `durationS` seconds, then returns to normal. */
+  | { atS: number; kind: "surge"; multiplier: number; durationS: number };
 
 export type JunctionControl = SignalControl | { type: "priority" };
 
@@ -208,6 +216,8 @@ export type WorkerInMessage =
   | { type: "setMaxVehicles"; value: number }
   /** Clears every vehicle, the clock, demand overrides and scoring samples — a fresh run. Send before `updateNetwork`. */
   | { type: "reset" }
+  /** Replaces the run's scripted events (times in sim-seconds since the run started). Send after `reset`/`updateNetwork`. */
+  | { type: "scheduleEvents"; events: ScriptedEvent[] }
   /** Breaks down one random moving car on an open stretch of road for `durationS` sim-seconds, so traffic has to cope with a blockage. */
   | { type: "breakdown"; durationS: number }
   /** Live tweaks while traffic is running: speed limits and lane arrows per edge, signal/priority control per node. */
