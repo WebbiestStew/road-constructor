@@ -205,6 +205,8 @@ interface EditorState {
   activeScenarioId: string | null;
   /** True in a manage-only city: roads can't be built or changed, only traffic management tools work. */
   buildLocked: boolean;
+  /** True while a real-city (OpenStreetMap) level is loaded: its stacked ramps legitimately overlap, so the clearance warning pills are hidden. */
+  realCityActive: boolean;
   /** Bumped whenever a scenario (re)starts, so the simulation knows to start a fresh run even if the mode didn't change. */
   simEpoch: number;
   loadScenario: (scenario: ScenarioDef) => void;
@@ -1156,6 +1158,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   activeScenarioId: null,
   buildLocked: false,
+  realCityActive: false,
   simEpoch: 0,
 
   loadScenario: (scenario) => {
@@ -1173,12 +1176,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       mode: scenario.kind === "manage" ? "simulate" : "build",
       tool: scenario.kind === "manage" ? "inspect" : get().tool,
       buildLocked: scenario.kind === "manage",
+      realCityActive: scenario.real === true,
       simEpoch: get().simEpoch + 1,
       // Frame the whole city: zoom out to the farthest node.
       pendingCameraFit: {
         centerX: 0,
         centerZ: 0,
-        radiusFt: scenario.startingNetwork.nodes.reduce((r, n) => Math.max(r, Math.hypot(n.position[0], n.position[2])), 0),
+        // The farthest node along either axis (not the diagonal): the camera adds its own margin for the oblique view.
+        radiusFt:
+          1.2 * scenario.startingNetwork.nodes.reduce((r, n) => Math.max(r, Math.abs(n.position[0]), Math.abs(n.position[2])), 0),
       },
       activeScenarioId: scenario.id,
       past: [],
@@ -1186,13 +1192,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  exitScenario: () => set({ activeScenarioId: null, buildLocked: false }),
-  enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, budget: SANDBOX_BUDGET }),
+  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false }),
+  enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, budget: SANDBOX_BUDGET }),
   startSandbox: () => {
     get().clearNetwork();
     set({
       activeScenarioId: null,
       buildLocked: false,
+      realCityActive: false,
       budget: SANDBOX_BUDGET,
       mode: "build",
       tool: "draw",

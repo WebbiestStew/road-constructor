@@ -1,4 +1,5 @@
 import { buildHarborDrive, buildInterchangeSite, buildMidtown } from "./cities";
+import { REAL_CITY_DATA } from "./real";
 import type { EdgeSpec, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
@@ -69,6 +70,8 @@ export interface ScenarioDef {
    * flow with lane arrows, speed limits and junction control. Undefined = a normal build-and-fix level.
    */
   kind?: "manage";
+  /** True for levels built from real OpenStreetMap roads (shown with their own section and credit). */
+  real?: boolean;
   /** Trouble that arrives at fixed moments of the run (a surge, a breakdown), so every attempt faces the same thing. */
   scriptedEvents?: ScriptedEvent[];
   createEvaluator: () => ScenarioEvaluator;
@@ -495,6 +498,113 @@ const ROUGH_MORNING: ScriptedEvent[] = [
   { atS: 130, kind: "breakdown", durationS: 18 },
   { atS: 200, kind: "breakdown", durationS: 18 },
 ];
+
+/**
+ * Star rating for the real-city levels, measured against what the unmodified city does: nobody knows what a "good"
+ * score is on a real road network, so the yardstick is the player's own improvement. Beat the baseline by 4% for two
+ * stars and 12% for three. The baselines are vehicles moved in the 300 s run, measured in the headless sim.
+ */
+function createRealCityEvaluator(baseline: number, durationS: number): () => ScenarioEvaluator {
+  const two = Math.ceil(baseline * 1.04);
+  const three = Math.ceil(baseline * 1.12);
+  return () => (ctx) => {
+    const stars: 1 | 2 | 3 = ctx.completedTripsTotal >= three ? 3 : ctx.completedTripsTotal >= two ? 2 : 1;
+    return {
+      won: ctx.elapsedS >= durationS - 0.5,
+      stars,
+      label: `${ctx.completedTripsTotal} moved · city baseline ${baseline}`,
+      detailLines: [
+        `Vehicles moved: ${ctx.completedTripsTotal} (the unchanged city moves ${baseline})`,
+        `2 stars at ${two}, 3 stars at ${three}`,
+        `Budget left: $${Math.max(0, Math.round(ctx.budgetRemaining)).toLocaleString()}`,
+      ],
+    };
+  };
+}
+
+interface RealCityPlan {
+  key: string;
+  name: string;
+  tagline: string;
+  briefing: string;
+  budget: number;
+  /** Vehicles moved in 300 s by the unmodified network in the headless sim. */
+  baseline: number;
+}
+
+const REAL_PLANS: RealCityPlan[] = [
+  {
+    key: "los-angeles",
+    name: "Los Angeles: Four Level",
+    tagline: "The most famous stack of ramps in America.",
+    briefing:
+      "Downtown LA, where US-101 meets the Harbor Freeway on four stacked levels. These are the real roads, ramps and lane counts. Rush hour is jamming it. Widen the right lanes, retime the lights and tune the limits, but you can't afford to fix everything.",
+    budget: 9_000_000,
+    baseline: 445,
+  },
+  {
+    key: "new-york",
+    name: "New York: Midtown",
+    tagline: "Times Square at rush hour. One-way streets and a light on every corner.",
+    briefing:
+      "Midtown Manhattan around Times Square: real one-way avenues and streets with a traffic light at nearly every block. There's no room to widen, so it's all about timing: green lengths, offsets for a green wave, and which corners need a light at all.",
+    budget: 4_000_000,
+    baseline: 588,
+  },
+  {
+    key: "toronto",
+    name: "Toronto: Gardiner",
+    tagline: "An elevated expressway looming over the waterfront.",
+    briefing:
+      "Toronto's waterfront, where the elevated Gardiner Expressway runs over Lake Shore Boulevard and the downtown ramps. Real elevations, real ramps. Find the bottleneck where the ramps meet the street grid.",
+    budget: 7_000_000,
+    baseline: 475,
+  },
+  {
+    key: "houston",
+    name: "Houston: I-45 & I-10",
+    tagline: "A knot of freeway ramps north of downtown.",
+    briefing:
+      "Where I-45 meets I-10 just north of downtown Houston, a dense tangle of real ramps and flyovers. There are no lights to retime, so widen the ramps and lanes that choke, and spend the budget where it counts.",
+    budget: 8_000_000,
+    baseline: 580,
+  },
+  {
+    key: "san-antonio",
+    name: "San Antonio: The Y",
+    tagline: "I-35, I-10 and US-281 collide just north of downtown.",
+    briefing:
+      "The freeway knot just north of downtown San Antonio, where I-35, I-10 and US-281 all meet. Real geometry, real flyovers. It's slow because a few ramps carry far more than they were built for. Find them and add capacity.",
+    budget: 8_000_000,
+    baseline: 342,
+  },
+  {
+    key: "monterrey",
+    name: "Monterrey: Downtown",
+    tagline: "The Macroplaza grid, crowded in every direction.",
+    briefing:
+      "Downtown Monterrey around the Macroplaza: a big grid of real streets, avenues and signals, with far more cars than the grid wants. Retime the lights, fix the limits and widen the worst streets to keep the center moving.",
+    budget: 7_000_000,
+    baseline: 444,
+  },
+];
+
+function realScenario(plan: RealCityPlan): ScenarioDef {
+  return {
+    id: `real-${plan.key}`,
+    real: true,
+    name: plan.name,
+    tagline: plan.tagline,
+    briefing: plan.briefing,
+    startingNetwork: REAL_CITY_DATA[plan.key].network,
+    startingBudget: plan.budget,
+    durationS: 300,
+    targetAvgSpeedMph: 25,
+    createEvaluator: createRealCityEvaluator(plan.baseline, 300),
+  };
+}
+
+const REAL_SCENARIOS: ScenarioDef[] = REAL_PLANS.map(realScenario);
 
 const MIDTOWN_NETWORK = buildMidtown(true);
 const HARBOR_NETWORK = buildHarborDrive(true);
@@ -1230,6 +1340,7 @@ export const SCENARIOS: ScenarioDef[] = [
     scriptedEvents: ROUGH_MORNING,
     createEvaluator: createChallengeEvaluator(514, 300),
   },
+  ...REAL_SCENARIOS,
 ];
 
 export function getScenarioById(id: string): ScenarioDef | undefined {

@@ -734,6 +734,7 @@ export default function RoadNetworkMesh({
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
+  const hideClearanceWarnings = useEditorStore((s) => s.realCityActive);
   const nodes = networkOverride?.nodes ?? storeNodes;
   const edges = networkOverride?.edges ?? storeEdges;
   const decorative = networkOverride !== undefined;
@@ -924,7 +925,8 @@ export default function RoadNetworkMesh({
       {mode === "simulate" &&
         nodes.map((node) => <NodeInspectTarget key={`inspect-node-${node.id}`} node={node} />)}
 
-      {clearanceViolations.map((violation, i) => (
+      {!hideClearanceWarnings &&
+        clearanceViolations.map((violation, i) => (
         <ClearanceWarningMarker key={`clearance-${violation.edgeAId}-${violation.edgeBId}-${i}`} violation={violation} />
       ))}
     </group>

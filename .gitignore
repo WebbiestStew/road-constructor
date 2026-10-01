@@ -27,3 +27,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# raw OpenStreetMap downloads (re-fetch with scripts/osm/build.ts)
+/scripts/osm/cache/

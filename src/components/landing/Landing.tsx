@@ -21,6 +21,10 @@ import {
 // Three.js is heavy — keep it out of the server render and the initial JS bundle.
 const HeroScene = dynamic(() => import("./HeroScene"), { ssr: false });
 
+const REAL = SCENARIOS.filter((s) => s.real);
+/** A taste of the campaign for the landing page: the two Traffic Manager cities and the build-your-own interchange. */
+const FEATURED_LEVELS = SCENARIOS.filter((s) => ["midtown", "harbor-drive", "highway-interchange"].includes(s.id));
+
 const VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
 const FEEDBACK_URL = process.env.NEXT_PUBLIC_FEEDBACK_URL;
 
@@ -308,23 +312,45 @@ function Sections() {
         </div>
       </section>
 
+      <section className="mx-auto max-w-6xl px-5 pb-16 sm:px-8">
+        <h2 className="font-display text-3xl font-extrabold uppercase tracking-tight text-[#241b3d] sm:text-4xl">
+          Real cities. Real roads.
+        </h2>
+        <p className="mt-2 max-w-2xl text-sm font-semibold text-zinc-600">
+          The actual ramps, lanes, speed limits and traffic lights of six famous places, built from OpenStreetMap. Start
+          with the unchanged city and see how much more traffic you can move.
+        </p>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {REAL.map((s) => (
+            <div key={s.id} className="hud-panel p-4">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-sky-600">🌎 Real roads</span>
+              <h3 className="font-display mt-1 text-lg font-extrabold uppercase text-[#241b3d]">{s.name}</h3>
+              <p className="mt-1 text-sm font-semibold text-zinc-700">{s.tagline}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] font-semibold text-zinc-500">Map data © OpenStreetMap contributors (ODbL).</p>
+      </section>
+
       <section className="mx-auto max-w-6xl px-5 pb-20 sm:px-8">
         <h2 className="font-display text-3xl font-extrabold uppercase tracking-tight text-[#241b3d] sm:text-4xl">
-          Levels: can you fix these?
+          Plus a campaign
         </h2>
         <div className="mt-8 grid gap-5 md:grid-cols-3">
-          {SCENARIOS.map((s, i) => (
+          {FEATURED_LEVELS.map((s, i) => (
             <div key={s.id} className="hud-panel p-5">
               <span className="text-xs font-extrabold uppercase tracking-wider text-fuchsia-600">Level {i + 1}</span>
               <h3 className="font-display mt-1 text-xl font-extrabold uppercase text-[#241b3d]">{s.name}</h3>
               <p className="mt-1 text-sm font-semibold text-zinc-700">{s.tagline}</p>
               <p className="mt-3 text-xs font-bold text-zinc-500">
-                Goal: {s.targetAvgSpeedMph} mph avg · {s.durationS}s ·{" "}
-                {s.kind === "manage" ? "roads locked" : `$${(s.startingBudget / 1000).toFixed(0)}k budget`}
+                {s.durationS}s · {s.kind === "manage" ? "roads locked" : `$${(s.startingBudget / 1000).toFixed(0)}k budget`}
               </p>
             </div>
           ))}
         </div>
+        <p className="mt-4 text-sm font-bold text-zinc-600">
+          …and {Math.max(0, SCENARIOS.length - FEATURED_LEVELS.length - REAL.length)} more, from tight little bottlenecks to a grand interchange.
+        </p>
       </section>
 
       <section className="mx-auto max-w-4xl px-5 pb-24 sm:px-8">

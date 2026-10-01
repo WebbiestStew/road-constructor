@@ -40,6 +40,7 @@ function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) =>
         <span>⏱ {s.durationS}s</span>
         {s.kind === "manage" ? <span>🔒 build locked</span> : <span>💰 ${(s.startingBudget / 1000).toFixed(0)}k</span>}
         {s.scriptedEvents && <span className="text-orange-500">⚡ scripted trouble</span>}
+        {s.real && <span className="text-sky-600">🌎 real roads</span>}
       </span>
     </button>
   );
@@ -118,9 +119,18 @@ function ScenarioPicker({
         <h3 className="mt-1 text-[10.5px] font-extrabold uppercase tracking-wide text-violet-600">
           Build &amp; fix — design your own solution
         </h3>
-        {SCENARIOS.filter((s) => s.kind !== "manage").map((s) => (
+        {SCENARIOS.filter((s) => s.kind !== "manage" && !s.real).map((s) => (
           <ScenarioCard key={s.id} s={s} onStart={onStart} />
         ))}
+        <h3 className="mt-1 text-[10.5px] font-extrabold uppercase tracking-wide text-sky-600">
+          🌎 Real cities — actual roads from OpenStreetMap
+        </h3>
+        {SCENARIOS.filter((s) => s.real).map((s) => (
+          <ScenarioCard key={s.id} s={s} onStart={onStart} />
+        ))}
+        <p className="text-center text-[10px] font-semibold text-zinc-400">
+          Real-city maps © OpenStreetMap contributors (ODbL), openstreetmap.org/copyright
+        </p>
 
         {hasActiveScenario && (
           <button
