@@ -119,11 +119,18 @@ function buildSpline(
       // to this edge's own length rather than the neighbor's — otherwise a
       // long lead-in segment feeding a short one would wildly overshoot the
       // control points and bulge or loop the curve.
+      // Horizontal only: this edge is flat, and if the neighbouring road climbs (a ramp onto a viaduct), letting its
+      // rise tilt our tangent drags the control points below ground and buries the end of the road, leaving only
+      // the barrier tops poking out of the grass.
+      const flatten = (v: THREE.Vector3) => {
+        v.y = 0;
+        return v.lengthSq() > 1e-6 ? v.normalize() : straightDir.clone();
+      };
       const startDir = prevNode
-        ? toV.clone().sub(new THREE.Vector3(...prevNode.position)).normalize()
+        ? flatten(toV.clone().sub(new THREE.Vector3(...prevNode.position)))
         : straightDir;
       const endDir = nextNode
-        ? new THREE.Vector3(...nextNode.position).sub(fromV).normalize()
+        ? flatten(new THREE.Vector3(...nextNode.position).sub(fromV))
         : straightDir;
 
       const control1 = fromV.clone().addScaledVector(startDir, chordLength / 3);

@@ -58,7 +58,9 @@ function CameraRig({ reducedMotion }: { reducedMotion: boolean }) {
     const intro = reducedMotion ? 1 : 1 - Math.pow(1 - Math.min(1, t / 11), 3);
     const radius = THREE.MathUtils.lerp(3400, 1900, intro);
     const height = THREE.MathUtils.lerp(2600, 800, intro);
-    const az = 0.62 + t * 0.028 + Math.sin(t * 0.11) * 0.08;
+    // Sway across a side-on arc instead of orbiting all the way round: a full orbit eventually looks straight
+    // down the motorway, hiding the viaduct and making the whole city look like one thin line.
+    const az = 0.55 + Math.sin(t * 0.09) * 0.45;
     cam.position.set(Math.sin(az) * radius, height, Math.cos(az) * radius);
     cam.lookAt(0, 40, 0);
   });
