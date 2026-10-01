@@ -13,6 +13,8 @@ import { assembleNetworkCached, computeRoute } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { JunctionCard, LaneManagerCard, SpeedLimitCard, ToolHintCard } from "./ManagerPanels";
+import { useEditLog } from "@/lib/editLog";
+import CityMood from "./CityMood";
 import {
   IconCar,
   IconClock,
@@ -830,6 +832,34 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   );
 }
 
+/** Your recent tweaks and what each one did to average speed, so you can see what actually worked. */
+function EditHistoryCard() {
+  const entries = useEditLog();
+  if (entries.length === 0) return null;
+  return (
+    <div className="hud-panel flex flex-col gap-1.5 rounded-2xl p-3">
+      <div className="text-[10.5px] font-extrabold uppercase tracking-wide text-zinc-500">Your changes</div>
+      {entries.slice(0, 5).map((e) => (
+        <div key={e.id} className="flex items-center justify-between gap-2 rounded-lg bg-black/[0.03] px-2.5 py-1.5 text-[11px]">
+          <span className="min-w-0 truncate font-semibold text-zinc-700">{e.label}</span>
+          {e.delta === null ? (
+            <span className="shrink-0 font-bold text-zinc-400">measuring…</span>
+          ) : (
+            <span
+              className={`shrink-0 font-extrabold tabular-nums ${
+                e.delta >= 1.5 ? "text-emerald-600" : e.delta <= -1.5 ? "text-rose-600" : "text-zinc-500"
+              }`}
+            >
+              {e.delta >= 0 ? "+" : ""}
+              {e.delta.toFixed(1)} mph
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** A compact live read-out so the effect of a lane/speed/junction change is visible right where you make it. */
 function MiniStats({ sim }: { sim: UseTrafficSimulationReturn }) {
   const { metrics } = sim;
@@ -907,6 +937,7 @@ export default function InfoPanel({
 
   return (
     <div className="pointer-events-auto absolute right-4 top-60 z-20 flex max-h-[calc(100vh-19rem)] w-80 flex-col gap-3 overflow-y-auto hud-scrollbar lg:top-20 lg:max-h-[calc(100vh-16rem)]">
+      {mode === "simulate" && <CityMood sim={sim} />}
       {managing ? (
         <>
           {mode === "simulate" && <MiniStats sim={sim} />}
@@ -917,6 +948,7 @@ export default function InfoPanel({
       ) : (
         <SimulateInfo sim={sim} />
       )}
+      {mode === "simulate" && <EditHistoryCard />}
     </div>
   );
 }

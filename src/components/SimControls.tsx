@@ -23,6 +23,9 @@ import ToastHost from "./hud/ToastHost";
 import FlowFeedback from "./hud/FlowFeedback";
 import ChaosDirector from "./hud/ChaosDirector";
 import ScriptedEventAnnouncer from "./hud/ScriptedEventAnnouncer";
+import CoachBar from "./hud/CoachBar";
+import PhotoOverlay from "./hud/PhotoOverlay";
+import { usePhotoMode } from "@/lib/photoMode";
 import Tutorial from "./hud/Tutorial";
 
 export default function SimControls({
@@ -32,6 +35,17 @@ export default function SimControls({
   sim: UseTrafficSimulationReturn;
   scenarioRunner: UseScenarioRunnerReturn;
 }) {
+  const photo = usePhotoMode();
+  // Photo mode: a clean frame. Toasts stay (for "saved"); everything else steps aside.
+  if (photo) {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-10">
+        <PhotoOverlay />
+        <ToastHost />
+      </div>
+    );
+  }
+
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
       <ModeVignette />
@@ -55,6 +69,7 @@ export default function SimControls({
       <FlowFeedback sim={sim} />
       <ChaosDirector sim={sim} />
       <ScriptedEventAnnouncer runner={scenarioRunner} />
+      <CoachBar />
       <Tutorial />
     </div>
   );

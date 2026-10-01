@@ -5,6 +5,7 @@ import { SCENARIOS, buildDailyScenario, getScenarioById, type ScenarioDef } from
 import { useDaily } from "@/lib/daily";
 import { isSandboxBudget, useEditorStore } from "@/state/editorStore";
 import { totalStars, useProgress } from "@/lib/progress";
+import { pushToast } from "@/lib/toast";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import { playFailTone, playVictoryFanfare } from "@/lib/sound";
 import { IconClock, IconFlag, IconStar } from "./icons";
@@ -215,6 +216,22 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
             </button>
           )}
         </div>
+        <button
+          type="button"
+          onClick={async () => {
+            const stars = `${"★".repeat(results.stars)}${"☆".repeat(3 - results.stars)}`;
+            const text = `🚦 ${scenario.name} ${stars}\n${results.summaryLines[0] ?? ""}\nThink you can beat it? ${window.location.origin}/play`;
+            try {
+              await navigator.clipboard.writeText(text);
+              pushToast("📋 Result copied. Paste it to a friend", "good");
+            } catch {
+              pushToast("Couldn't copy: your browser blocked clipboard access", "bad");
+            }
+          }}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-black/5 px-3 py-2 text-xs font-bold text-zinc-700 transition hover:bg-black/10 active:scale-95"
+        >
+          📋 Share my result
+        </button>
         {results.won && (
           <button
             type="button"

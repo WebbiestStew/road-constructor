@@ -23,6 +23,8 @@ import ChaseCamera from "@/components/ChaseCamera";
 import AutosaveHydrator from "@/components/AutosaveHydrator";
 import FallbackScreen from "@/components/FallbackScreen";
 import KeyboardPan from "@/components/KeyboardPan";
+import PhotoRig from "@/components/PhotoRig";
+import { togglePhotoMode, usePhotoMode } from "@/lib/photoMode";
 import PerfGuard from "@/components/PerfGuard";
 import { QUALITY_SETTINGS, useHydrated, useQuality } from "@/lib/quality";
 import FrameLimiter from "@/components/FrameLimiter";
@@ -159,6 +161,19 @@ export default function Play() {
   const q = QUALITY_SETTINGS[quality];
   const webglSupported = useWebGLSupported();
   const hydrated = useHydrated();
+  const photoMode = usePhotoMode();
+
+  // H toggles photo mode and Esc leaves it. This lives here (not in the HUD) because the HUD is hidden in photo mode.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key.toLowerCase() === "h") togglePhotoMode();
+      else if (e.key === "Escape" && photoMode) togglePhotoMode();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [photoMode]);
   const [contextLost, setContextLost] = useState(false);
 
   if (!webglSupported) {
@@ -207,7 +222,8 @@ export default function Play() {
           });
         }}
       >
-        <FrameLimiter maxFps={q.maxFps} active={sim.running || rideAlongActive} />
+        <FrameLimiter maxFps={q.maxFps} active={sim.running || rideAlongActive || photoMode} />
+        <PhotoRig />
         <PerfGuard active={sim.running} />
         <KeyboardPan />
         <color attach="background" args={[skyColor]} />

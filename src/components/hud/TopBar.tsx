@@ -9,6 +9,7 @@ import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
 import { nextQuality, setQuality, useQuality } from "@/lib/quality";
 import { setChaos, useChaos } from "@/lib/chaos";
+import { togglePhotoMode } from "@/lib/photoMode";
 import {
   IconArrowLeft,
   IconDownload,
@@ -353,6 +354,14 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           Feedback
         </a>
       )}
+      <button
+        type="button"
+        onClick={togglePhotoMode}
+        title="Photo mode (H): hide the UI, slow orbit, save a picture"
+        className="flex h-7 items-center justify-center rounded-full px-2 text-sm text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+      >
+        📸
+      </button>
       <button
         type="button"
         onClick={requestOpenTutorial}
