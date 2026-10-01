@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, type RefObject, memo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
@@ -42,7 +42,7 @@ function readVehicle(matrices: Float32Array, slot: number, outPos: THREE.Vector3
  * OrbitControls at the same time, since this camera drives its own pose
  * every frame. No visual output beyond the camera itself.
  */
-export default function ChaseCamera({ snapshotRef }: ChaseCameraProps) {
+function ChaseCamera({ snapshotRef }: ChaseCameraProps) {
   const active = useEditorStore((s) => s.rideAlongActive);
   const camera = useThree((s) => s.camera);
   const trackedSlotRef = useRef<number | null>(null);
@@ -114,3 +114,6 @@ export default function ChaseCamera({ snapshotRef }: ChaseCameraProps) {
     />
   );
 }
+
+/** Memoized: the game page re-renders several times a second with live traffic stats, and none of this scene depends on them. */
+export default memo(ChaseCamera);

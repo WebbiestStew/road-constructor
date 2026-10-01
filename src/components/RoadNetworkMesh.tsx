@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Html, Line } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -246,7 +246,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   };
 }
 
-function ZoneBadge({
+const ZoneBadge = memo(function ZoneBadge({
   edge,
   badgeIndex,
   typeIndex,
@@ -307,10 +307,10 @@ function ZoneBadge({
       </div>
     </Html>
   );
-}
+});
 
 /** A pulsing "trouble here" marker over an edge that's been badly congested for a while — the game's "find the problem" signal, on by default (unlike the opt-in heatmap). */
-function ProblemMarker({ edge }: { edge: Edge3D }) {
+const ProblemMarker = memo(function ProblemMarker({ edge }: { edge: Edge3D }) {
   const p = edge.spline.getPointAt(0.5);
   return (
     <Html position={[p.x, p.y, p.z]} style={{ pointerEvents: "none" }} zIndexRange={[15, 0]} occlude={false}>
@@ -333,10 +333,10 @@ function ProblemMarker({ edge }: { edge: Edge3D }) {
       </div>
     </Html>
   );
-}
+});
 
 /** A pulsing red exclamation over a vehicle that's been near-stationary long enough to be flagged as gridlocked — it despawns for a throughput penalty shortly after this appears. */
-function GridlockMarker({ position }: { position: [number, number, number] }) {
+const GridlockMarker = memo(function GridlockMarker({ position }: { position: [number, number, number] }) {
   return (
     <Html
       position={[position[0], position[1] + 8, position[2]]}
@@ -363,7 +363,7 @@ function GridlockMarker({ position }: { position: [number, number, number] }) {
       </div>
     </Html>
   );
-}
+});
 
 /** Radius/height (ft) of the invisible click target that makes a junction selectable for the Simulate-mode civil metrics panel — a bit larger than Build mode's visible node marker since there's no colored disc here to aim at. */
 const NODE_INSPECT_HIT_RADIUS_FT = 9;
@@ -377,7 +377,7 @@ const NODE_INSPECT_HIT_HEIGHT_FT = 2;
  * for LiveNodeInspector — this fills that gap without reintroducing any of
  * Build mode's editing affordances.
  */
-function NodeInspectTarget({ node }: { node: NodeSpec }) {
+const NodeInspectTarget = memo(function NodeInspectTarget({ node }: { node: NodeSpec }) {
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
     const store = useEditorStore.getState();
@@ -394,7 +394,7 @@ function NodeInspectTarget({ node }: { node: NodeSpec }) {
       <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>
   );
-}
+});
 
 /** Flags a plan-view road crossing that doesn't clear TxDOT's 16.5 ft minimum bridge clearance. */
 function ClearanceWarningMarker({ violation }: { violation: ClearanceViolation }) {
@@ -453,7 +453,7 @@ function TurnaroundPreview({ plan }: { plan: TexasTurnaroundPlan }) {
   );
 }
 
-function YieldMarker({ edge }: { edge: Edge3D }) {
+const YieldMarker = memo(function YieldMarker({ edge }: { edge: Edge3D }) {
   const p = edge.spline.getPointAt(1);
   const tangent = edge.spline.getTangentAt(1);
   const rotationY = Math.atan2(tangent.x, tangent.z);
@@ -463,11 +463,10 @@ function YieldMarker({ edge }: { edge: Edge3D }) {
       <meshStandardMaterial color="#f4f4f5" emissive="#f4f4f5" emissiveIntensity={0.15} />
     </mesh>
   );
-}
+});
 
-function EdgeGroup({
+const EdgeGroup = memo(function EdgeGroup({
   edge,
-  contract,
   badgeIndex,
   typeIndex,
   speedRatio,
@@ -480,7 +479,6 @@ function EdgeGroup({
 }: {
   decorative?: boolean;
   edge: Edge3D;
-  contract?: ContractStatus;
   badgeIndex?: number;
   typeIndex?: number;
   speedRatio?: number;
@@ -666,11 +664,12 @@ function EdgeGroup({
         );
       })}
 
-      {!decorative && edge.zone && badgeIndex !== undefined && typeIndex !== undefined && (
-        <ZoneBadge edge={edge} badgeIndex={badgeIndex} typeIndex={typeIndex} contract={contract} />
-      )}
     </group>
   );
+});
+
+function quantizeRatio(ratio: number | undefined): number | undefined {
+  return ratio === undefined ? undefined : Math.round(ratio * 20) / 20;
 }
 
 export default function RoadNetworkMesh({
@@ -691,6 +690,7 @@ export default function RoadNetworkMesh({
   const storeEdges = useEditorStore((s) => s.edges);
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
+  const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const nodes = networkOverride?.nodes ?? storeNodes;
   const edges = networkOverride?.edges ?? storeEdges;
   const decorative = networkOverride !== undefined;
@@ -708,7 +708,8 @@ export default function RoadNetworkMesh({
   // beats a synchronized setState for a value this cheap to recompute.
   const effectiveHover = tool === "turnaround" ? turnaroundHover : null;
 
-  const handleTurnaroundHover = (edgeId: string | null, point: THREE.Vector3 | null) => {
+  // Stable identity matters: EdgeGroup is memoized, and a new function every render would defeat that for every road.
+  const handleTurnaroundHover = useCallback((edgeId: string | null, point: THREE.Vector3 | null) => {
     if (!edgeId || !point) {
       setTurnaroundHover(null);
       lastHoverPointRef.current = null;
@@ -718,7 +719,7 @@ export default function RoadNetworkMesh({
     if (last && last.distanceTo(point) < 15) return;
     lastHoverPointRef.current = point;
     setTurnaroundHover({ edgeId, point });
-  };
+  }, []);
 
   const turnaroundPlan = useMemo(
     () => (effectiveHover ? planTexasTurnaround(network, effectiveHover.edgeId, effectiveHover.point) : null),
@@ -807,16 +808,31 @@ export default function RoadNetworkMesh({
     return { stopBarEdgeIdSet: stopBars, crosswalkEdgeIdSet: crosswalks };
   }, [network]);
 
+  const showHeatmap = heatmapEnabled && mode === "simulate";
+
   return (
     <group>
+      {!decorative &&
+        network.edges
+          .filter((edge) => edge.zone && badgeIndexByEdgeId.get(edge.id) !== undefined)
+          .map((edge) => (
+            <ZoneBadge
+              key={`zone-${edge.id}`}
+              edge={edge}
+              badgeIndex={badgeIndexByEdgeId.get(edge.id)!}
+              typeIndex={typeIndexByEdgeId.get(edge.id)!}
+              contract={contractsByEdgeId.get(edge.id)}
+            />
+          ))}
       {network.edges.map((edge) => (
         <EdgeGroup
           key={edge.id}
           edge={edge}
-          contract={contractsByEdgeId.get(edge.id)}
           badgeIndex={badgeIndexByEdgeId.get(edge.id)}
           typeIndex={typeIndexByEdgeId.get(edge.id)}
-          speedRatio={speedRatioByEdgeId.get(edge.id)}
+          // Only the heatmap reads this, so don't feed live speeds to every road while it's off — and round them,
+          // so a road re-renders when its color band changes rather than on every 200 ms sample.
+          speedRatio={showHeatmap ? quantizeRatio(speedRatioByEdgeId.get(edge.id)) : undefined}
           turnaroundHighlight={
             tool === "turnaround" &&
             (edge.id === effectiveHover?.edgeId || edge.id === turnaroundPlan?.targetEdgeId)

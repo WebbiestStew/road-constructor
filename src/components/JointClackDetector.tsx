@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, type RefObject } from "react";
+import { useMemo, useRef, type RefObject, memo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { assembleNetworkCached } from "@/sim/network";
 import { computePierDescriptors } from "./roadGeometry";
@@ -28,7 +28,7 @@ const MAX_CLACKS_PER_FRAME = 3;
  * matrices already being handed to `VehicleRenderer` each tick, rather than
  * plumbing new per-vehicle state through the worker. No visual output.
  */
-export default function JointClackDetector({ snapshotRef }: JointClackDetectorProps) {
+function JointClackDetector({ snapshotRef }: JointClackDetectorProps) {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const mode = useEditorStore((s) => s.mode);
@@ -81,3 +81,6 @@ export default function JointClackDetector({ snapshotRef }: JointClackDetectorPr
 
   return null;
 }
+
+/** Memoized: the game page re-renders several times a second with live traffic stats, and none of this scene depends on them. */
+export default memo(JointClackDetector);

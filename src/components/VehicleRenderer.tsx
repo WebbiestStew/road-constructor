@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type RefObject } from "react";
+import { useEffect, useMemo, useRef, type RefObject, memo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
@@ -26,7 +26,7 @@ interface VehicleRendererProps {
  * memory straight to the GPU upload, with no per-frame allocation on the
  * render thread.
  */
-export default function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
+function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const headlightRef = useRef<THREE.InstancedMesh>(null);
   const taillightRef = useRef<THREE.InstancedMesh>(null);
@@ -164,3 +164,6 @@ export default function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
     </>
   );
 }
+
+/** Memoized: the game page re-renders several times a second with live traffic stats, and none of this scene depends on them. */
+export default memo(VehicleRenderer);

@@ -224,6 +224,19 @@ export interface ContractStatus {
 /** Per-edge average speed as a fraction of that edge's speed limit (0 = gridlock, 1 = free-flow), for the traffic heatmap. */
 export type EdgeSpeedRatio = [edgeId: string, ratio: number];
 
+export interface TickStats {
+  contracts: ContractStatus[];
+  edgeSpeedRatios: EdgeSpeedRatio[];
+  /** Edge IDs that have been badly congested (well under the speed limit) for a sustained stretch of time — surfaced as warning markers so players can spot trouble without reading stats. */
+  problemEdgeIds: string[];
+  /** Live Level-of-Service / v-c / flow stats per edge, for the Inspect panel. */
+  edgeTrafficStats: EdgeTrafficStats[];
+  /** Total vehicles forcibly despawned after sitting gridlocked (near-zero speed) for GRIDLOCK_DESPAWN_S — a throughput penalty counter. */
+  gridlockPenaltyTotal: number;
+  /** World positions of currently-stuck vehicles that have crossed the warning threshold but haven't been despawned yet, for the pulsing exclamation marker. */
+  gridlockMarkers: [number, number, number][];
+}
+
 export type WorkerOutMessage =
   | { type: "ready" }
   | {
@@ -239,14 +252,6 @@ export type WorkerOutMessage =
       spawnedTotal: number;
       /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */
       completedTripsTotal: number;
-      contracts: ContractStatus[];
-      edgeSpeedRatios: EdgeSpeedRatio[];
-      /** Edge IDs that have been badly congested (well under the speed limit) for a sustained stretch of time — surfaced as warning markers so players can spot trouble without reading stats. */
-      problemEdgeIds: string[];
-      /** Live Level-of-Service / v-c / flow stats per edge, for the Inspect panel. */
-      edgeTrafficStats: EdgeTrafficStats[];
-      /** Total vehicles forcibly despawned after sitting gridlocked (near-zero speed) for GRIDLOCK_DESPAWN_S — a throughput penalty counter. */
-      gridlockPenaltyTotal: number;
-      /** World positions of currently-stuck vehicles that have crossed the warning threshold but haven't been despawned yet, for the pulsing exclamation marker. */
-      gridlockMarkers: [number, number, number][];
+      /** The heavy per-edge statistics. Only present on ticks where they were recomputed (about 5 per second); the main thread keeps the last set. */
+      stats?: TickStats;
     };

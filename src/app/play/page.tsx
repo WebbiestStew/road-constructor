@@ -24,7 +24,8 @@ import AutosaveHydrator from "@/components/AutosaveHydrator";
 import FallbackScreen from "@/components/FallbackScreen";
 import KeyboardPan from "@/components/KeyboardPan";
 import PerfGuard from "@/components/PerfGuard";
-import { useHydrated, useQuality } from "@/lib/quality";
+import { QUALITY_SETTINGS, useHydrated, useQuality } from "@/lib/quality";
+import FrameLimiter from "@/components/FrameLimiter";
 import { useWebGLSupported } from "@/lib/webgl";
 
 const SHARE_HASH_PREFIX = "#data=";
@@ -155,7 +156,7 @@ export default function Play() {
     timeOfDay === "night" ? SKY_COLOR_NIGHT : timeOfDay === "dusk" ? SKY_COLOR_DUSK : SKY_COLOR_DAY;
   const canvasCursor = mode === "build" && CROSSHAIR_TOOLS.has(tool) ? "crosshair" : "default";
   const quality = useQuality();
-  const high = quality === "high";
+  const q = QUALITY_SETTINGS[quality];
   const webglSupported = useWebGLSupported();
   const hydrated = useHydrated();
   const [contextLost, setContextLost] = useState(false);
@@ -193,9 +194,11 @@ export default function Play() {
       <Canvas
         // gl options are fixed at creation, so switching quality remounts the canvas.
         key={quality}
-        shadows={high}
-        dpr={high ? [1, 2] : 1}
-        gl={{ antialias: high, powerPreference: "high-performance" }}
+        shadows={q.shadows}
+        dpr={q.dpr}
+        // We drive frames ourselves (FrameLimiter): capped rate, and a trickle while idle.
+        frameloop="never"
+        gl={{ antialias: q.antialias, powerPreference: "default" }}
         style={{ cursor: canvasCursor }}
         onCreated={({ gl }) => {
           gl.domElement.addEventListener("webglcontextlost", (e) => {
@@ -204,7 +207,8 @@ export default function Play() {
           });
         }}
       >
-        <PerfGuard />
+        <FrameLimiter maxFps={q.maxFps} active={sim.running || rideAlongActive} />
+        <PerfGuard active={sim.running} />
         <KeyboardPan />
         <color attach="background" args={[skyColor]} />
         <fog attach="fog" args={[skyColor, 4200 + FOG_OFFSET_FT, 13000 + FOG_OFFSET_FT]} />
@@ -219,9 +223,9 @@ export default function Play() {
               position={[-700, 900, -400]}
               intensity={0.18}
               color="#7c8fd9"
-              castShadow={high}
-              shadow-mapSize-width={2048}
-              shadow-mapSize-height={2048}
+              castShadow={q.shadows}
+              shadow-mapSize-width={q.shadowMapSize}
+              shadow-mapSize-height={q.shadowMapSize}
               shadow-camera-left={-3600}
               shadow-camera-right={3600}
               shadow-camera-top={2200}
@@ -239,9 +243,9 @@ export default function Play() {
               position={[1500, 260, 750]}
               intensity={0.55}
               color="#ffb37a"
-              castShadow={high}
-              shadow-mapSize-width={2048}
-              shadow-mapSize-height={2048}
+              castShadow={q.shadows}
+              shadow-mapSize-width={q.shadowMapSize}
+              shadow-mapSize-height={q.shadowMapSize}
               shadow-camera-left={-3600}
               shadow-camera-right={3600}
               shadow-camera-top={2200}
@@ -258,9 +262,9 @@ export default function Play() {
             <directionalLight
               position={[900, 1000, 500]}
               intensity={1.35}
-              castShadow={high}
-              shadow-mapSize-width={2048}
-              shadow-mapSize-height={2048}
+              castShadow={q.shadows}
+              shadow-mapSize-width={q.shadowMapSize}
+              shadow-mapSize-height={q.shadowMapSize}
               shadow-camera-left={-3600}
               shadow-camera-right={3600}
               shadow-camera-top={2200}
@@ -283,7 +287,7 @@ export default function Play() {
         <Streetlights />
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
-        <JointClackDetector snapshotRef={sim.snapshotRef} />
+        {quality !== "low" && <JointClackDetector snapshotRef={sim.snapshotRef} />}
         <ChaseCamera snapshotRef={sim.snapshotRef} />
         <AmbienceController avgSpeedMph={sim.metrics.avgSpeedMph} />
         <CameraFitController />
@@ -313,8 +317,8 @@ export default function Play() {
           bloom blooms the pre-tonemapped HDR-ish highlights, tone mapping
           compresses to display range last, vignette works on the final image.
         */}
-        {high && (
-        <EffectComposer multisampling={4} enableNormalPass>
+        {q.postprocessing && (
+        <EffectComposer multisampling={2} enableNormalPass>
           <SSAO
             blendFunction={BlendFunction.MULTIPLY}
             samples={8}

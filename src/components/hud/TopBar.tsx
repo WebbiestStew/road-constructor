@@ -7,7 +7,7 @@ import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { downloadNetworkFile, encodePayloadToShareHash, parseNetworkFile } from "@/state/persistence";
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
-import { setQuality, useQuality } from "@/lib/quality";
+import { nextQuality, setQuality, useQuality } from "@/lib/quality";
 import {
   IconArrowLeft,
   IconDownload,
@@ -319,11 +319,11 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       </button>
       <button
         type="button"
-        onClick={() => setQuality(quality === "high" ? "low" : "high")}
-        title={quality === "high" ? "Graphics: High — click for Low (faster)" : "Graphics: Low — click for High"}
+        onClick={() => setQuality(nextQuality(quality))}
+        title={`Graphics: ${quality === "high" ? "High" : quality === "medium" ? "Medium" : "Low"} — click to change. Lower settings run cooler and quieter.`}
         className="flex h-7 items-center justify-center rounded-full px-2 text-[10px] font-extrabold uppercase text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
       >
-        {quality === "high" ? "HQ" : "LQ"}
+        {quality === "high" ? "HQ" : quality === "medium" ? "MQ" : "LQ"}
       </button>
       {FEEDBACK_URL && (
         <a

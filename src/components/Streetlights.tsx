@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, memo } from "react";
 import * as THREE from "three";
 import { useEditorStore } from "@/state/editorStore";
 import { assembleNetworkCached } from "@/sim/network";
@@ -99,7 +99,7 @@ function createGlowTexture(): THREE.CanvasTexture {
 }
 
 /** Procedural cobra-head lamp posts along every road, glowing with an arm-mounted fixture and a warm ground light-pool at dusk/night — no light-emitting geometry rendered during the day, and no dynamic per-pole lights (all emissive + instanced, so the light budget stays flat regardless of network size). */
-export default function Streetlights() {
+function Streetlights() {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
@@ -178,3 +178,6 @@ export default function Streetlights() {
     </group>
   );
 }
+
+/** Memoized: the game page re-renders several times a second with live traffic stats, and none of this scene depends on them. */
+export default memo(Streetlights);

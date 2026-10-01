@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, memo } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
 import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
@@ -23,7 +23,7 @@ const NODE_HEIGHT_FT = 2;
  * currently being drawn. Only active in Build mode — Simulate mode hides
  * every editing affordance so the network reads as "open to traffic."
  */
-export default function RoadEditor() {
+function RoadEditor() {
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
   const nodes = useEditorStore((s) => s.nodes);
@@ -339,3 +339,6 @@ export default function RoadEditor() {
     </group>
   );
 }
+
+/** Memoized: the game page re-renders several times a second with live traffic stats, and none of this scene depends on them. */
+export default memo(RoadEditor);

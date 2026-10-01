@@ -57,7 +57,6 @@ const DEFAULT_METRICS: SimMetricsState = {
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
 const DEFAULT_SEED = 1337;
 
-const METRICS_UPDATE_INTERVAL_MS = 200;
 
 /**
  * Owns the dedicated simulation worker's lifecycle and exposes:
@@ -80,7 +79,6 @@ export function useTrafficSimulation() {
     taillightColors: ArrayBuffer;
   } | null>(null);
   const versionCounterRef = useRef(0);
-  const lastMetricsFlushRef = useRef(0);
 
   const [metrics, setMetrics] = useState<SimMetricsState>(DEFAULT_METRICS);
   const [userPaused, setUserPaused] = useState(false);
@@ -135,9 +133,10 @@ export function useTrafficSimulation() {
           version: versionCounterRef.current,
         };
 
-        const now = performance.now();
-        if (now - lastMetricsFlushRef.current >= METRICS_UPDATE_INTERVAL_MS) {
-          lastMetricsFlushRef.current = now;
+        // The worker attaches the heavy per-edge stats only a few times a second (and once per change while
+        // paused), so a React state update happens exactly then — not on every 30 Hz snapshot.
+        const stats = msg.stats;
+        if (stats) {
           setMetrics({
             activeCount: msg.activeCount,
             avgSpeedMph: ftpsToMph(msg.avgSpeedFtS),
@@ -145,12 +144,12 @@ export function useTrafficSimulation() {
             simTime: msg.simTime,
             spawnedTotal: msg.spawnedTotal,
             completedTripsTotal: msg.completedTripsTotal,
-            contracts: msg.contracts,
-            edgeSpeedRatios: msg.edgeSpeedRatios,
-            problemEdgeIds: msg.problemEdgeIds,
-            edgeTrafficStats: msg.edgeTrafficStats,
-            gridlockPenaltyTotal: msg.gridlockPenaltyTotal,
-            gridlockMarkers: msg.gridlockMarkers,
+            contracts: stats.contracts,
+            edgeSpeedRatios: stats.edgeSpeedRatios,
+            problemEdgeIds: stats.problemEdgeIds,
+            edgeTrafficStats: stats.edgeTrafficStats,
+            gridlockPenaltyTotal: stats.gridlockPenaltyTotal,
+            gridlockMarkers: stats.gridlockMarkers,
           });
         }
       }

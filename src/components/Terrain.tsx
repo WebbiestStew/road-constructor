@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, memo } from "react";
 import * as THREE from "three";
 
 const GROUND_SIZE = 24000;
@@ -155,7 +155,7 @@ function TreeField({ count, avoid, clearance }: { count: number; avoid: AvoidSeg
 
 const NO_AVOID: AvoidSegment[] = [];
 
-export default function Terrain({
+function Terrain({
   treeCount = TREE_COUNT,
   avoid = NO_AVOID,
   clearance = 0,
@@ -176,3 +176,6 @@ export default function Terrain({
     </group>
   );
 }
+
+/** Memoized: the game page re-renders several times a second with live traffic stats, and none of this scene depends on them. */
+export default memo(Terrain);

@@ -26,6 +26,7 @@ import {
   type Edge3D,
   type EdgeSpeedRatio,
   type RoadNetwork,
+  type TickStats,
   type VehicleState,
   type WorkerInMessage,
   type WorkerOutMessage,
@@ -966,11 +967,13 @@ const edgeSpeedRatioSum = new Map<string, number>();
 const edgeSpeedRatioCount = new Map<string, number>();
 const edgeSpeedSumMph = new Map<string, number>();
 
-function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: number; gridlockMarkers: [number, number, number][] } {
+function writeSnapshot(buf: BufferSet, collectStats: boolean): { activeCount: number; avgSpeedFtS: number; gridlockMarkers: [number, number, number][] } {
   if (!network) return { activeCount: 0, avgSpeedFtS: 0, gridlockMarkers: [] };
-  edgeSpeedRatioSum.clear();
-  edgeSpeedRatioCount.clear();
-  edgeSpeedSumMph.clear();
+  if (collectStats) {
+    edgeSpeedRatioSum.clear();
+    edgeSpeedRatioCount.clear();
+    edgeSpeedSumMph.clear();
+  }
   const gridlockMarkers: [number, number, number][] = [];
   let i = 0;
   let speedSum = 0;
@@ -1021,9 +1024,11 @@ function writeSnapshot(buf: BufferSet): { activeCount: number; avgSpeedFtS: numb
     buf.taillightColors[i * 3 + 1] = 0.05 + brakeT * 0.2;
     buf.taillightColors[i * 3 + 2] = 0.05 + brakeT * 0.2;
 
-    edgeSpeedRatioSum.set(edge.id, (edgeSpeedRatioSum.get(edge.id) ?? 0) + ratio);
-    edgeSpeedRatioCount.set(edge.id, (edgeSpeedRatioCount.get(edge.id) ?? 0) + 1);
-    edgeSpeedSumMph.set(edge.id, (edgeSpeedSumMph.get(edge.id) ?? 0) + ftpsToMph(v.speed));
+    if (collectStats) {
+      edgeSpeedRatioSum.set(edge.id, (edgeSpeedRatioSum.get(edge.id) ?? 0) + ratio);
+      edgeSpeedRatioCount.set(edge.id, (edgeSpeedRatioCount.get(edge.id) ?? 0) + 1);
+      edgeSpeedSumMph.set(edge.id, (edgeSpeedSumMph.get(edge.id) ?? 0) + ftpsToMph(v.speed));
+    }
 
     speedSum += v.speed;
     i++;
@@ -1088,12 +1093,32 @@ function updateCongestionState(deltaSimTime: number) {
   }
 }
 
-function postSnapshot() {
+/** How often the heavy per-edge statistics are recomputed and sent. Everything the HUD shows from them updates only ~5x/s anyway. */
+const STATS_INTERVAL_MS = 200;
+let lastStatsPostMs = 0;
+/** Set whenever something changed while paused (network, patches, run state) so the main thread gets one fresh snapshot instead of a stream of identical ones. */
+let snapshotDirty = true;
+
+function postSnapshot(forceStats: boolean) {
+  const now = performance.now();
+  const withStats = forceStats || now - lastStatsPostMs >= STATS_INTERVAL_MS;
   const buf = acquireBufferSet();
-  const { activeCount, avgSpeedFtS, gridlockMarkers } = writeSnapshot(buf);
-  const deltaSimTime = Math.max(0, simTime - lastSnapshotSimTime);
-  lastSnapshotSimTime = simTime;
-  updateCongestionState(deltaSimTime);
+  const { activeCount, avgSpeedFtS, gridlockMarkers } = writeSnapshot(buf, withStats);
+  let stats: TickStats | undefined;
+  if (withStats) {
+    lastStatsPostMs = now;
+    const deltaSimTime = Math.max(0, simTime - lastSnapshotSimTime);
+    lastSnapshotSimTime = simTime;
+    updateCongestionState(deltaSimTime);
+    stats = {
+      contracts: computeContracts(),
+      edgeSpeedRatios: computeEdgeSpeedRatios(),
+      problemEdgeIds: Array.from(problemEdges),
+      edgeTrafficStats: computeEdgeTrafficStatsList(),
+      gridlockPenaltyTotal,
+      gridlockMarkers,
+    };
+  }
   const matricesBuffer = buf.matrices.buffer as ArrayBuffer;
   const colorsBuffer = buf.colors.buffer as ArrayBuffer;
   const taillightColorsBuffer = buf.taillightColors.buffer as ArrayBuffer;
@@ -1108,12 +1133,7 @@ function postSnapshot() {
     throughputLastMinute: despawnTimestamps.length,
     spawnedTotal,
     completedTripsTotal,
-    contracts: computeContracts(),
-    edgeSpeedRatios: computeEdgeSpeedRatios(),
-    problemEdgeIds: Array.from(problemEdges),
-    edgeTrafficStats: computeEdgeTrafficStatsList(),
-    gridlockPenaltyTotal,
-    gridlockMarkers,
+    stats,
   };
   ctx.postMessage(message, [matricesBuffer, colorsBuffer, taillightColorsBuffer]);
 }
@@ -1122,7 +1142,8 @@ function postSnapshot() {
 // Fixed-timestep loop, decoupled from render cadence
 // ---------------------------------------------------------------------------
 
-const LOOP_INTERVAL_MS = 1000 / 60;
+// 30 Hz is plenty: the sim steps at 30 Hz and the renderer is capped at or below it for low-end machines.
+const LOOP_INTERVAL_MS = 1000 / 30;
 const MAX_STEPS_PER_FRAME = 40;
 
 function loopTick() {
@@ -1141,7 +1162,13 @@ function loopTick() {
     }
   }
 
-  postSnapshot();
+  // While paused nothing moves, so send one snapshot per change rather than a constant stream.
+  if (running) {
+    postSnapshot(false);
+  } else if (snapshotDirty) {
+    snapshotDirty = false;
+    postSnapshot(true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1150,6 +1177,7 @@ function loopTick() {
 
 ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
   const msg = event.data;
+  if (msg.type !== "returnBuffers" && msg.type !== "setSpeedMultiplier" && msg.type !== "setMaxVehicles") snapshotDirty = true;
   switch (msg.type) {
     case "reset":
       resetRun();

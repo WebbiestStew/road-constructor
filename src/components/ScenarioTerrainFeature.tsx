@@ -1,10 +1,11 @@
 "use client";
 
+import { memo } from "react";
 import { useEditorStore } from "@/state/editorStore";
 import { getScenarioById } from "@/sim/scenarios";
 
 /** Decorative-only river/cliff dressing for the active campaign scenario's narrative — never affects gameplay or pathing. */
-export default function ScenarioTerrainFeature() {
+function ScenarioTerrainFeature() {
   const activeScenarioId = useEditorStore((s) => s.activeScenarioId);
   const scenario = activeScenarioId ? getScenarioById(activeScenarioId) : undefined;
   const feature = scenario?.terrainFeature;
@@ -38,3 +39,6 @@ export default function ScenarioTerrainFeature() {
     </group>
   );
 }
+
+/** Memoized: the game page re-renders several times a second with live traffic stats, and none of this scene depends on them. */
+export default memo(ScenarioTerrainFeature);

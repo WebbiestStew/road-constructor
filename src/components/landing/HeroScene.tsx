@@ -8,7 +8,8 @@ import Terrain from "@/components/Terrain";
 import VehicleRenderer from "@/components/VehicleRenderer";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { getDemoCity, getDemoRoadSegments } from "@/sim/demoCity";
-import { useQuality } from "@/lib/quality";
+import { QUALITY_SETTINGS, useQuality } from "@/lib/quality";
+import FrameLimiter from "@/components/FrameLimiter";
 
 const HAZE = "#ffd9e6";
 
@@ -77,19 +78,21 @@ export default function HeroScene({
   reducedMotion: boolean;
 }) {
   const quality = useQuality();
-  const high = quality === "high";
+  const q = QUALITY_SETTINGS[quality];
   const city = useMemo(() => getDemoCity(), []);
   const avoid = useMemo(() => getDemoRoadSegments(), []);
 
   return (
     <Canvas
       key={quality}
-      shadows={high}
-      dpr={high ? [1, 1.75] : 1}
-      gl={{ antialias: high, powerPreference: "high-performance" }}
+      shadows={q.shadows}
+      dpr={q.dpr}
+      // FrameLimiter drives frames: capped rate, and no rendering at all while the hero is off-screen.
+      frameloop="never"
+      gl={{ antialias: q.antialias, powerPreference: "default" }}
       camera={{ fov: 30, near: 50, far: 30000, position: [2000, 3800, 2500] }}
-      frameloop={visible ? "always" : "never"}
     >
+      {visible && <FrameLimiter maxFps={q.maxFps} active />}
       <color attach="background" args={[HAZE]} />
       <fog attach="fog" args={[HAZE, 4200, 12500]} />
 
@@ -99,9 +102,9 @@ export default function HeroScene({
         position={[-1600, 950, 1100]}
         intensity={1.5}
         color="#ffe2b8"
-        castShadow={high}
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        castShadow={q.shadows}
+        shadow-mapSize-width={q.shadowMapSize}
+        shadow-mapSize-height={q.shadowMapSize}
         shadow-camera-left={-3000}
         shadow-camera-right={3000}
         shadow-camera-top={2600}
@@ -112,7 +115,7 @@ export default function HeroScene({
       />
 
       <CameraRig reducedMotion={reducedMotion} />
-      <Terrain treeCount={high ? 1100 : 450} avoid={avoid} clearance={90} />
+      <Terrain treeCount={Math.round(1100 * q.scenery)} avoid={avoid} clearance={90} />
 
       {city.stages.map((slice, i) => (
         <Rise key={i} show={stage > i}>
