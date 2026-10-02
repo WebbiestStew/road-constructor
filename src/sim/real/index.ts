@@ -1,4 +1,5 @@
 import type { NetworkSnapshot } from "../types";
+import type { SceneryData } from "../osm/scenery";
 import losAngeles from "./los-angeles.json";
 import monterrey from "./monterrey.json";
 import newYork from "./new-york.json";
@@ -16,6 +17,8 @@ import atlanta from "./atlanta.json";
 export interface RealCityData {
   meta: { key: string; name: string; bbox: [number, number, number, number]; attribution: string; generated: string };
   network: NetworkSnapshot;
+  /** Real building footprints and water from OpenStreetMap, drawn around the roads. */
+  scenery?: SceneryData;
 }
 
 export const REAL_CITY_DATA = {

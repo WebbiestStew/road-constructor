@@ -13,6 +13,7 @@ import PlaceSearch from "./PlaceSearch";
 import DailyBoard from "./DailyBoard";
 import { makeShareCard, shareOrDownload } from "@/lib/shareCard";
 import type { NetworkSnapshot } from "@/sim/types";
+import type { SceneryData } from "@/sim/osm/scenery";
 
 function formatMMSS(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -94,7 +95,7 @@ function ScenarioPicker({
   onPlace,
 }: {
   onSandbox: () => void;
-  onPlace: (network: NetworkSnapshot, name: string) => void;
+  onPlace: (network: NetworkSnapshot, name: string, scenery: SceneryData) => void;
   onStart: (id: string) => void;
   onClose: () => void;
   hasActiveScenario: boolean;
@@ -290,7 +291,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
 }
 
 /** First-visit menu over an empty map: pick a pre-built city to manage, or start from scratch. */
-function StartMenu({ onStart, onSandbox, onPlace }: { onStart: (id: string) => void; onSandbox: () => void; onPlace: (network: NetworkSnapshot, name: string) => void }) {
+function StartMenu({ onStart, onSandbox, onPlace }: { onStart: (id: string) => void; onSandbox: () => void; onPlace: (network: NetworkSnapshot, name: string, scenery: SceneryData) => void }) {
   const cities = SCENARIOS.filter((s) => s.id === "first-shift" || s.id === "midtown" || s.id === "harbor-drive");
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
@@ -386,8 +387,8 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
             const def = getScenarioById(id);
             if (def) runner.startScenario(def);
           }}
-          onPlace={(network, name) => {
-            startPlace(network, name);
+          onPlace={(network, name, scenery) => {
+            startPlace(network, name, scenery);
             setStartDismissed(true);
           }}
           onSandbox={() => {
@@ -410,8 +411,8 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
             runner.exitToFreeBuild();
             setPickerOpen(false);
           }}
-          onPlace={(network, name) => {
-            startPlace(network, name);
+          onPlace={(network, name, scenery) => {
+            startPlace(network, name, scenery);
             setPickerOpen(false);
           }}
           onSandbox={() => {

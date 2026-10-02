@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { loadPlace, searchPlaces, type PlaceHit } from "@/lib/place";
 import type { NetworkSnapshot } from "@/sim/types";
+import type { SceneryData } from "@/sim/osm/scenery";
 
 type Phase = { kind: "idle" } | { kind: "searching" } | { kind: "loading"; name: string } | { kind: "error"; message: string };
 
 /** "Load any place": type a place, pick a result, and play on its real roads. */
-export default function PlaceSearch({ onPlace }: { onPlace: (network: NetworkSnapshot, name: string) => void }) {
+export default function PlaceSearch({ onPlace }: { onPlace: (network: NetworkSnapshot, name: string, scenery: SceneryData) => void }) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<PlaceHit[]>([]);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -36,8 +37,8 @@ export default function PlaceSearch({ onPlace }: { onPlace: (network: NetworkSna
     const short = hit.name.split(",").slice(0, 2).join(",").trim();
     setPhase({ kind: "loading", name: short });
     try {
-      const { network } = await loadPlace(hit, ctl.signal);
-      onPlace(network, short);
+      const { network, scenery } = await loadPlace(hit, ctl.signal);
+      onPlace(network, short, scenery);
     } catch (e) {
       if (!ctl.signal.aborted) setPhase({ kind: "error", message: e instanceof Error ? e.message : "Couldn't load that place." });
     }

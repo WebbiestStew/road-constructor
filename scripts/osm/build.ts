@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { convertOsm } from "../../src/sim/osm/convert";
+import { convertScenery, sceneryQuery } from "../../src/sim/osm/scenery";
 import { CITIES, type CityConfig } from "./cities";
 
 // Run from the repo root (see usage above), so paths are relative to it.
@@ -59,9 +60,19 @@ async function download(city: CityConfig): Promise<OsmData> {
   return data;
 }
 
+async function downloadScenery(city: CityConfig): Promise<OsmData> {
+  const file = path.join(CACHE_DIR, `${city.key}.scenery.json`);
+  if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8")) as OsmData;
+  console.log(`  downloading ${city.name} buildings and water…`);
+  const data = await overpass(sceneryQuery(city.bbox));
+  fs.writeFileSync(file, JSON.stringify(data));
+  return data;
+}
+
 async function buildCity(city: CityConfig) {
   const data = await download(city);
   const { network, stats } = convertOsm(city, data);
+  const scenery = convertScenery(city.bbox, (await downloadScenery(city)).elements as never, network);
   const meta = {
     key: city.key,
     name: city.name,
@@ -71,11 +82,11 @@ async function buildCity(city: CityConfig) {
   };
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const file = path.join(OUT_DIR, `${city.key}.json`);
-  fs.writeFileSync(file, JSON.stringify({ meta, network }));
+  fs.writeFileSync(file, JSON.stringify({ meta, network, scenery }));
   const kb = Math.round(fs.statSync(file).size / 1024);
   console.log(
     `  ${city.name.padEnd(12)} ${stats.edges} edges, ${stats.nodes} nodes, ${Math.round(stats.lengthMiles)} mi of road, ` +
-      `${stats.signals} signals, ${stats.entries} entries/${stats.dests} dests, ` +
+      `${stats.signals} signals, ${stats.entries} entries/${stats.dests} dests, ${scenery.buildings.length} buildings, ${scenery.water.length} water, ` +
       `extent ${Math.round(stats.extentFt[0])}×${Math.round(stats.extentFt[1])} ft, ${stats.elevationLevels} elevation levels, ${kb} KB`
   );
 }

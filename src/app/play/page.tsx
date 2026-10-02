@@ -11,6 +11,7 @@ import RoadEditor from "@/components/RoadEditor";
 import VehicleRenderer from "@/components/VehicleRenderer";
 import Pedestrians from "@/components/Pedestrians";
 import RoadsideProps from "@/components/RoadsideProps";
+import Scenery from "@/components/Scenery";
 import EmergencyPins from "@/components/EmergencyPins";
 import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
@@ -312,6 +313,7 @@ export default function Play() {
         />
         <Streetlights />
         <RoadsideProps />
+        <Scenery />
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
         <Pedestrians snapshotRef={sim.snapshotRef} />

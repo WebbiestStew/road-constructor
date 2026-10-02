@@ -5,6 +5,8 @@ import { create } from "zustand";
 import { assembleNetwork, assembleNetworkCached, computeSignalPhaseGroups, planTexasTurnaround, trafficStaysConnected } from "@/sim/network";
 import { pushToast } from "@/lib/toast";
 import { FREE_BUILD_ECONOMY_K, economyKFor, economyRates } from "@/sim/economy";
+import { EMPTY_SCENERY, type SceneryData } from "@/sim/osm/scenery";
+import { REAL_CITY_DATA } from "@/sim/real";
 import { assembleCached } from "@/sim/assembleCache";
 import { findClearanceViolations } from "@/sim/clearance";
 import {
@@ -231,10 +233,12 @@ interface EditorState {
   economyK: number | null;
   /** Charges (or credits) the budget for traffic having run `deltaS` sim-seconds with the current roads. */
   applyEconomy: (deltaS: number) => void;
+  /** Buildings and water drawn around the roads (real cities and loaded places). */
+  scenery: SceneryData;
   /** Name of the real-world place loaded with "Load any place", for the map credit; null otherwise. */
   placeName: string | null;
   /** Opens a real place's roads (from OpenStreetMap) as an open sandbox: unlimited money, nothing locked. */
-  startPlace: (network: NetworkSnapshot, name: string) => void;
+  startPlace: (network: NetworkSnapshot, name: string, scenery?: SceneryData) => void;
   /** The weather the player chose in free play (scripted storms in a level override it). */
   weather: Weather;
   setWeather: (w: Weather) => void;
@@ -1396,6 +1400,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeScenarioId: null,
   buildLocked: false,
   realCityActive: false,
+  scenery: EMPTY_SCENERY,
   economyK: FREE_BUILD_ECONOMY_K,
   applyEconomy: (deltaS) => {
     const s = get();
@@ -1405,8 +1410,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (net !== 0) set({ budget: s.budget + net });
   },
   placeName: null,
-  startPlace: (network, name) =>
+  startPlace: (network, name, scenery) =>
     set((s) => ({
+      scenery: scenery ?? EMPTY_SCENERY,
       nodes: network.nodes,
       edges: network.edges,
       nodesById: new Map(network.nodes.map((n) => [n.id, n])),
@@ -1459,6 +1465,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tool: scenario.kind === "manage" ? "inspect" : get().tool,
       buildLocked: scenario.kind === "manage",
       realCityActive: scenario.real === true,
+      scenery: (scenario.sceneryKey && REAL_CITY_DATA[scenario.sceneryKey]?.scenery) || EMPTY_SCENERY,
       placeName: null,
       economyK:
         scenario.kind === "manage"
@@ -1482,14 +1489,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, placeName: null, economyK: FREE_BUILD_ECONOMY_K, trafficMix: CLASSIC_MIX }),
-  enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, economyK: null, budget: SANDBOX_BUDGET }),
+  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, scenery: EMPTY_SCENERY, placeName: null, economyK: FREE_BUILD_ECONOMY_K, trafficMix: CLASSIC_MIX }),
+  enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, scenery: EMPTY_SCENERY, economyK: null, budget: SANDBOX_BUDGET }),
   startSandbox: () => {
     get().clearNetwork();
     set({
       activeScenarioId: null,
       buildLocked: false,
       realCityActive: false,
+      scenery: EMPTY_SCENERY,
       placeName: null,
       economyK: null,
       trafficMix: MIXED_MIX,

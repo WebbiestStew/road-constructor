@@ -1,4 +1,5 @@
 import { convertOsm, type OsmData } from "@/sim/osm/convert";
+import { EMPTY_SCENERY, convertScenery, sceneryQuery, type SceneryData } from "@/sim/osm/scenery";
 import type { NetworkSnapshot } from "@/sim/types";
 
 /**
@@ -70,6 +71,7 @@ async function overpass(query: string, signal?: AbortSignal): Promise<OsmData> {
 
 export interface LoadedPlace {
   network: NetworkSnapshot;
+  scenery: SceneryData;
   summary: string;
 }
 
@@ -95,8 +97,17 @@ export async function loadPlace(hit: PlaceHit, signal?: AbortSignal): Promise<Lo
       if (highways === HIGHWAYS_DENSE) throw new Error("There aren't enough connected roads there. Try a busier part of town.");
       continue;
     }
+    // Buildings and water are a nicety: if that second request fails the roads still load.
+    let scenery = EMPTY_SCENERY;
+    try {
+      const extra = await overpass(sceneryQuery(bbox), signal);
+      scenery = convertScenery(bbox, extra.elements as never, network);
+    } catch {
+      if (signal?.aborted) throw new Error("cancelled");
+    }
     return {
       network,
+      scenery,
       summary: `${Math.round(stats.lengthMiles * 10) / 10} mi of road, ${stats.signals} traffic lights, ${stats.entries} ways in`,
     };
   }
