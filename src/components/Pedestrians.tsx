@@ -52,14 +52,14 @@ function Pedestrians({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
         const across = (dir > 0 ? t : 1 - t) * 2 - 1;
         const along = (k - (PEOPLE_PER_CROSSING - 1) / 2) * 2.1;
         // The "right" vector is horizontal; walking is along it, spreading is along the road (perpendicular).
-        _p.set(cx + rx * across * halfWidth - rz * along, cy + 2.6, cz + rz * across * halfWidth + rx * along);
+        _p.set(cx + rx * across * halfWidth - rz * along, cy + 3.4, cz + rz * across * halfWidth + rx * along);
         _q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.atan2(rx * dir, rz * dir));
         _s.set(1, 1, 1);
         _m.compose(_p, _q, _s);
         body.setMatrixAt(n, _m);
         _c.set(PED_COLORS[(k + Math.floor(Math.abs(cx + cz)) + n) % PED_COLORS.length]);
         body.setColorAt(n, _c);
-        _p.y += 3.3;
+        _p.y += 4.3;
         _m.compose(_p, _q, _s);
         head.setMatrixAt(n, _m);
         n++;
@@ -75,11 +75,11 @@ function Pedestrians({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
   return (
     <>
       <instancedMesh ref={bodyRef} args={[undefined, undefined, MAX_PEDS]} castShadow>
-        <capsuleGeometry args={[0.9, 3.2, 3, 8]} />
+        <capsuleGeometry args={[1.35, 3.6, 3, 8]} />
         <meshStandardMaterial color="#ffffff" roughness={0.7} />
       </instancedMesh>
       <instancedMesh ref={headRef} args={[undefined, undefined, MAX_PEDS]}>
-        <sphereGeometry args={[0.85, 8, 6]} />
+        <sphereGeometry args={[1.25, 8, 6]} />
         <meshStandardMaterial color="#f1c9a5" roughness={0.8} />
       </instancedMesh>
     </>
