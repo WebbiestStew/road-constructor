@@ -8,7 +8,7 @@ import Terrain from "@/components/Terrain";
 import VehicleRenderer from "@/components/VehicleRenderer";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { getDemoCity, getDemoRoadSegments } from "@/sim/demoCity";
-import { useGraphics } from "@/lib/quality";
+import { useGlEpoch, useGraphics } from "@/lib/quality";
 import FrameLimiter from "@/components/FrameLimiter";
 
 const HAZE = "#ffd9e6";
@@ -80,12 +80,13 @@ export default function HeroScene({
   reducedMotion: boolean;
 }) {
   const q = useGraphics();
+  const glEpoch = useGlEpoch();
   const city = useMemo(() => getDemoCity(), []);
   const avoid = useMemo(() => getDemoRoadSegments(), []);
 
   return (
     <Canvas
-      key={`${q.antialias}`}
+      key={glEpoch}
       shadows={q.shadows}
       dpr={q.dpr}
       // FrameLimiter drives frames: capped rate, and no rendering at all while the hero is off-screen.

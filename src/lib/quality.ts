@@ -126,6 +126,12 @@ function detectDefaultQuality(): Quality {
 const OVERRIDES_KEY = "road-constructor:graphics-overrides:v1";
 let overrides: GraphicsOverrides = {};
 let resolved: QualitySettings = QUALITY_SETTINGS.high;
+/**
+ * Bumps only when the player's own choice changes how the 3D context must be created (antialiasing). The canvas is
+ * keyed on this, so an automatic step down in quality never tears it down mid-game, which React's Html overlays do
+ * not survive.
+ */
+let glEpoch = 0;
 let quality: Quality = "high";
 let autoDowngraded = false;
 let hydrated = false;
@@ -184,8 +190,10 @@ export function setGraphicsOption<K extends keyof GraphicsOverrides>(key: K, val
   if (value === baseValue || value === undefined) delete next[key];
   else next[key] = value;
   overrides = next;
+  const before = resolved.antialias;
   saveOverrides();
   recompute();
+  if (resolved.antialias !== before) glEpoch++;
   emit();
 }
 
@@ -202,11 +210,13 @@ export function setQuality(value: Quality, auto = false): void {
   quality = value;
   autoDowngraded = auto && wasLower;
   // Picking a preset means "use that preset": it replaces any individual tweaks.
+  const aaBefore = resolved.antialias;
   if (!auto) {
     overrides = {};
     saveOverrides();
   }
   recompute();
+  if (!auto && resolved.antialias !== aaBefore) glEpoch++;
   try {
     window.localStorage.setItem(QUALITY_KEY, value);
   } catch {
@@ -251,6 +261,15 @@ export function useGraphics(): QualitySettings {
       return resolved;
     },
     () => QUALITY_SETTINGS.high
+  );
+}
+
+/** Changes only when the 3D view must be rebuilt (see `glEpoch`). */
+export function useGlEpoch(): number {
+  return useSyncExternalStore(
+    subscribe,
+    () => glEpoch,
+    () => 0
   );
 }
 

@@ -119,6 +119,10 @@ export type ReservedLane = "bus" | "bike";
 
 export type Weather = "clear" | "rain" | "fog";
 
+/** The number each kind is sent as in the snapshot (see VehicleRenderer, which turns it back into a shape). */
+export const VEHICLE_KIND_CODE: Record<VehicleKind, number> = { car: 0, truck: 1, bus: 2, bike: 3, ambulance: 4 };
+export const VEHICLE_KIND_BY_CODE: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance"];
+
 /** What a simulated road user is. Most are cars; the rest only appear when the level or sandbox asks for mixed traffic. */
 export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance";
 

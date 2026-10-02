@@ -18,6 +18,7 @@ import { assembleNetwork, computeRoute, patchEdge } from "./network";
 import {
   MAX_VEHICLES,
   SIM_DT,
+  VEHICLE_KIND_CODE,
   VEHICLE_HEIGHT_FT,
   VEHICLE_LENGTH_FT,
   ftpsToMph,
@@ -1540,12 +1541,6 @@ function writeSnapshot(
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
 
-    // Trucks get a taller, slightly wider box on top of their already-longer
-    // length, so an 18-wheeler reads as a distinct bulkier silhouette next
-    // to a sedan using nothing but the one shared box geometry.
-    const widthScale = v.kind === "bus" ? 1.25 : v.kind === "bike" ? 0.32 : v.kind === "ambulance" ? 1.1 : v.isTruck ? 1.15 : 1;
-    const heightScale = v.kind === "bus" ? 1.85 : v.kind === "bike" ? 0.75 : v.kind === "ambulance" ? 1.5 : v.isTruck ? 1.55 : 1;
-
     const t = distanceToT(edge, v.distanceAlongEdge);
     laneCenterPointAt(edge, t, v.laneIndex, _tangent, _right, _pos);
     // Roads meet at a node but each lane's offset belongs to its own road, so a turning car would snap sideways
@@ -1563,11 +1558,9 @@ function writeSnapshot(
         if (_tangent.lengthSq() > 1e-6) _tangent.normalize();
       }
     }
-    // The box's local origin is its center, so its footprint sits at ground
-    // level only if we lift it by half of its *scaled* height — using the
-    // unscaled height here would leave taller (truck) boxes sunk into the
-    // pavement by the difference.
-    _pos.y += (VEHICLE_HEIGHT_FT * heightScale) / 2;
+    // The renderer builds each kind of vehicle's own shape, standing on the road: the matrix carries only where it is
+    // and which way it faces, plus two spare slots (below) for what kind it is and how long.
+    _pos.y += 0.1;
 
     const broken = v.frozenUntil > simTime;
     if (v.kind === "ambulance") ambulancePositions.push([_pos.x, _pos.y, _pos.z]);
@@ -1578,9 +1571,13 @@ function writeSnapshot(
     }
 
     _quat.setFromUnitVectors(FORWARD_AXIS, _tangent);
-    _scale.set(widthScale, heightScale, v.length / VEHICLE_LENGTH_FT);
+    _scale.set(1, 1, 1);
     _matrix.compose(_pos, _quat, _scale);
     _matrix.toArray(buf.matrices, i * 16);
+    // Slots 3 and 7 are always 0 in a transform; here they carry the vehicle's kind code and its length in feet. The
+    // renderer reads them and clears them before the matrix reaches the GPU.
+    buf.matrices[i * 16 + 3] = VEHICLE_KIND_CODE[v.kind];
+    buf.matrices[i * 16 + 7] = v.length;
 
     const speedLimitFtps = mphToFtps(edge.speedLimitMph);
     const ratio = v.speed / speedLimitFtps;
