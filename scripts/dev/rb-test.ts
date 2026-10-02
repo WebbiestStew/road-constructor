@@ -1,0 +1,12 @@
+import fs from "node:fs";
+import { Builder } from "../../src/sim/cityBuilder";
+import { toShareHash } from "./hash";
+const b = new Builder();
+b.node("w", -600, 0); b.node("m", 0, 0); b.node("e", 600, 0); b.node("n", 0, -600); b.node("s", 0, 600);
+const E = (v: number) => ({ type: "entry", demandVehPerHour: v }) as const;
+const D = { type: "destination", targetSpeedMph: 20 } as const;
+b.road(0, "a1", "w", "m", "avenue", "ground", { forward: E(700), backward: D });
+b.road(0, "a2", "m", "e", "avenue", "ground", { forward: D, backward: E(700) });
+b.road(0, "c1", "n", "m", "street", "ground", { forward: E(300), backward: D });
+b.road(0, "c2", "m", "s", "street", "ground", { forward: D, backward: E(300) });
+fs.writeFileSync("/tmp/shots/rb_test.txt", toShareHash({ nodes: [...b.nodes.values()], edges: b.edges }));

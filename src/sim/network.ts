@@ -87,6 +87,22 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
     (inByNode.get(e.toNodeId) ?? inByNode.set(e.toNodeId, []).get(e.toNodeId)!).push(e);
     (outByNode.get(e.fromNodeId) ?? outByNode.set(e.fromNodeId, []).get(e.fromNodeId)!).push(e);
   }
+  // Arms meeting a roundabout funnel in toward the ring instead of ending in a square slab that overlaps it.
+  const ringNodes = new Set<string>();
+  for (const e of edges) {
+    if (e.isRoundaboutRing) {
+      ringNodes.add(e.fromNodeId);
+      ringNodes.add(e.toNodeId);
+    }
+  }
+  if (ringNodes.size > 0) {
+    for (const e of edges) {
+      if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
+      const funnel = Math.min(60, e.length * 0.4);
+      if (ringNodes.has(e.toNodeId)) e.taperEndFt = Math.max(e.taperEndFt, funnel);
+      if (ringNodes.has(e.fromNodeId)) e.taperStartFt = Math.max(e.taperStartFt, funnel);
+    }
+  }
   const rank = (e: Edge3D, ang: number) => e.priority * 1000 + e.lanes * 10 - ang;
   const taperFor = (e: Edge3D) => Math.min(MERGE_TAPER_FT, e.length * 0.55);
 

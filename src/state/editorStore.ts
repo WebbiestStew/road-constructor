@@ -1234,21 +1234,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         (((legs[(i + 1) % legs.length].angle - a.angle) % (Math.PI * 2)) +
           Math.PI * 2) %
         (Math.PI * 2);
-      const midAngle = a.angle + delta / 2;
-      const midPoint: [number, number, number] = [
-        node.position[0] + Math.cos(midAngle) * radius,
-        y,
-        node.position[2] + Math.sin(midAngle) * radius,
-      ];
-      const length = edgeLengthFt(fromNode.position, toNode.position, [
-        midPoint,
-      ]);
+      // Several points along the true arc (not one bowed midpoint), so the ring is round with no corner at each leg.
+      const arcPoints: [number, number, number][] = [];
+      const ARC_STEPS = 4;
+      for (let k = 1; k < ARC_STEPS; k++) {
+        const ang = a.angle + (delta * k) / ARC_STEPS;
+        arcPoints.push([node.position[0] + Math.cos(ang) * radius, y, node.position[2] + Math.sin(ang) * radius]);
+      }
+      const length = edgeLengthFt(fromNode.position, toNode.position, arcPoints);
       ringCost += estimateEdgeCost("lane", "ground", length, ringLanes);
       ringEdges.push({
         id: `e${edgeSeq++}`,
         fromNodeId: fromNode.id,
         toNodeId: toNode.id,
-        interiorPoints: [midPoint],
+        interiorPoints: arcPoints,
         roadClassId: "lane",
         elevationLevelId: "ground",
         lanes: ringLanes,

@@ -157,8 +157,11 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   // (the opposite carriageway draws the same one from its side). Everywhere else it is a plain white edge line.
   const leftIsCenterline = isCenterlineEdge && !roadClass.divided;
   if (leftIsCenterline) {
-    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth - CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
-    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth + CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
+    // The double yellow stops short of a junction, so it never runs on into a roundabout's lanes or across a crossing road.
+    const [cT0, cT1] = trimRange(28);
+    for (const off of [-pavedHalfWidth - CENTERLINE_GAP_FT, -pavedHalfWidth + CENTERLINE_GAP_FT]) {
+      stripes.push({ geometry: buildSolidStripe(edge, off, 0.35, 0.03, cT0, cT1), color: YELLOW_COLOR });
+    }
   } else {
     for (const [a, b] of runs(-pavedHalfWidth, lineT0, lineT1)) {
       stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5, 0.03, a, b), color: WHITE_COLOR });
@@ -900,14 +903,14 @@ export default function RoadNetworkMesh({
       // A stop bar belongs at a real intersection: three or more roads meeting, and not at a freeway merge, a ramp
       // tapering into another road, or a simple joint where a road just carries on.
       const isIntersection = (neighborsByNode.get(e.toNodeId)?.size ?? 0) >= 3;
-      if (!destNode || !isIntersection || e.taperEndFt > 0) continue;
+      if (!destNode || !isIntersection || e.taperEndFt > 0 || ringNodeIds.has(e.toNodeId)) continue;
       const signal = destNode.control?.type === "signal";
       if (e.isFreeway && !signal) continue;
       stopBars.add(e.id);
       if (signal) crosswalks.add(e.id);
     }
     return { stopBarEdgeIdSet: stopBars, crosswalkEdgeIdSet: crosswalks };
-  }, [network]);
+  }, [network, ringNodeIds]);
 
   const showHeatmap = heatmapEnabled && mode === "simulate";
 
