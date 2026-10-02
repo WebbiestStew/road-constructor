@@ -28,6 +28,8 @@ import EmergencyAnnouncer from "./hud/EmergencyAnnouncer";
 import WeatherFx from "./hud/WeatherFx";
 import PlaceCredit from "./hud/PlaceCredit";
 import SoundScape from "./hud/SoundScape";
+import EconomyTicker from "./hud/EconomyTicker";
+import GuidedTour from "./hud/GuidedTour";
 import DayClock from "./hud/DayClock";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import { usePhotoMode } from "@/lib/photoMode";
@@ -77,9 +79,11 @@ export default function SimControls({
       <EmergencyAnnouncer sim={sim} />
       <ScriptedEventAnnouncer runner={scenarioRunner} />
       <CoachBar />
+      <GuidedTour sim={sim} />
       <DayClock sim={sim} />
       <PlaceCredit />
       <SoundScape sim={sim} />
+      <EconomyTicker sim={sim} />
       <Tutorial />
     </div>
   );

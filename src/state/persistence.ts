@@ -63,6 +63,8 @@ const edgeSchema = z.object({
   reservedLane: z.enum(["bus", "bike"]).optional(),
   crosswalk: z.boolean().optional(),
   jaywalkers: z.boolean().optional(),
+  busStop: z.boolean().optional(),
+  parking: z.boolean().optional(),
 });
 
 const networkSnapshotSchema = z.object({

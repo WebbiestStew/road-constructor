@@ -42,3 +42,36 @@ test("a level can be improved: adding lanes beats the three-star target in Houst
   const better = run("houston", "lanes");
   assert.ok(better.trips >= Math.ceil(plan.baseline * 1.12), `only ${better.trips} vs target ${Math.ceil(plan.baseline * 1.12)}`);
 });
+
+// ---------------------------------------------------------------------------
+// The levels that score something other than vehicles moved: each needs a real route to its stars.
+// ---------------------------------------------------------------------------
+
+function runLevel(id: string, variant: string): { trips: number; people: number; incidents: number; amb: string } {
+  const out = execFileSync("npx", ["tsx", "scripts/sim/level.ts", id, variant], { encoding: "utf8" });
+  return JSON.parse(out.trim().split("\n").pop()!);
+}
+
+test("Code Three: reserving a bus lane as a fast lane gets all four ambulances through quickly", () => {
+  const r = runLevel("code-three", "bus");
+  const [done, rest] = r.amb.split(" x");
+  assert.equal(done, "4/4", `only ${done} arrived`);
+  assert.ok(Number(rest) <= 1.6, `average ${rest}x an empty road, needs <= 1.6`);
+});
+
+test("School Run: crossings on the school blocks stop anyone stepping into traffic", () => {
+  const r = runLevel("school-run", "fixed,cross");
+  assert.equal(r.incidents, 0);
+});
+
+test("First Shift: the three fixes together reach the three-star pace", () => {
+  const r = runLevel("first-shift", "fixed,cross");
+  assert.equal(r.incidents, 0);
+  assert.ok(r.trips >= 236 * 0.85, `only ${r.trips} moved`);
+});
+
+test("Transit Street: bus lanes move more people than leaving the street alone", () => {
+  const none = runLevel("transit-street", "none");
+  const bus = runLevel("transit-street", "bus");
+  assert.ok(bus.people > none.people * 1.08, `${bus.people} vs ${none.people}`);
+});

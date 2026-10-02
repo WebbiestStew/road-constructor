@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { create } from "zustand";
 import { assembleNetwork, assembleNetworkCached, computeSignalPhaseGroups, planTexasTurnaround, trafficStaysConnected } from "@/sim/network";
 import { pushToast } from "@/lib/toast";
+import { FREE_BUILD_ECONOMY_K, economyKFor, economyRates } from "@/sim/economy";
 import { assembleCached } from "@/sim/assembleCache";
 import { findClearanceViolations } from "@/sim/clearance";
 import {
@@ -47,6 +48,7 @@ export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "juncti
 
 /** A crossing needs room for the approach and stopping distance on both sides. */
 export const MIN_CROSSWALK_ROAD_FT = 110;
+export const MIN_BUS_STOP_ROAD_FT = 150;
 
 export interface TrafficMix {
   bus: number;
@@ -193,6 +195,10 @@ interface EditorState {
   setReservedLane: (edgeId: string, kind: ReservedLane | null, wholeRoad: boolean) => void;
   /** Makes a road one-way (in the selected direction) or restores its opposite carriageway. Refuses edits that would strand traffic. */
   setRoadOneWay: (edgeId: string, oneWay: boolean, wholeRoad: boolean) => void;
+  /** Adds or removes a bus stop on this side of the road. */
+  setBusStop: (edgeId: string, on: boolean) => void;
+  /** Adds or removes street parking along this side of a road (and its opposite side, and optionally the rest of the road). */
+  setParking: (edgeId: string, on: boolean, wholeRoad: boolean) => void;
   /** Adds or removes a mid-block pedestrian crossing on this segment and its opposite direction. */
   setCrosswalk: (edgeId: string, on: boolean) => void;
 
@@ -221,6 +227,10 @@ interface EditorState {
    */
   hydrateAutosave: () => void;
 
+  /** Scale of the running costs (upkeep and parking income) in budgeted levels; null where money doesn't run out (sandbox, manage levels). */
+  economyK: number | null;
+  /** Charges (or credits) the budget for traffic having run `deltaS` sim-seconds with the current roads. */
+  applyEconomy: (deltaS: number) => void;
   /** Name of the real-world place loaded with "Load any place", for the map credit; null otherwise. */
   placeName: string | null;
   /** Opens a real place's roads (from OpenStreetMap) as an open sandbox: unlimited money, nothing locked. */
@@ -1047,6 +1057,54 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }));
   },
 
+  setBusStop: (edgeId, on) => {
+    const state = get();
+    const edge = state.edgesById.get(edgeId);
+    if (!edge || edge.isRoundaboutRing || !!edge.busStop === on) return;
+    const from = state.nodesById.get(edge.fromNodeId);
+    const to = state.nodesById.get(edge.toNodeId);
+    if (!from || !to) return;
+    if (on && edgeLengthFt(from.position, to.position, edge.interiorPoints) < MIN_BUS_STOP_ROAD_FT) {
+      pushToast("That stretch is too short for a stop, so try a longer block", "alert");
+      return;
+    }
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const next = { ...e };
+        if (on) next.busStop = true;
+        else delete next.busStop;
+        return next;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
+  setParking: (edgeId, on, wholeRoad) => {
+    const state = get();
+    const targets = collectRoadTargets(state, edgeId, wholeRoad);
+    const changed = state.edges.filter(
+      (e) => targets.has(e.id) && !e.isRoundaboutRing && (e.roadClassId === "lane" || e.roadClassId === "street" || e.roadClassId === "avenue") && !!e.parking !== on,
+    );
+    if (changed.length === 0) {
+      if (on) pushToast("Parking only fits on lanes, streets and avenues", "info");
+      return;
+    }
+    get().pushHistoryEntry();
+    const ids = new Set(changed.map((e) => e.id));
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (!ids.has(e.id)) return e;
+        const next = { ...e };
+        if (on) next.parking = true;
+        else delete next.parking;
+        return next;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
   setCrosswalk: (edgeId, on) => {
     const state = get();
     const edge = state.edgesById.get(edgeId);
@@ -1339,6 +1397,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeScenarioId: null,
   buildLocked: false,
   realCityActive: false,
+  economyK: FREE_BUILD_ECONOMY_K,
+  applyEconomy: (deltaS) => {
+    const s = get();
+    if (s.economyK === null || isSandboxBudget(s.budget) || deltaS <= 0) return;
+    const { upkeep, income } = economyRates(s.nodes, s.edges, s.economyK);
+    const net = (income - upkeep) * deltaS;
+    if (net !== 0) set({ budget: s.budget + net });
+  },
   placeName: null,
   startPlace: (network, name) =>
     set((s) => ({
@@ -1360,6 +1426,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       weather: "clear",
       dayCycle: false,
       placeName: name,
+      economyK: null,
       simEpoch: s.simEpoch + 1,
       pendingCameraFit: {
         centerX: 0,
@@ -1394,6 +1461,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       buildLocked: scenario.kind === "manage",
       realCityActive: scenario.real === true,
       placeName: null,
+      economyK:
+        scenario.kind === "manage"
+          ? null
+          : economyKFor(scenario.startingNetwork.nodes, scenario.startingNetwork.edges, scenario.startingBudget, scenario.durationS),
       trafficMix: scenario.trafficMix ?? CLASSIC_MIX,
       weather: "clear",
       dayCycle: false,
@@ -1412,8 +1483,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, placeName: null, trafficMix: CLASSIC_MIX }),
-  enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, budget: SANDBOX_BUDGET }),
+  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, placeName: null, economyK: FREE_BUILD_ECONOMY_K, trafficMix: CLASSIC_MIX }),
+  enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, economyK: null, budget: SANDBOX_BUDGET }),
   startSandbox: () => {
     get().clearNetwork();
     set({
@@ -1421,6 +1492,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       buildLocked: false,
       realCityActive: false,
       placeName: null,
+      economyK: null,
       trafficMix: MIXED_MIX,
       budget: SANDBOX_BUDGET,
       mode: "build",

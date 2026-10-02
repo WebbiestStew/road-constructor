@@ -185,6 +185,14 @@ const _pos = new THREE.Vector3();
 const _tangent = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
+// Scratch for easing a car from the end of one road into the lane it joins on the next.
+const _tangentNext = new THREE.Vector3();
+const _rightNext = new THREE.Vector3();
+const _posEnd = new THREE.Vector3();
+const _posNext = new THREE.Vector3();
+const _tmpTangent = new THREE.Vector3();
+/** Over this last stretch of a road, a car eases toward the exact spot (and heading) where it enters the next one. */
+const JUNCTION_BLEND_FT = 30;
 const _scale = new THREE.Vector3(1, 1, 1);
 const _matrix = new THREE.Matrix4();
 const _color = new THREE.Color();
@@ -270,6 +278,8 @@ function acquireVehicle(): VehicleState {
     maxSpeedFtps: Infinity,
     yieldUntil: 0,
     yieldLane: 0,
+    stopServedEdge: "",
+    dwellUntil: 0,
     weightToPowerLbPerHp: 25,
     bodyColorR: 1,
     bodyColorG: 1,
@@ -481,6 +491,8 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.passengers = isBus ? Math.round(randRange(22, 42)) : isBike || isTruck || isAmbulance ? (isAmbulance ? 0 : 1) : 1.4;
   v.yieldUntil = 0;
   v.yieldLane = 0;
+  v.stopServedEdge = "";
+  v.dwellUntil = 0;
   v.maxSpeedFtps = isBike ? mphToFtps(randRange(10, 13)) : Infinity;
   v.jamDistance = isBike ? randRange(2.5, 3.5) : randRange(5.5, 7.5);
   v.desiredHeadway = isBus || isTruck ? randRange(1.6, 2.0) : isBike ? randRange(0.8, 1.1) : isAmbulance ? 0.9 : randRange(1.1, 1.7);
@@ -877,12 +889,56 @@ function recordAmbulanceArrival(v: VehicleState) {
   ambTotalIdealS += ambLastIdealS;
 }
 
-/** Returns the distance (ft) at which a vehicle must stop for a crossing or a junction it cannot yet enter, or null if clear. */
+// ---------------------------------------------------------------------------
+// Bus stops: a bus on a route through a stop pulls up at it, waits while people board, and carries more riders
+// for it. A bus stopped in a general lane holds up the cars behind it, which is the price of a stop.
+// ---------------------------------------------------------------------------
+
+const BUS_STOP_AT = 0.6;
+const BUS_DWELL_S = 7;
+const BUS_STOP_APPROACH_FT = 110;
+const BUS_RIDERSHIP_GAIN = 1.12;
+const BUS_MAX_RIDERS = 70;
+
+/** Drivers cruising a street with parking along it slow down looking for a space and watching for opening doors. */
+function parkingSpeedMult(edge: Edge3D, v: VehicleState): number {
+  return edge.parking && v.kind !== "ambulance" ? 0.85 : 1;
+}
+
+/** Stop line for a bus that has a stop of its own ahead on this road, or null. */
+function busStopDistance(v: VehicleState, edge: Edge3D): number | null {
+  if (v.kind !== "bus" || !edge.busStop || v.stopServedEdge === edge.id) return null;
+  const d = edge.length * BUS_STOP_AT - v.distanceAlongEdge;
+  return d > -2 && d <= BUS_STOP_APPROACH_FT ? Math.max(d, 0.1) : null;
+}
+
+/** Runs a bus's boarding timer once it has stopped at its stop, and marks the stop served when the wait is over. */
+function updateBusDwell(v: VehicleState, edge: Edge3D) {
+  if (v.kind !== "bus" || !edge.busStop || v.stopServedEdge === edge.id) return;
+  const d = edge.length * BUS_STOP_AT - v.distanceAlongEdge;
+  if (d < -2) {
+    v.stopServedEdge = edge.id; // overshot (it joined the road past the stop): don't hold it up for one it can't use
+    v.dwellUntil = 0;
+    return;
+  }
+  if (v.dwellUntil === 0) {
+    if (d < 16 && v.speed < 1.5) v.dwellUntil = simTime + BUS_DWELL_S;
+    return;
+  }
+  if (simTime >= v.dwellUntil) {
+    v.stopServedEdge = edge.id;
+    v.dwellUntil = 0;
+    v.passengers = Math.min(BUS_MAX_RIDERS, Math.round(v.passengers * BUS_RIDERSHIP_GAIN));
+  }
+}
+
+/** Returns the distance (ft) at which a vehicle must stop for a bus stop, a crossing or a junction it cannot yet enter, or null if clear. */
 function computeVirtualStopDistance(v: VehicleState, edge: Edge3D): number | null {
-  const junction = junctionStopDistance(v, edge);
-  const crossing = crossingStopDistance(v, edge);
-  if (crossing === null) return junction;
-  return junction === null ? crossing : Math.min(junction, crossing);
+  let best = junctionStopDistance(v, edge);
+  for (const extra of [crossingStopDistance(v, edge), busStopDistance(v, edge)]) {
+    if (extra !== null && (best === null || extra < best)) best = extra;
+  }
+  return best;
 }
 
 /** Returns the distance (ft) at which a vehicle must stop for a junction it cannot yet enter, or null if clear. */
@@ -1071,7 +1127,7 @@ function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
 
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
   const v0 = Math.min(
-    mphToFtps(edge.speedLimitMph) * cruiseFactor(v) * weatherSpeedMult(),
+    mphToFtps(edge.speedLimitMph) * cruiseFactor(v) * weatherSpeedMult() * parkingSpeedMult(edge, v),
     curvatureSpeedCapFtps(edge, v.distanceAlongEdge),
     v.maxSpeedFtps
   );
@@ -1096,7 +1152,7 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
 // ---------------------------------------------------------------------------
 
 function pairAccel(followerV: VehicleState, followerDist: number, leader: VehicleState | null, edge: Edge3D): number {
-  const v0 = Math.min(mphToFtps(edge.speedLimitMph) * cruiseFactor(followerV) * weatherSpeedMult(), followerV.maxSpeedFtps);
+  const v0 = Math.min(mphToFtps(edge.speedLimitMph) * cruiseFactor(followerV) * weatherSpeedMult() * parkingSpeedMult(edge, followerV), followerV.maxSpeedFtps);
   let gap = NO_LEADER_GAP;
   let leaderSpeed = followerV.speed;
   if (leader) {
@@ -1341,6 +1397,7 @@ function step(dt: number) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
     updateWrongLaneTimer(v, edge, dt);
+    updateBusDwell(v, edge);
     const gapInfo = findLeaderGapForVehicle(v, edge);
     v.accel = idmAccelForVehicle(v, edge, gapInfo);
     if (v.frozenUntil > simTime) v.accel = -30; // broken down: hold still
@@ -1483,6 +1540,21 @@ function writeSnapshot(
 
     const t = distanceToT(edge, v.distanceAlongEdge);
     laneCenterPointAt(edge, t, v.laneIndex, _tangent, _right, _pos);
+    // Roads meet at a node but each lane's offset belongs to its own road, so a turning car would snap sideways
+    // as it crosses. Easing it toward the next road's lane start over the last few feet removes the jump.
+    const remaining = edge.length - v.distanceAlongEdge;
+    if (remaining < JUNCTION_BLEND_FT) {
+      const nextEdge = network.edgesById.get(v.routeEdgeIds[v.routeIndex + 1] ?? "");
+      if (nextEdge) {
+        const k = clamp(1 - remaining / JUNCTION_BLEND_FT, 0, 1);
+        const ease = k * k * (3 - 2 * k);
+        laneCenterPointAt(edge, 1, v.laneIndex, _tmpTangent, _right, _posEnd);
+        laneCenterPointAt(nextEdge, 0, clamp(v.laneIndex, 0, nextEdge.lanes - 1), _tangentNext, _rightNext, _posNext);
+        _pos.addScaledVector(_posNext.sub(_posEnd), ease);
+        _tangent.lerp(_tangentNext, ease);
+        if (_tangent.lengthSq() > 1e-6) _tangent.normalize();
+      }
+    }
     // The box's local origin is its center, so its footprint sits at ground
     // level only if we lift it by half of its *scaled* height — using the
     // unscaled height here would leave taller (truck) boxes sunk into the

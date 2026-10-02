@@ -10,6 +10,7 @@ import RoadNetworkMesh from "@/components/RoadNetworkMesh";
 import RoadEditor from "@/components/RoadEditor";
 import VehicleRenderer from "@/components/VehicleRenderer";
 import Pedestrians from "@/components/Pedestrians";
+import RoadsideProps from "@/components/RoadsideProps";
 import EmergencyPins from "@/components/EmergencyPins";
 import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
@@ -309,6 +310,7 @@ export default function Play() {
           incidentMarkers={sim.metrics.incidentMarkers}
         />
         <Streetlights />
+        <RoadsideProps />
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
         <Pedestrians snapshotRef={sim.snapshotRef} />

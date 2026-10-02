@@ -107,6 +107,10 @@ export interface EdgeSpec {
   reservedLane?: ReservedLane;
   /** A mid-block pedestrian crossing: traffic stops for people who press the button. */
   crosswalk?: boolean;
+  /** A bus stop on this side of the road: buses on a route through here stop, and pick up more riders. */
+  busStop?: boolean;
+  /** Street parking along this side: a little income, and drivers slow down looking for a space. */
+  parking?: boolean;
   /** People want to cross here whether or not there is a crossing; without one they step out into traffic. Set by levels. */
   jaywalkers?: boolean;
 }
@@ -163,6 +167,8 @@ export interface Edge3D {
   reservedLane: ReservedLane | null;
   crosswalk: boolean;
   jaywalkers: boolean;
+  busStop: boolean;
+  parking: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
   /** Player-set lane arrows copied from the spec (null = automatic). */
@@ -232,6 +238,10 @@ export interface VehicleState {
   passengers: number;
   /** Hard ceiling on this vehicle's speed regardless of the limit (a bicycle, say). Infinity = none. */
   maxSpeedFtps: number;
+  /** The road whose stop this bus has already served (or passed), so it never stops twice for the same one. */
+  stopServedEdge: string;
+  /** Sim time at which this bus finishes boarding and moves on; 0 when not at a stop. */
+  dwellUntil: number;
   /** While the sim clock is below this, an ambulance is behind this vehicle and it should pull out of that lane. */
   yieldUntil: number;
   yieldLane: number;
@@ -280,6 +290,8 @@ export interface EdgePatch {
   laneMoves: LaneMove[][] | null;
   reservedLane?: ReservedLane | null;
   crosswalk?: boolean;
+  busStop?: boolean;
+  parking?: boolean;
 }
 
 /** How the run's emergency responses are going. Times are sim-seconds; "ideal" is the route at the ambulance's own free-flow speed. */

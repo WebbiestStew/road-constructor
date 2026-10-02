@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { registerCapture, usePhotoMode } from "@/lib/photoMode";
+import { registerCapture, registerGrabber, usePhotoMode } from "@/lib/photoMode";
 
 const ORBIT_RAD_PER_S = 0.07;
 const _offset = new THREE.Vector3();
@@ -37,6 +37,36 @@ export default function PhotoRig() {
       }, "image/png");
     });
     return () => registerCapture(null);
+  }, [advance, gl]);
+
+  useEffect(() => {
+    registerGrabber({
+      frame: () =>
+        new Promise((resolve) => {
+          // Render in the same task as toBlob so the drawing buffer is still valid.
+          advance(performance.now() / 1000);
+          gl.domElement.toBlob((b) => resolve(b), "image/png");
+        }),
+      clip: (seconds) =>
+        new Promise((resolve) => {
+          const canvas = gl.domElement;
+          if (typeof MediaRecorder === "undefined" || typeof canvas.captureStream !== "function") return resolve(null);
+          const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
+          if (!type) return resolve(null);
+          try {
+            const recorder = new MediaRecorder(canvas.captureStream(30), { mimeType: type, videoBitsPerSecond: 5_000_000 });
+            const chunks: Blob[] = [];
+            recorder.ondataavailable = (e) => e.data.size > 0 && chunks.push(e.data);
+            recorder.onstop = () => resolve({ blob: new Blob(chunks, { type }), ext: type.startsWith("video/mp4") ? "mp4" : "webm" });
+            recorder.onerror = () => resolve(null);
+            recorder.start();
+            window.setTimeout(() => recorder.state !== "inactive" && recorder.stop(), seconds * 1000);
+          } catch {
+            resolve(null);
+          }
+        }),
+    });
+    return () => registerGrabber(null);
   }, [advance, gl]);
 
   useFrame((_, delta) => {

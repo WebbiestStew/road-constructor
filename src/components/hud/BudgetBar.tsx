@@ -1,6 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
 import { STARTING_BUDGET, isSandboxBudget, useEditorStore } from "@/state/editorStore";
+import { economyRates } from "@/sim/economy";
 import { getScenarioById } from "@/sim/scenarios";
 
 function formatMoney(n: number): string {
@@ -10,6 +12,15 @@ function formatMoney(n: number): string {
 
 export default function BudgetBar() {
   const budget = useEditorStore((s) => s.budget);
+  const nodes = useEditorStore((s) => s.nodes);
+  const edges = useEditorStore((s) => s.edges);
+  const economyK = useEditorStore((s) => s.economyK);
+  // Net running cost per simulated minute: upkeep out, parking in. Hidden where money doesn't run out.
+  const perMinute = useMemo(() => {
+    if (economyK === null || edges.length === 0) return null;
+    const r = economyRates(nodes, edges, economyK);
+    return (r.income - r.upkeep) * 60;
+  }, [nodes, edges, economyK]);
   // Campaign levels start from their own budget, not the free-build default.
   const cap = useEditorStore((s) => (s.activeScenarioId ? getScenarioById(s.activeScenarioId)?.startingBudget : undefined)) ?? STARTING_BUDGET;
   const top = Math.max(cap, budget);
@@ -40,6 +51,11 @@ export default function BudgetBar() {
           </span>
           <span className="text-xs font-semibold text-zinc-500">/ {formatMoney(top)}</span>
         </div>
+        {perMinute !== null && Math.abs(perMinute) >= 1 && (
+          <span className={`text-[10px] font-bold tabular-nums ${perMinute < 0 ? "text-red-600" : "text-emerald-600"}`} title="Upkeep on your roads, less parking income, per minute of traffic">
+            {perMinute < 0 ? "−" : "+"}${Math.abs(Math.round(perMinute)).toLocaleString()}/min upkeep
+          </span>
+        )}
         <div className="h-1.5 w-40 max-md:w-28 overflow-hidden rounded-full bg-black/10">
           <div
             className={`h-full rounded-full transition-all ${

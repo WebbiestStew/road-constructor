@@ -4,7 +4,7 @@ import { useMemo, type ComponentType, type ReactNode, type SVGProps } from "reac
 import { assembleCached } from "@/sim/assembleCache";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
 import { LANE_MOVES, type LaneMove, type ReservedLane } from "@/sim/types";
-import { CLASSIC_MIX, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
+import { CLASSIC_MIX, MIN_BUS_STOP_ROAD_FT, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
 import {
   IconTurnLeft,
   IconTurnRight,
@@ -339,6 +339,8 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
   const setReservedLane = useEditorStore((s) => s.setReservedLane);
   const setRoadOneWay = useEditorStore((s) => s.setRoadOneWay);
   const setCrosswalk = useEditorStore((s) => s.setCrosswalk);
+  const setBusStop = useEditorStore((s) => s.setBusStop);
+  const setParking = useEditorStore((s) => s.setParking);
   const nodesById = useEditorStore((s) => s.nodesById);
   const inScenario = useEditorStore((s) => s.activeScenarioId !== null);
   const mixed = useEditorStore((s) => s.trafficMix.bus + s.trafficMix.bike > 0);
@@ -416,6 +418,37 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
           <input type="checkbox" className="accent-fuchsia-600" checked={mixed} onChange={(e) => setTrafficMix(e.target.checked ? MIXED_MIX : CLASSIC_MIX)} />
         </label>
       )}
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Kerbside</span>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            disabled={!spec.busStop && lengthFt < MIN_BUS_STOP_ROAD_FT}
+            aria-pressed={!!spec.busStop}
+            onClick={() => setBusStop(spec.id, !spec.busStop)}
+            className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+              spec.busStop ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+            }`}
+          >
+            🚏 Bus stop
+          </button>
+          <button
+            type="button"
+            aria-pressed={!!spec.parking}
+            onClick={() => setParking(spec.id, !spec.parking, wholeRoad)}
+            className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 ${
+              spec.parking ? "bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+            }`}
+          >
+            🅿️ Parking
+          </button>
+        </div>
+        <p className="text-[11px] leading-snug text-zinc-500">
+          A stop on this side lets buses pick up about 12% more riders, but a bus waiting in a general lane holds up the cars behind it. Parking earns money
+          and slows drivers down looking for a space.
+        </p>
+      </div>
 
       <div className="flex flex-col gap-1.5">
         <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Pedestrians</span>

@@ -10,7 +10,7 @@ const variants = new Set(variantArg.split(","));
 
 function fixedNetwork(id: string): NetworkSnapshot | null {
   if (id === "code-three" || id === "transit-street") return buildMidtown(false);
-  if (id === "rainy-rush" || id === "school-run") return buildHarborDrive(false);
+  if (id === "rainy-rush" || id === "school-run" || id === "first-shift") return buildHarborDrive(false);
   return null;
 }
 
@@ -37,6 +37,8 @@ async function main() {
     if (variants.has("busEW") && ew && e.lanes >= 2) e.reservedLane = "bus";
     if (variants.has("busNS") && !ew && e.lanes >= 2) e.reservedLane = "bus";
     if (variants.has("cross") && e.jaywalkers) e.crosswalk = true;
+    if (variants.has("stops") && e.lanes >= 2) e.busStop = true;
+    if (variants.has("parking") && e.lanes >= 2) e.parking = true;
   }
   const sim = await createSim();
   const g = globalThis as unknown as { postMessage: (m: any) => void };

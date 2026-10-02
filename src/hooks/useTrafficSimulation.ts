@@ -242,7 +242,7 @@ export function useTrafficSimulation() {
     worker.postMessage({ type: "updateNetwork", network: snapshot, seed: DEFAULT_SEED } satisfies WorkerInMessage);
     postScenarioEvents(worker);
 
-    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${e.crosswalk ? 1 : 0}`;
+    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${e.crosswalk ? 1 : 0}|${e.busStop ? 1 : 0}|${e.parking ? 1 : 0}`;
     const nodeSig = (n: NodeSpec) => JSON.stringify(n.control ?? null);
     let sentEdges = new Map(snapshot.edges.map((e) => [e.id, edgeSig(e)]));
     let sentNodes = new Map(snapshot.nodes.map((n) => [n.id, nodeSig(n)]));
@@ -275,6 +275,8 @@ export function useTrafficSimulation() {
           laneMoves: e.laneMoves ?? null,
           reservedLane: e.reservedLane ?? null,
           crosswalk: e.crosswalk ?? false,
+          busStop: e.busStop ?? false,
+          parking: e.parking ?? false,
         });
       }
       if (edgePatches.length > 0) {

@@ -74,6 +74,8 @@ function RoadEditor() {
       reservedLane: null,
       crosswalk: false,
       jaywalkers: false,
+      busStop: false,
+      parking: false,
       nextEdgeIds: [],
       manualLaneMoves: null,
       nextMoves: new Map(),

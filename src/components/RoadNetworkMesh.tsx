@@ -193,7 +193,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   if (canMarkJunction && hasStopBar) markingMeshes.push(buildStopBar(edge));
   if (canMarkJunction && hasCrosswalk) markingMeshes.push(...buildCrosswalkBars(edge));
   // A mid-block crossing sits halfway along the segment.
-  if (edge.crosswalk && edge.length > 60) markingMeshes.push(...buildCrosswalkBars(edge, edge.length / 2 - 6, 12, 2.4, 2));
+  if (edge.crosswalk && edge.length > 60) markingMeshes.push(...buildCrosswalkBars(edge, edge.length / 2 - 7, 14, 3.2, 2));
 
   const piers = computePierDescriptors(edge);
   const pierColumnGeometries = piers.map((pier) =>

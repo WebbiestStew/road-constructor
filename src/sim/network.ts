@@ -207,6 +207,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       reservedLane: spec.lanes >= 2 ? (spec.reservedLane ?? null) : null,
       crosswalk: spec.crosswalk ?? false,
       jaywalkers: spec.jaywalkers ?? false,
+      busStop: spec.busStop ?? false,
+      parking: spec.parking ?? false,
       nextEdgeIds: [],
       manualLaneMoves: spec.laneMoves ?? null,
       nextMoves: new Map(),
@@ -377,6 +379,8 @@ export function patchEdge(
   edge.manualLaneMoves = patch.laneMoves;
   if (patch.reservedLane !== undefined) edge.reservedLane = edge.lanes >= 2 ? patch.reservedLane : null;
   if (patch.crosswalk !== undefined) edge.crosswalk = patch.crosswalk;
+  if (patch.busStop !== undefined) edge.busStop = patch.busStop;
+  if (patch.parking !== undefined) edge.parking = patch.parking;
   computeLaneUse(edge, edgesById);
 }
 

@@ -11,6 +11,7 @@ import { playFailTone, playVictoryFanfare } from "@/lib/sound";
 import { IconClock, IconFlag, IconStar } from "./icons";
 import PlaceSearch from "./PlaceSearch";
 import DailyBoard from "./DailyBoard";
+import { makeShareCard, shareOrDownload } from "@/lib/shareCard";
 import type { NetworkSnapshot } from "@/sim/types";
 
 function formatMMSS(seconds: number): string {
@@ -252,6 +253,21 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
         >
           📋 Share my result
         </button>
+        <button
+          type="button"
+          onClick={async () => {
+            const card = await makeShareCard({ title: scenario.name, stars: results.stars, lines: results.summaryLines });
+            if (!card) {
+              pushToast("Couldn't make the picture: the 3D view isn't ready", "bad");
+              return;
+            }
+            const how = await shareOrDownload(card, `road-constructor-${scenario.id}.png`, `${scenario.name} in Road Constructor`);
+            pushToast(how === "shared" ? "🖼️ Shared" : "🖼️ Picture saved to your downloads", "good");
+          }}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-black/5 px-3 py-2 text-xs font-bold text-zinc-700 transition hover:bg-black/10 active:scale-95"
+        >
+          🖼️ Save a picture to share
+        </button>
         {results.won && (
           <button
             type="button"
@@ -275,7 +291,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
 
 /** First-visit menu over an empty map: pick a pre-built city to manage, or start from scratch. */
 function StartMenu({ onStart, onSandbox, onPlace }: { onStart: (id: string) => void; onSandbox: () => void; onPlace: (network: NetworkSnapshot, name: string) => void }) {
-  const cities = SCENARIOS.filter((s) => s.id === "midtown" || s.id === "harbor-drive");
+  const cities = SCENARIOS.filter((s) => s.id === "first-shift" || s.id === "midtown" || s.id === "harbor-drive");
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
       <div className="hud-panel flex max-h-[90vh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-2xl p-6">
@@ -293,7 +309,10 @@ function StartMenu({ onStart, onSandbox, onPlace }: { onStart: (id: string) => v
             onClick={() => onStart(s.id)}
             className="flex flex-col gap-1 rounded-xl border-[3px] border-[#2b1c40] bg-gradient-to-br from-emerald-300 to-teal-400 p-4 text-left shadow-[0_4px_0_#2b1c40] transition hover:-translate-y-0.5 active:translate-y-0.5"
           >
-            <span className="font-display text-lg font-extrabold uppercase text-[#10332b]">🚦 {s.name}</span>
+            <span className="font-display text-lg font-extrabold uppercase text-[#10332b]">
+              🚦 {s.name}
+              {s.id === "first-shift" && <span className="ml-2 rounded-full bg-[#10332b] px-2 py-0.5 text-[10px] tracking-wider text-white">Start here</span>}
+            </span>
             <span className="text-sm font-bold text-[#10332b]/80">{s.tagline}</span>
             <span className="text-xs font-semibold text-[#10332b]/70">Traffic Manager · roads are locked · {s.durationS}s shift</span>
           </button>

@@ -7,6 +7,9 @@ import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 
 /** People on the road at once: a handful per crossing, a few dozen crossings at most. */
 const MAX_PEDS = 320;
+const MAX_BEACONS = 160;
+/** Figures are drawn larger than life so they read at the zoom the game is played at. */
+const PED_SCALE = 1.7;
 const PEOPLE_PER_CROSSING = 4;
 const PED_COLORS = ["#ef476f", "#ffd166", "#06d6a0", "#118ab2", "#f78c6b", "#8338ec", "#ffffff"];
 
@@ -23,10 +26,11 @@ const _c = new THREE.Color();
 function Pedestrians({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot | null> }) {
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const headRef = useRef<THREE.InstancedMesh>(null);
+  const beaconRef = useRef<THREE.InstancedMesh>(null);
   const lastVersion = useRef(-1);
 
   useEffect(() => {
-    for (const ref of [bodyRef, headRef]) {
+    for (const ref of [bodyRef, headRef, beaconRef]) {
       const mesh = ref.current;
       if (!mesh) continue;
       mesh.count = 0;
@@ -38,13 +42,29 @@ function Pedestrians({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
   useFrame(() => {
     const body = bodyRef.current;
     const head = headRef.current;
+    const beacons = beaconRef.current;
     const snap = snapshotRef.current;
-    if (!body || !head || !snap || snap.version === lastVersion.current) return;
+    if (!body || !head || !beacons || !snap) return;
+    // The beacons blink every frame; everything else only changes with the sim.
+    const blink = Math.floor(performance.now() / 280) % 2 === 0;
+    if (snap.version === lastVersion.current && !blink === !beacons.userData.blink) return;
+    beacons.userData.blink = blink;
     lastVersion.current = snap.version;
 
     let n = 0;
+    let nb = 0;
     for (const c of snap.pedCrossings) {
       const [cx, cy, cz, rx, rz, halfWidth, progress, dir] = c;
+      // An amber beacon on a post at each kerb while people are on the road.
+      for (const side of [-1, 1]) {
+        if (nb >= MAX_BEACONS) break;
+        _p.set(cx + rx * side * (halfWidth + 3), cy + 15, cz + rz * side * (halfWidth + 3));
+        _q.identity();
+        const bs = blink ? 1.25 : 0.5;
+        _s.set(bs, bs, bs);
+        _m.compose(_p, _q, _s);
+        beacons.setMatrixAt(nb++, _m);
+      }
       for (let k = 0; k < PEOPLE_PER_CROSSING && n < MAX_PEDS; k++) {
         // Stagger the group so it looks like people, not a row: each starts a little apart and walks a slightly different line.
         const lag = k * 0.07;
@@ -52,14 +72,14 @@ function Pedestrians({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
         const across = (dir > 0 ? t : 1 - t) * 2 - 1;
         const along = (k - (PEOPLE_PER_CROSSING - 1) / 2) * 2.1;
         // The "right" vector is horizontal; walking is along it, spreading is along the road (perpendicular).
-        _p.set(cx + rx * across * halfWidth - rz * along, cy + 3.4, cz + rz * across * halfWidth + rx * along);
+        _p.set(cx + rx * across * halfWidth - rz * along, cy + 3.4 * PED_SCALE, cz + rz * across * halfWidth + rx * along);
         _q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.atan2(rx * dir, rz * dir));
-        _s.set(1, 1, 1);
+        _s.set(PED_SCALE, PED_SCALE, PED_SCALE);
         _m.compose(_p, _q, _s);
         body.setMatrixAt(n, _m);
         _c.set(PED_COLORS[(k + Math.floor(Math.abs(cx + cz)) + n) % PED_COLORS.length]);
         body.setColorAt(n, _c);
-        _p.y += 4.3;
+        _p.y += 4.3 * PED_SCALE;
         _m.compose(_p, _q, _s);
         head.setMatrixAt(n, _m);
         n++;
@@ -67,6 +87,8 @@ function Pedestrians({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
     }
     body.count = n;
     head.count = n;
+    beacons.count = nb;
+    beacons.instanceMatrix.needsUpdate = true;
     body.instanceMatrix.needsUpdate = true;
     head.instanceMatrix.needsUpdate = true;
     if (body.instanceColor) body.instanceColor.needsUpdate = true;
@@ -77,6 +99,10 @@ function Pedestrians({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
       <instancedMesh ref={bodyRef} args={[undefined, undefined, MAX_PEDS]} castShadow>
         <capsuleGeometry args={[1.35, 3.6, 3, 8]} />
         <meshStandardMaterial color="#ffffff" roughness={0.7} />
+      </instancedMesh>
+      <instancedMesh ref={beaconRef} args={[undefined, undefined, MAX_BEACONS]}>
+        <sphereGeometry args={[1.6, 10, 8]} />
+        <meshStandardMaterial color="#ffb703" emissive="#ffb703" emissiveIntensity={2.4} toneMapped={false} />
       </instancedMesh>
       <instancedMesh ref={headRef} args={[undefined, undefined, MAX_PEDS]}>
         <sphereGeometry args={[1.25, 8, 6]} />

@@ -727,6 +727,10 @@ const MIDTOWN_NETWORK = buildMidtown(true);
 const HARBOR_NETWORK = buildHarborDrive(true);
 const TRANSIT_NETWORK = buildMidtown(false);
 const SCHOOL_NETWORK = withJaywalkers(buildHarborDrive(true), ["m2", "m3"]);
+/** First Shift: Harbor Drive with a slow block and an angry light, plus one block where kids cross. No lane-arrow trouble, so every fault has an obvious fix. */
+const FIRST_SHIFT_NETWORK = withJaywalkers(buildHarborDrive({ speed: true, signal: true }), ["m1"]);
+/** Vehicles moved by a fully fixed First Shift (limits and lights repaired, crossing added). */
+const FIRST_SHIFT_PAR = 236;
 const INTERCHANGE_NETWORK = buildInterchangeSite();
 function createFivePointsEvaluator(): ScenarioEvaluator {
   const sustain = createSustainTracker(FP_SUSTAIN_S);
@@ -1234,6 +1238,19 @@ function createGrandInterchangeEvaluator(): ScenarioEvaluator {
 // ---------------------------------------------------------------------------
 
 export const SCENARIOS: ScenarioDef[] = [
+  {
+    id: "first-shift",
+    kind: "manage",
+    name: "First Shift",
+    tagline: "Your first day on the job. We'll walk you through it.",
+    briefing:
+      "A guided tour of the tools. Harbor Drive has one slow-posted block, one traffic light gone haywire, and a stretch where kids cross without a crossing. Fix the three, and the street flows. A step-by-step guide shows you where to click.",
+    startingNetwork: FIRST_SHIFT_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    createEvaluator: createSafeStreetsEvaluator(FIRST_SHIFT_PAR, 300),
+  },
   {
     id: "suburban-choke-point",
     name: "The Suburban Choke Point",

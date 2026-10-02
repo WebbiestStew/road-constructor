@@ -40,7 +40,8 @@ const STEPS: Step[] = [
  */
 export default function CoachBar() {
   const buildLocked = useEditorStore((s) => s.buildLocked);
-  const scenarioActive = useEditorStore((s) => s.activeScenarioId !== null);
+  // The guided first level has its own, fuller walkthrough.
+  const scenarioActive = useEditorStore((s) => s.activeScenarioId !== null && s.activeScenarioId !== "first-shift");
   const edits = useEditLog();
 
   const [coached, setCoached] = useState(true); // assume done until the client has looked at storage
