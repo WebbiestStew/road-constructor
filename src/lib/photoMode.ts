@@ -12,10 +12,32 @@ function emit() {
   listeners.forEach((l) => l());
 }
 
+let tour = false;
+
 export function setPhotoMode(value: boolean): void {
-  if (enabled === value) return;
+  if (enabled === value && (value || !tour)) return;
   enabled = value;
+  if (!value) tour = false;
   emit();
+}
+
+/** The cinematic tour: photo mode plus a camera that flies between wide shots and low swoops over the roads. */
+export function setTour(value: boolean): void {
+  if (value) enabled = true;
+  tour = value;
+  emit();
+}
+
+export function toggleTour(): void {
+  setTour(!tour);
+}
+
+export function usePhotoTour(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => tour,
+    () => false
+  );
 }
 
 export function togglePhotoMode(): void {

@@ -10,7 +10,7 @@ import { requestOpenTutorial } from "@/lib/tutorial";
 import { useQuality } from "@/lib/quality";
 import { setSettingsOpen } from "@/lib/settingsMenu";
 import { setChaos, useChaos } from "@/lib/chaos";
-import { togglePhotoMode } from "@/lib/photoMode";
+import { toggleTour, togglePhotoMode } from "@/lib/photoMode";
 import { useCompact } from "@/lib/compact";
 import {
   IconArrowLeft,
@@ -410,6 +410,14 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           Feedback
         </a>
       )}
+      <button
+        type="button"
+        onClick={toggleTour}
+        title="Cinematic tour: hides the UI and flies around your city"
+        className="flex h-7 items-center justify-center rounded-full px-2 text-sm text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+      >
+        🎬
+      </button>
       <button
         type="button"
         onClick={togglePhotoMode}

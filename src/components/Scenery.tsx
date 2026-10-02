@@ -70,6 +70,37 @@ function buildWater(data: SceneryData): THREE.BufferGeometry | null {
   return parts.length ? mergeGeometries(parts, false) : null;
 }
 
+interface UrbanGround {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+}
+
+/**
+ * Dense cities get a paved ground under them instead of meadow showing between the blocks. Returns the rectangle
+ * covering the buildings, or null when the area is too sparse (a freeway interchange in open country keeps its grass).
+ */
+function urbanGround(data: SceneryData): UrbanGround | null {
+  if (data.buildings.length < 150) return null;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, covered = 0;
+  for (const b of data.buildings) {
+    let bx0 = Infinity, bx1 = -Infinity, bz0 = Infinity, bz1 = -Infinity;
+    for (let k = 0; k + 1 < b.p.length; k += 2) {
+      bx0 = Math.min(bx0, b.p[k]); bx1 = Math.max(bx1, b.p[k]);
+      bz0 = Math.min(bz0, b.p[k + 1]); bz1 = Math.max(bz1, b.p[k + 1]);
+    }
+    minX = Math.min(minX, bx0); maxX = Math.max(maxX, bx1);
+    minZ = Math.min(minZ, bz0); maxZ = Math.max(maxZ, bz1);
+    covered += (bx1 - bx0) * (bz1 - bz0);
+  }
+  const pad = 60;
+  const w = maxX - minX + pad * 2;
+  const d = maxZ - minZ + pad * 2;
+  if (covered / (w * d) < 0.3) return null;
+  return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, w, d };
+}
+
 /**
  * The buildings and water around a real city's roads: real footprints from OpenStreetMap extruded to their real (or
  * estimated) height, as one merged mesh. Skipped entirely when 'Buildings and scenery' is off.
@@ -79,9 +110,16 @@ function Scenery() {
   const on = useGraphics().setDressing;
   const buildings = useMemo(() => (on ? buildBuildings(scenery) : null), [scenery, on]);
   const water = useMemo(() => (on ? buildWater(scenery) : null), [scenery, on]);
+  const ground = useMemo(() => (on ? urbanGround(scenery) : null), [scenery, on]);
   if (!on) return null;
   return (
     <>
+      {ground && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[ground.x, -0.2, ground.z]} receiveShadow>
+          <planeGeometry args={[ground.w, ground.d]} />
+          <meshStandardMaterial color="#a9aca3" roughness={0.95} />
+        </mesh>
+      )}
       {buildings && (
         <mesh geometry={buildings} castShadow receiveShadow frustumCulled={false}>
           <meshStandardMaterial vertexColors roughness={0.85} metalness={0.05} />

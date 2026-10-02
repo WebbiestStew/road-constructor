@@ -2,7 +2,7 @@
 
 import { useEditorStore } from "@/state/editorStore";
 import { useState } from "react";
-import { recordClip, setPhotoMode, takePhoto } from "@/lib/photoMode";
+import { recordClip, setPhotoMode, takePhoto, toggleTour, usePhotoTour } from "@/lib/photoMode";
 import { shareOrDownload } from "@/lib/shareCard";
 import { pushToast } from "@/lib/toast";
 
@@ -11,6 +11,7 @@ export default function PhotoOverlay() {
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
   const setTimeOfDay = useEditorStore((s) => s.setTimeOfDay);
   const [recording, setRecording] = useState(false);
+  const tour = usePhotoTour();
 
   const clip = async () => {
     setRecording(true);
@@ -50,6 +51,16 @@ export default function PhotoOverlay() {
         className="chunky-btn bg-gradient-to-br from-orange-400 to-pink-500 px-5 py-2 text-sm text-white"
       >
         📸 Save photo
+      </button>
+      <button
+        type="button"
+        onClick={toggleTour}
+        aria-pressed={tour}
+        className={`rounded-full px-3.5 py-2 text-xs font-bold transition active:scale-95 ${
+          tour ? "bg-gradient-to-br from-sky-400 to-indigo-500 text-white shadow" : "bg-black/5 text-zinc-700 hover:bg-black/10"
+        }`}
+      >
+        🎬 {tour ? "Touring" : "Tour"}
       </button>
       <button
         type="button"
