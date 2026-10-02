@@ -226,6 +226,11 @@ export function useTrafficSimulation() {
     workerRef.current?.postMessage({ type: "setDayCycle", enabled: dayCycle, startHour: 6, dayLengthS: 480 } satisfies WorkerInMessage);
   }, [dayCycle]);
 
+  const transitLines = useEditorStore((s) => s.transitLines);
+  useEffect(() => {
+    workerRef.current?.postMessage({ type: "setTransit", lines: transitLines } satisfies WorkerInMessage);
+  }, [transitLines]);
+
   const trafficMix = useEditorStore((s) => s.trafficMix);
   useEffect(() => {
     workerRef.current?.postMessage({ type: "setTrafficMix", bus: trafficMix.bus, bike: trafficMix.bike } satisfies WorkerInMessage);

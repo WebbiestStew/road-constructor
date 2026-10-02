@@ -1,10 +1,12 @@
 import { z } from "zod";
-import type { NetworkSnapshot } from "@/sim/types";
+import type { NetworkSnapshot, TransitLine } from "@/sim/types";
 
 const STORAGE_KEY = "road-constructor:autosave:v1";
 
 export interface PersistedPayload {
   version: 1;
+  /** Bus lines the player drew. */
+  transit?: TransitLine[];
   network: NetworkSnapshot;
   budget: number;
   nextNodeSeq: number;
@@ -72,8 +74,17 @@ const networkSnapshotSchema = z.object({
   edges: z.array(edgeSchema),
 });
 
+const transitLineSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  edgeIds: z.array(z.string()),
+  headwayS: z.number(),
+  color: z.string(),
+});
+
 const persistedPayloadSchema = z.object({
   version: z.literal(1),
+  transit: z.array(transitLineSchema).optional(),
   network: networkSnapshotSchema,
   budget: z.number(),
   nextNodeSeq: z.number(),

@@ -601,6 +601,10 @@ const EdgeGroup = memo(function EdgeGroup({
     const point: [number, number, number] = [event.point.x, event.point.y, event.point.z];
 
     // Traffic Manager tools just select a road, in either mode.
+    if (store.tool === "transit") {
+      store.extendTransit(edge.id);
+      return;
+    }
     if (store.tool === "lanes" || store.tool === "speed" || store.tool === "street") {
       store.setSelection({ kind: "edge", id: edge.id });
       return;

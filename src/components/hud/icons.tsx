@@ -215,6 +215,18 @@ export function IconRoad(props: IconProps) {
   );
 }
 
+export function IconBus(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="4" y="3.5" width="16" height="13" rx="2.5" />
+      <path d="M4 10.5h16" />
+      <path d="M8 16.5v2.5M16 16.5v2.5" />
+      <circle cx="8" cy="13.5" r=".6" fill="currentColor" />
+      <circle cx="16" cy="13.5" r=".6" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function IconUndo(props: IconProps) {
   return (
     <svg {...base} {...props}>

@@ -12,7 +12,7 @@ import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
 import { assembleNetworkCached, computeRoute } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
-import { JunctionCard, LaneManagerCard, SpeedLimitCard, StreetCard, ToolHintCard } from "./ManagerPanels";
+import { JunctionCard, LaneManagerCard, SpeedLimitCard, StreetCard, ToolHintCard, TransitCard } from "./ManagerPanels";
 import { useEditLog } from "@/lib/editLog";
 import CityMood from "./CityMood";
 import {
@@ -939,6 +939,7 @@ function ManagerToolCard() {
       />
     );
   }
+  if (tool === "transit") return <TransitCard />;
   if (tool === "street") {
     return selection?.kind === "edge" ? (
       <StreetCard wholeRoad={wholeRoad} setWholeRoad={setWholeRoad} />
@@ -971,7 +972,7 @@ export default function InfoPanel({
 }) {
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
-  const managing = tool === "lanes" || tool === "speed" || tool === "junction" || tool === "street";
+  const managing = tool === "lanes" || tool === "speed" || tool === "junction" || tool === "street" || tool === "transit";
 
   return (
     <div className="pointer-events-auto absolute right-4 top-60 z-20 flex max-h-[calc(100vh-19rem)] w-80 flex-col gap-3 overflow-y-auto hud-scrollbar lg:top-[6.25rem] lg:max-h-[calc(100vh-18rem)] max-md:inset-x-2 max-md:bottom-[4.5rem] max-md:top-auto max-md:max-h-[38vh] max-md:w-auto">

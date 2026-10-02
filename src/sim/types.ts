@@ -125,6 +125,17 @@ export type Weather = "clear" | "rain" | "fog";
 export const VEHICLE_KIND_CODE: Record<VehicleKind, number> = { car: 0, truck: 1, bus: 2, bike: 3, ambulance: 4, police: 5 };
 export const VEHICLE_KIND_BY_CODE: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance", "police"];
 
+/** A bus line the player has drawn: a connected run of roads that buses drive end to end, one every `headwayS` seconds. */
+export interface TransitLine {
+  id: string;
+  name: string;
+  /** Consecutive roads, each starting where the last one ends. */
+  edgeIds: string[];
+  headwayS: number;
+  /** Display colour. */
+  color: string;
+}
+
 /** What a simulated road user is. Most are cars; the rest only appear when the level or sandbox asks for mixed traffic. */
 export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance" | "police";
 
@@ -295,6 +306,8 @@ export type WorkerInMessage =
   | { type: "ambulance" }
   /** Causes a crash now (Chaos mode). */
   | { type: "crash" }
+  /** The player's bus lines. Buses run on them on a timetable, on top of any bus traffic from the mix. */
+  | { type: "setTransit"; lines: TransitLine[] }
   /** The weather the player picked. Scripted weather events override it while they last. */
   | { type: "setWeather"; weather: Weather }
   /** Turns the 24-hour demand cycle on or off: demand follows rush hours and the clock starts at `startHour`, one day lasting `dayLengthS` sim-seconds. */

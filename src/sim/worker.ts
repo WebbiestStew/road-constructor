@@ -30,6 +30,7 @@ import {
   type CrashStats,
   type EmergencyStats,
   type TickStats,
+  type TransitLine,
   type VehicleKind,
   type VehicleState,
   type Weather,
@@ -396,6 +397,7 @@ function resetRun() {
   crossingByEdge.clear();
   resetEmergency();
   resetCrashes();
+  nextBusAt.clear();
   scriptedWeather = null;
   gridlockPenaltyTotal = 0;
   demandScale = 1;
@@ -935,6 +937,46 @@ function updateBusDwell(v: VehicleState, edge: Edge3D) {
     v.stopServedEdge = edge.id;
     v.dwellUntil = 0;
     v.passengers = Math.min(BUS_MAX_RIDERS, Math.round(v.passengers * BUS_RIDERSHIP_GAIN));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Transit lines: buses on a timetable along a route the player drew. They carry far more people than a car, stop at
+// the stops on their way, and count toward "people moved" when they reach the end of the line.
+// ---------------------------------------------------------------------------
+
+let transitLines: TransitLine[] = [];
+const nextBusAt = new Map<string, number>();
+const TRANSIT_RETRY_S = 2;
+
+function updateTransit() {
+  if (!network || transitLines.length === 0) return;
+  for (const line of transitLines) {
+    if (line.edgeIds.length === 0) continue;
+    let due = nextBusAt.get(line.id);
+    if (due === undefined) {
+      due = simTime + 3;
+      nextBusAt.set(line.id, due);
+    }
+    if (simTime < due) continue;
+    // Skip a line whose roads were since changed or deleted.
+    const first = network.edgesById.get(line.edgeIds[0]);
+    if (!first || line.edgeIds.some((id) => !network!.edgesById.has(id)) || vehicles.size >= maxVehicles) {
+      nextBusAt.set(line.id, simTime + TRANSIT_RETRY_S * 3);
+      continue;
+    }
+    const occupancy = laneOccupancy.get(first.id);
+    let spawned = false;
+    if (occupancy) {
+      // buses prefer the right-hand lane (a reserved bus lane, if there is one)
+      for (let lane = first.lanes - 1; lane >= 0 && !spawned; lane--) {
+        const head = occupancy[lane].length > 0 ? vehicles.get(occupancy[lane][0])?.distanceAlongEdge ?? Infinity : Infinity;
+        if (head < MIN_SPAWN_CLEARANCE_FT) continue;
+        spawnVehicle(first, lane, line.edgeIds, line.edgeIds[line.edgeIds.length - 1], "bus");
+        spawned = true;
+      }
+    }
+    nextBusAt.set(line.id, simTime + (spawned ? line.headwayS : TRANSIT_RETRY_S));
   }
 }
 
@@ -1578,6 +1620,7 @@ function step(dt: number) {
   updateCrashes();
   rebuildLaneOccupancy();
   updateAmbulanceDispatch();
+  updateTransit();
   markAmbulanceYielders();
   rebuildNodeApproaches();
 
@@ -2007,6 +2050,10 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case "crash":
       crashPending++;
+      break;
+    case "setTransit":
+      transitLines = msg.lines;
+      for (const id of Array.from(nextBusAt.keys())) if (!transitLines.some((l) => l.id === id)) nextBusAt.delete(id);
       break;
     case "setWeather":
       manualWeather = msg.weather;

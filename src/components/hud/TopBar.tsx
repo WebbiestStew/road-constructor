@@ -7,9 +7,9 @@ import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { downloadNetworkFile, encodePayloadToShareHash, parseNetworkFile } from "@/state/persistence";
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
+import { setChaos, useChaos } from "@/lib/chaos";
 import { useQuality } from "@/lib/quality";
 import { setSettingsOpen } from "@/lib/settingsMenu";
-import { setChaos, useChaos } from "@/lib/chaos";
 import { toggleTour, togglePhotoMode } from "@/lib/photoMode";
 import { useCompact } from "@/lib/compact";
 import {
@@ -44,12 +44,70 @@ const VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "";
 /** Set NEXT_PUBLIC_FEEDBACK_URL (issue tracker, form, mailto:) to show the feedback link. */
 const FEEDBACK_URL = process.env.NEXT_PUBLIC_FEEDBACK_URL;
 
+
+/** Free-play toys that stir things up: send an ambulance, cause a crash, switch on chaos, change the weather, run a 24-hour day. */
+function EventsMenu({ sim }: { sim: UseTrafficSimulationReturn }) {
+  const [open, setOpen] = useState(false);
+  const chaos = useChaos();
+  const weather = useEditorStore((s) => s.weather);
+  const setWeather = useEditorStore((s) => s.setWeather);
+  const dayCycle = useEditorStore((s) => s.dayCycle);
+  const setDayCycle = useEditorStore((s) => s.setDayCycle);
+  const active = chaos || dayCycle || weather !== "clear";
+  const item = "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-700 transition hover:bg-black/5 active:scale-[0.99]";
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title="Events: ambulance, crash, chaos, weather, day cycle"
+        className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+          active ? "bg-gradient-to-br from-amber-400 to-red-500 text-white shadow" : "bg-black/5 text-zinc-600 hover:text-zinc-900"
+        }`}
+      >
+        🎲 Events{active ? " •" : ""}
+      </button>
+      {open && (
+        <div className="hud-panel animate-pop absolute left-0 top-full z-40 mt-2 flex w-60 flex-col gap-0.5 rounded-2xl p-1.5">
+          <button type="button" className={item} onClick={() => { sim.triggerAmbulance(); setOpen(false); }}>
+            🚑 <span>Send an ambulance</span>
+          </button>
+          <button type="button" className={item} onClick={() => { sim.triggerCrash(); setOpen(false); }}>
+            💥 <span>Cause a crash</span>
+          </button>
+          <button type="button" className={`${item} ${chaos ? "bg-amber-100" : ""}`} aria-pressed={chaos} onClick={() => setChaos(!chaos)}>
+            🎲 <span>Chaos mode {chaos ? "(on)" : ""}</span>
+          </button>
+          <button type="button" className={`${item} ${dayCycle ? "bg-amber-100" : ""}`} aria-pressed={dayCycle} onClick={() => setDayCycle(!dayCycle)}>
+            🕒 <span>24-hour day {dayCycle ? "(on)" : ""}</span>
+          </button>
+          <div className="flex items-center gap-1 px-2 py-1.5">
+            <span className="mr-1 text-[11px] font-extrabold uppercase text-zinc-400">Weather</span>
+            {(["clear", "rain", "fog"] as const).map((w) => (
+              <button
+                key={w}
+                type="button"
+                aria-pressed={weather === w}
+                onClick={() => setWeather(w)}
+                className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-bold transition ${weather === w ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+              >
+                {w === "clear" ? "☀️" : w === "rain" ? "🌧️" : "🌫️"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const mode = useEditorStore((s) => s.mode);
   const setMode = useEditorStore((s) => s.setMode);
   const buildLocked = useEditorStore((s) => s.buildLocked);
   const scenarioActive = useEditorStore((s) => s.activeScenarioId !== null);
-  const chaos = useChaos();
   const quality = useQuality();
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const setHeatmapEnabled = useEditorStore((s) => s.setHeatmapEnabled);
@@ -58,10 +116,6 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
   const setTimeOfDay = useEditorStore((s) => s.setTimeOfDay);
   const [muted, setMutedState] = useState(false);
-  const weather = useEditorStore((s) => s.weather);
-  const setWeather = useEditorStore((s) => s.setWeather);
-  const dayCycle = useEditorStore((s) => s.dayCycle);
-  const setDayCycle = useEditorStore((s) => s.setDayCycle);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMutedState(isMuted()));
@@ -304,40 +358,7 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
             <IconRideAlong className="h-3.5 w-3.5" />
             Ride Along
           </button>
-          {!scenarioActive && (
-            <button
-              type="button"
-              onClick={sim.triggerAmbulance}
-              title="Dispatch an ambulance and see how fast it gets through"
-              className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-xs font-bold text-zinc-600 transition hover:text-zinc-900"
-            >
-              🚑 Ambulance
-            </button>
-          )}
-          {!scenarioActive && (
-            <button
-              type="button"
-              onClick={sim.triggerCrash}
-              title="Cause a crash and see how long it takes police to clear it"
-              className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-xs font-bold text-zinc-600 transition hover:text-zinc-900"
-            >
-              💥 Crash
-            </button>
-          )}
-          {!scenarioActive && (
-            <button
-              type="button"
-              onClick={() => setChaos(!chaos)}
-              title="Chaos mode: random breakdowns and rush hours while traffic runs"
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
-                chaos
-                  ? "bg-gradient-to-br from-amber-400 to-red-500 text-white shadow"
-                  : "bg-black/5 text-zinc-600 hover:text-zinc-900"
-              }`}
-            >
-              🎲 Chaos{chaos ? " ON" : ""}
-            </button>
-          )}
+          {!scenarioActive && <EventsMenu sim={sim} />}
         </>
       )}
     </>
@@ -367,29 +388,6 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           </button>
         ))}
       </div>
-      {!scenarioActive && (
-        <>
-          <div className="h-6 w-px bg-black/10" />
-          <button
-            type="button"
-            onClick={() => setWeather(weather === "clear" ? "rain" : weather === "rain" ? "fog" : "clear")}
-            title={`Weather: ${weather === "clear" ? "clear" : weather}. Click to change: rain and fog slow everyone down.`}
-            className="flex h-7 items-center justify-center rounded-full px-2 text-sm text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
-          >
-            {weather === "clear" ? "☀️" : weather === "rain" ? "🌧️" : "🌫️"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDayCycle(!dayCycle)}
-            title="Day cycle: demand follows the rush hours and the light follows the clock"
-            className={`flex h-7 items-center justify-center rounded-full px-2.5 text-[11px] font-bold transition ${
-              dayCycle ? "bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow" : "text-zinc-600 hover:bg-black/5 hover:text-zinc-900"
-            }`}
-          >
-            🕒 Day{dayCycle ? " ON" : ""}
-          </button>
-        </>
-      )}
       <div className="h-6 w-px bg-black/10" />
       <button
         type="button"

@@ -2,7 +2,7 @@
 
 import * as THREE from "three";
 import { create } from "zustand";
-import { assembleNetwork, assembleNetworkCached, computeSignalPhaseGroups, planTexasTurnaround, trafficStaysConnected } from "@/sim/network";
+import { assembleNetwork, assembleNetworkCached, computeRoute, computeSignalPhaseGroups, planTexasTurnaround, trafficStaysConnected } from "@/sim/network";
 import { pushToast } from "@/lib/toast";
 import { FREE_BUILD_ECONOMY_K, economyKFor, economyRates } from "@/sim/economy";
 import { EMPTY_SCENERY, type SceneryData } from "@/sim/osm/scenery";
@@ -31,6 +31,7 @@ import type {
   NetworkSnapshot,
   NodeSpec,
   ReservedLane,
+  TransitLine,
   Weather,
   ZoneSpec,
 } from "@/sim/types";
@@ -43,10 +44,13 @@ import { playDemolish, playPlaceRoad } from "@/lib/sound";
 import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
-export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street";
+export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street" | "transit";
 
 /** Tools that change how traffic is managed rather than what is built — these work while traffic is running. */
-export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction", "street"];
+export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction", "street", "transit"];
+
+export const TRANSIT_COLORS = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#a855f7", "#ec4899"];
+export const MAX_TRANSIT_LINES = 6;
 
 /** A crossing needs room for the approach and stopping distance on both sides. */
 export const MIN_CROSSWALK_ROAD_FT = 110;
@@ -233,6 +237,14 @@ interface EditorState {
   economyK: number | null;
   /** Charges (or credits) the budget for traffic having run `deltaS` sim-seconds with the current roads. */
   applyEconomy: (deltaS: number) => void;
+  /** The player's bus lines, and which one is being extended by clicking roads (null = none). */
+  transitLines: TransitLine[];
+  activeTransitId: string | null;
+  /** Adds a road to the line being drawn (starting a new line if none is active), filling in the roads between if it isn't adjacent. */
+  extendTransit: (edgeId: string) => void;
+  finishTransit: () => void;
+  removeTransit: (id: string) => void;
+  setTransitHeadway: (id: string, headwayS: number) => void;
   /** Buildings and water drawn around the roads (real cities and loaded places). */
   scenery: SceneryData;
   /** Name of the real-world place loaded with "Load any place", for the map credit; null otherwise. */
@@ -1362,6 +1374,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       budget: s.budget,
       nextNodeSeq: s.nextNodeSeq,
       nextEdgeSeq: s.nextEdgeSeq,
+      ...(s.transitLines.length > 0 ? { transit: s.transitLines } : {}),
     };
   },
 
@@ -1375,6 +1388,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       budget: payload.budget,
       nextNodeSeq: payload.nextNodeSeq,
       nextEdgeSeq: payload.nextEdgeSeq,
+      transitLines: payload.transit ?? [],
+      activeTransitId: null,
       selection: null,
       drawFromNodeId: null,
     });
@@ -1394,12 +1409,47 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       budget: payload.budget,
       nextNodeSeq: payload.nextNodeSeq,
       nextEdgeSeq: payload.nextEdgeSeq,
+      transitLines: payload.transit ?? [],
     });
   },
 
   activeScenarioId: null,
   buildLocked: false,
   realCityActive: false,
+  transitLines: [],
+  activeTransitId: null,
+  extendTransit: (edgeId) => {
+    const s = get();
+    if (!s.edgesById.has(edgeId)) return;
+    const active = s.transitLines.find((l) => l.id === s.activeTransitId);
+    if (!active) {
+      if (s.transitLines.length >= MAX_TRANSIT_LINES) {
+        pushToast("That's the most bus lines this city needs", "info");
+        return;
+      }
+      const n = s.transitLines.length + 1;
+      const used = new Set(s.transitLines.map((l) => l.color));
+      const color = TRANSIT_COLORS.find((c) => !used.has(c)) ?? TRANSIT_COLORS[0];
+      const line: TransitLine = { id: `t${Date.now().toString(36)}${n}`, name: `Line ${n}`, edgeIds: [edgeId], headwayS: 45, color };
+      set({ transitLines: [...s.transitLines, line], activeTransitId: line.id });
+      return;
+    }
+    const last = active.edgeIds[active.edgeIds.length - 1];
+    if (edgeId === last || active.edgeIds.includes(edgeId)) return;
+    const network = assembleCached(s.nodes, s.edges);
+    const path = computeRoute(network, last, edgeId);
+    if (!path || path.length < 2) {
+      pushToast("A bus can't get from the end of the line to there", "alert");
+      return;
+    }
+    // computeRoute starts with `last`: append everything after it, so the line stays continuous.
+    const extra = path.slice(1).filter((id) => !active.edgeIds.includes(id));
+    set({ transitLines: s.transitLines.map((l) => (l.id === active.id ? { ...l, edgeIds: [...l.edgeIds, ...extra] } : l)) });
+  },
+  finishTransit: () => set({ activeTransitId: null }),
+  removeTransit: (id) =>
+    set((s) => ({ transitLines: s.transitLines.filter((l) => l.id !== id), activeTransitId: s.activeTransitId === id ? null : s.activeTransitId })),
+  setTransitHeadway: (id, headwayS) => set((s) => ({ transitLines: s.transitLines.map((l) => (l.id === id ? { ...l, headwayS } : l)) })),
   scenery: EMPTY_SCENERY,
   economyK: FREE_BUILD_ECONOMY_K,
   applyEconomy: (deltaS) => {
@@ -1465,6 +1515,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tool: scenario.kind === "manage" ? "inspect" : get().tool,
       buildLocked: scenario.kind === "manage",
       realCityActive: scenario.real === true,
+      transitLines: [],
+      activeTransitId: null,
       scenery: (scenario.sceneryKey && REAL_CITY_DATA[scenario.sceneryKey]?.scenery) || EMPTY_SCENERY,
       placeName: null,
       economyK:
@@ -1521,6 +1573,7 @@ useEditorStore.subscribe((state) => {
       budget: state.budget,
       nextNodeSeq: state.nextNodeSeq,
       nextEdgeSeq: state.nextEdgeSeq,
+      ...(state.transitLines.length > 0 ? { transit: state.transitLines } : {}),
     });
   }, 600);
 });
