@@ -27,6 +27,7 @@ export default function OnboardingChecklist() {
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const rideAlongActive = useEditorStore((s) => s.rideAlongActive);
   const buildLocked = useEditorStore((s) => s.buildLocked);
+  const inScenario = useEditorStore((s) => s.activeScenarioId !== null);
   const [visible, setVisible] = useState(false);
   const [hasInspectedLive, setHasInspectedLive] = useState(false);
   const [hasTriedHeatmapOrRideAlong, setHasTriedHeatmapOrRideAlong] = useState(false);
@@ -101,7 +102,7 @@ export default function OnboardingChecklist() {
   }, [allDone, visible]);
 
   // The checklist teaches building; a locked Traffic Manager city has nothing to build.
-  if (!visible || buildLocked) return null;
+  if (!visible || buildLocked || inScenario) return null;
 
   const dismiss = () => {
     markOnboardingSeen();

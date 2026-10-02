@@ -522,7 +522,7 @@ function createRealCityEvaluator(baseline: number, durationS: number): () => Sce
   };
 }
 
-interface RealCityPlan {
+export interface RealCityPlan {
   key: string;
   name: string;
   tagline: string;
@@ -532,7 +532,7 @@ interface RealCityPlan {
   baseline: number;
 }
 
-const REAL_PLANS: RealCityPlan[] = [
+export const REAL_PLANS: RealCityPlan[] = [
   {
     key: "los-angeles",
     name: "Los Angeles: Four Level",

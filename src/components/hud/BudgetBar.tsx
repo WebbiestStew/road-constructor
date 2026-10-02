@@ -1,6 +1,7 @@
 "use client";
 
 import { STARTING_BUDGET, isSandboxBudget, useEditorStore } from "@/state/editorStore";
+import { getScenarioById } from "@/sim/scenarios";
 
 function formatMoney(n: number): string {
   const sign = n < 0 ? "-" : "";
@@ -9,8 +10,10 @@ function formatMoney(n: number): string {
 
 export default function BudgetBar() {
   const budget = useEditorStore((s) => s.budget);
-  const spent = STARTING_BUDGET - budget;
-  const fraction = Math.min(1, Math.max(0, spent / STARTING_BUDGET));
+  // Campaign levels start from their own budget, not the free-build default.
+  const cap = useEditorStore((s) => (s.activeScenarioId ? getScenarioById(s.activeScenarioId)?.startingBudget : undefined)) ?? STARTING_BUDGET;
+  const spent = cap - budget;
+  const fraction = Math.min(1, Math.max(0, spent / cap));
 
   if (isSandboxBudget(budget)) {
     return (
@@ -35,7 +38,7 @@ export default function BudgetBar() {
           >
             {formatMoney(budget)}
           </span>
-          <span className="text-xs font-semibold text-zinc-500">/ {formatMoney(STARTING_BUDGET)}</span>
+          <span className="text-xs font-semibold text-zinc-500">/ {formatMoney(cap)}</span>
         </div>
         <div className="h-1.5 w-40 max-md:w-28 overflow-hidden rounded-full bg-black/10">
           <div
