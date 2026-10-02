@@ -33,7 +33,7 @@ export default function ChaosDirector({ sim }: { sim: UseTrafficSimulationReturn
   const rushUntil = useRef<number | null>(null);
   const rushBase = useRef<Map<string, number> | null>(null);
   const lastIncidents = useRef(0);
-  const { setDemand, triggerBreakdown } = sim;
+  const { setDemand, triggerBreakdown, triggerAmbulance } = sim;
 
   // Put entry demand back exactly as it was.
   const endRush = useRef(() => {});
@@ -76,10 +76,12 @@ export default function ChaosDirector({ sim }: { sim: UseTrafficSimulationReturn
       rushUntil.current = simTime + RUSH_HOUR_S;
       for (const [edgeId, vph] of base) setDemand(edgeId, Math.round(vph * RUSH_MULTIPLIER));
       pushToast("🚗💨 RUSH HOUR! Demand is up 60% for 40 seconds", "alert");
+    } else if (Math.random() < 0.35) {
+      triggerAmbulance();
     } else {
       triggerBreakdown(BREAKDOWN_S);
     }
-  }, [live, simTime, setDemand, triggerBreakdown]);
+  }, [live, simTime, setDemand, triggerBreakdown, triggerAmbulance]);
 
   // The worker confirms a breakdown by listing it; announce each new one.
   const incidents = sim.metrics.incidentMarkers.length;

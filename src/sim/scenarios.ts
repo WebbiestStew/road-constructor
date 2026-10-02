@@ -1,6 +1,6 @@
 import { buildHarborDrive, buildInterchangeSite, buildMidtown } from "./cities";
 import { REAL_CITY_DATA } from "./real";
-import type { EdgeSpec, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
+import type { EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "./grade";
@@ -35,6 +35,10 @@ export interface ScenarioEvalContext {
   activeCount: number;
   spawnedTotal: number;
   completedTripsTotal: number;
+  peopleMovedTotal: number;
+  pedServedTotal: number;
+  pedIncidentsTotal: number;
+  emergency: EmergencyStats;
   gridlockPenaltyTotal: number;
   edgeTrafficStats: EdgeTrafficStats[];
   gridlockMarkers: [number, number, number][];
@@ -524,6 +528,90 @@ function createRealCityEvaluator(baseline: number, durationS: number): () => Sce
   };
 }
 
+/** Targets for the levels that score something other than vehicles moved, measured in the headless sim (see scripts/sim/level.ts). */
+/** People the unchanged street moves in 300 s with 16% buses. Reserving bus lanes on every avenue moves about 18% more. */
+const TRANSIT_BASELINE_PEOPLE = 2625;
+/** Unchanged, ambulances take about 2x an empty road; a reserved bus lane as a fast lane gets them to about 1.4x. */
+const CODE_THREE_RATIO = { three: 1.6, two: 1.85 };
+/** Vehicles moved by a fully fixed Harbor Drive in the rain. The unchanged street moves about 85% of this. */
+const RAINY_PAR = 239;
+/** Vehicles moved by a fully fixed street with crossings on both school blocks. */
+const SCHOOL_PAR = 226;
+
+/**
+ * Transit Street: the score is people moved, not vehicles, so a lane for buses (which carry a couple of dozen riders
+ * each) can win even while it costs cars some road. Stars are relative to what the unchanged street carries.
+ */
+function createPeopleEvaluator(baseline: number, durationS: number): () => ScenarioEvaluator {
+  const two = Math.ceil(baseline * 1.05);
+  const three = Math.ceil(baseline * 1.14);
+  return () => (ctx) => {
+    const people = Math.round(ctx.peopleMovedTotal);
+    const stars: 1 | 2 | 3 = people >= three ? 3 : people >= two ? 2 : 1;
+    return {
+      won: ctx.elapsedS >= durationS - 0.5,
+      stars,
+      label: `${people} people moved · street baseline ${baseline}`,
+      detailLines: [
+        `People moved: ${people} (the unchanged street carries ${baseline})`,
+        `2 stars at ${two}, 3 stars at ${three}`,
+        `Vehicles moved: ${ctx.completedTripsTotal}`,
+      ],
+    };
+  };
+}
+
+/** Code Three: how fast ambulances get through, as a multiple of what an empty road would take. */
+function createEmergencyEvaluator(calls: number, ratios: { three: number; two: number }, durationS: number): () => ScenarioEvaluator {
+  return () => (ctx) => {
+    const e = ctx.emergency;
+    const ratio = e.totalIdealS > 0 ? e.totalResponseS / e.totalIdealS : 0;
+    const allIn = e.completed >= calls;
+    const stars: 1 | 2 | 3 = allIn && ratio <= ratios.three ? 3 : e.completed >= calls - 1 && ratio <= ratios.two ? 2 : 1;
+    return {
+      won: ctx.elapsedS >= durationS - 0.5,
+      stars,
+      label: `🚑 ${e.completed}/${calls} arrived${e.completed > 0 ? ` · ×${ratio.toFixed(1)}` : ""}`,
+      detailLines: [
+        `Ambulances arrived: ${e.completed} of ${calls}`,
+        e.completed > 0 ? `Average time: ${ratio.toFixed(2)}× an empty road` : "None arrived yet",
+        `3 stars: all arrive within ×${ratios.three.toFixed(1)}. 2 stars: ×${ratios.two.toFixed(1)}`,
+      ],
+    };
+  };
+}
+
+/** School Run: nobody steps into traffic, and the city still moves. */
+function createSafeStreetsEvaluator(par: number, durationS: number): () => ScenarioEvaluator {
+  return () => (ctx) => {
+    const moved = ctx.completedTripsTotal;
+    const incidents = ctx.pedIncidentsTotal;
+    const stars: 1 | 2 | 3 = incidents === 0 && moved >= par * 0.92 ? 3 : incidents <= 2 && moved >= par * 0.8 ? 2 : 1;
+    return {
+      won: ctx.elapsedS >= durationS - 0.5,
+      stars,
+      label: `${incidents} stepped into traffic · ${moved} moved`,
+      detailLines: [
+        `Stepped into traffic: ${incidents}`,
+        `Vehicles moved: ${moved} (par ${par})`,
+        "3 stars: nobody steps into traffic and traffic keeps up. 2 stars: two or fewer incidents",
+      ],
+    };
+  };
+}
+
+/** A copy of a network with people wanting to cross the named roads (both directions of each). */
+function withJaywalkers(net: NetworkSnapshot, roadIds: string[]): NetworkSnapshot {
+  const ids = new Set(roadIds.flatMap((id) => [`${id}f`, `${id}b`]));
+  return { nodes: net.nodes, edges: net.edges.map((e) => (ids.has(e.id) ? { ...e, jaywalkers: true } : e)) };
+}
+
+const CODE_THREE_EVENTS: ScriptedEvent[] = [30, 85, 140, 195].map((atS) => ({ atS, kind: "ambulance" as const }));
+const RAINY_EVENTS: ScriptedEvent[] = [
+  { atS: 30, kind: "weather", weather: "rain", durationS: 220 },
+  { atS: 100, kind: "surge", multiplier: 1.5, durationS: 70 },
+];
+
 export interface RealCityPlan {
   key: string;
   name: string;
@@ -589,6 +677,33 @@ export const REAL_PLANS: RealCityPlan[] = [
     budget: 7_000_000,
     baseline: 444,
   },
+  {
+    key: "dallas",
+    name: "Dallas: High Five",
+    tagline: "Five levels of ramps, and Texas traffic on all of them.",
+    briefing:
+      "Where I-635 meets US-75 north of Dallas, on the real stack of flyovers. The ramps and lane counts are the real ones, and the afternoon crowd is on its way home. Add lanes where the weaves choke, retime the limits, and spend the budget where it matters most.",
+    budget: 9_000_000,
+    baseline: 625,
+  },
+  {
+    key: "chicago",
+    name: "Chicago: Jane Byrne",
+    tagline: "The Circle Interchange, where three expressways collide.",
+    briefing:
+      "The Jane Byrne Interchange west of the Loop, where the Kennedy, the Dan Ryan and the Eisenhower meet. Notoriously jammed, and the ramps are tight. Find the lane that's starving the rest and fix it with the money you have.",
+    budget: 8_000_000,
+    baseline: 428,
+  },
+  {
+    key: "atlanta",
+    name: "Atlanta: Spaghetti Junction",
+    tagline: "I-85 and I-285 tangled into one big knot.",
+    briefing:
+      "The Tom Moreland Interchange, better known as Spaghetti Junction, rebuilt from the real roads. Dozens of ramps, with the whole metro trying to get through. Widen, retime and re-limit until the knot loosens.",
+    budget: 8_000_000,
+    baseline: 852,
+  },
 ];
 
 function realScenario(plan: RealCityPlan): ScenarioDef {
@@ -610,6 +725,8 @@ const REAL_SCENARIOS: ScenarioDef[] = REAL_PLANS.map(realScenario);
 
 const MIDTOWN_NETWORK = buildMidtown(true);
 const HARBOR_NETWORK = buildHarborDrive(true);
+const TRANSIT_NETWORK = buildMidtown(false);
+const SCHOOL_NETWORK = withJaywalkers(buildHarborDrive(true), ["m2", "m3"]);
 const INTERCHANGE_NETWORK = buildInterchangeSite();
 function createFivePointsEvaluator(): ScenarioEvaluator {
   const sustain = createSustainTracker(FP_SUSTAIN_S);
@@ -1341,6 +1458,61 @@ export const SCENARIOS: ScenarioDef[] = [
     targetAvgSpeedMph: 20,
     scriptedEvents: ROUGH_MORNING,
     createEvaluator: createChallengeEvaluator(514, 300),
+  },
+  {
+    id: "code-three",
+    kind: "manage",
+    name: "Code Three",
+    tagline: "Four ambulances. Every second counts.",
+    briefing:
+      "Midtown, with four ambulance calls at fixed moments. Ambulances run red lights and everyone pulls over for them, but they cannot drive through a jam. Clear the avenues they use: sensible limits, signals that don't choke the grid, and a reserved bus lane they can use as a fast lane. Scored on how close each trip gets to an empty road.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: CODE_THREE_EVENTS,
+    createEvaluator: createEmergencyEvaluator(4, CODE_THREE_RATIO, 300),
+  },
+  {
+    id: "rainy-rush",
+    kind: "manage",
+    name: "Rainy Rush Hour",
+    tagline: "It's pouring, and everyone is going home at once.",
+    briefing:
+      "Harbor Drive in a downpour. Rain slows every driver and makes them leave more room, then rush hour hits on top. Fix what's broken first: the faults that cost you in the dry cost you double in the wet. Score challenge: vehicles moved against a fully fixed street.",
+    startingNetwork: HARBOR_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: RAINY_EVENTS,
+    createEvaluator: createChallengeEvaluator(RAINY_PAR, 300),
+  },
+  {
+    id: "transit-street",
+    kind: "manage",
+    name: "Transit Street",
+    tagline: "A bus holds forty people. A car holds one.",
+    briefing:
+      "Midtown's avenues carry buses and bicycles as well as cars. Reserve a lane for buses and the riders move faster, but cars have less road. Find the balance. This level counts people moved, not vehicles, so a full bus is worth far more than a car.",
+    startingNetwork: TRANSIT_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    trafficMix: { bus: 0.16, bike: 0.04 },
+    createEvaluator: createPeopleEvaluator(TRANSIT_BASELINE_PEOPLE, 300),
+  },
+  {
+    id: "school-run",
+    kind: "manage",
+    name: "School Run",
+    tagline: "Kids cross wherever they like. Fix that before someone gets hurt.",
+    briefing:
+      "Two blocks of Harbor Drive sit by a school, and children cross wherever they please, stepping out in front of cars. Add marked crossings there, then fix the rest of the street so the added stops don't jam it. Score challenge: nobody steps into traffic, and traffic still keeps up.",
+    startingNetwork: SCHOOL_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    createEvaluator: createSafeStreetsEvaluator(SCHOOL_PAR, 300),
   },
   ...REAL_SCENARIOS,
 ];

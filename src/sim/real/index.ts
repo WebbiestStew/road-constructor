@@ -5,6 +5,9 @@ import newYork from "./new-york.json";
 import houston from "./houston.json";
 import sanAntonio from "./san-antonio.json";
 import toronto from "./toronto.json";
+import dallas from "./dallas.json";
+import chicago from "./chicago.json";
+import atlanta from "./atlanta.json";
 
 /**
  * Real road networks baked from OpenStreetMap by scripts/osm/build.ts: real geometry, lane counts, speed limits,
@@ -22,6 +25,9 @@ export const REAL_CITY_DATA = {
   houston,
   "san-antonio": sanAntonio,
   monterrey,
+  dallas,
+  chicago,
+  atlanta,
 } as unknown as Record<string, RealCityData>;
 
 export const OSM_ATTRIBUTION = "Map data © OpenStreetMap contributors (ODbL)";

@@ -12,9 +12,13 @@ speed limits and signal timing, while every car drives for real. Play it on desk
 - **A real traffic simulation.** Every vehicle follows the Intelligent Driver Model (IDM) for car-following and
   MOBIL for lane changes, running in a Web Worker at 30 Hz so the UI never stalls.
 - **Traffic Manager tools** (in the spirit of TM:PE): per-lane turn arrows, speed limits, signal groups, priority
-  junctions, and signal *offsets* so you can build a green wave.
-- **Real cities.** Six levels built from actual OpenStreetMap data — the Los Angeles Four Level, Times Square,
-  the Gardiner Expressway in Toronto, Houston's I-45/I-10 knot, San Antonio's "Y" and downtown Monterrey.
+  junctions, signal *offsets* so you can build a green wave, bus and bike lanes, one-way streets and pedestrian
+  crossings.
+- **A living city.** Buses and bicycles share the road, ambulances race through it, people cross at crossings (or step
+  out where there isn't one), and a 24-hour cycle with rain and fog changes how everyone drives.
+- **Real cities.** Nine levels built from actual OpenStreetMap data — the Los Angeles Four Level, Times Square,
+  the Gardiner Expressway in Toronto, Houston's I-45/I-10 knot, San Antonio's "Y", downtown Monterrey, the Dallas
+  High Five, Chicago's Jane Byrne Interchange and Atlanta's Spaghetti Junction.
   Lane counts, speed limits, bridges, tunnels, roundabouts and traffic lights are the real ones.
 - **Campaign, daily challenge and sandbox.** Hand-built levels with par-based stars, scripted trouble (a stalled
   car, a stadium letting out), a seeded daily scenario, and a no-money-limit sandbox.

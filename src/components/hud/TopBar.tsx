@@ -57,6 +57,10 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
   const setTimeOfDay = useEditorStore((s) => s.setTimeOfDay);
   const [muted, setMutedState] = useState(false);
+  const weather = useEditorStore((s) => s.weather);
+  const setWeather = useEditorStore((s) => s.setWeather);
+  const dayCycle = useEditorStore((s) => s.dayCycle);
+  const setDayCycle = useEditorStore((s) => s.setDayCycle);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMutedState(isMuted()));
@@ -302,6 +306,16 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           {!scenarioActive && (
             <button
               type="button"
+              onClick={sim.triggerAmbulance}
+              title="Dispatch an ambulance and see how fast it gets through"
+              className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-xs font-bold text-zinc-600 transition hover:text-zinc-900"
+            >
+              🚑 Ambulance
+            </button>
+          )}
+          {!scenarioActive && (
+            <button
+              type="button"
               onClick={() => setChaos(!chaos)}
               title="Chaos mode: random breakdowns and rush hours while traffic runs"
               className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
@@ -342,6 +356,29 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           </button>
         ))}
       </div>
+      {!scenarioActive && (
+        <>
+          <div className="h-6 w-px bg-black/10" />
+          <button
+            type="button"
+            onClick={() => setWeather(weather === "clear" ? "rain" : weather === "rain" ? "fog" : "clear")}
+            title={`Weather: ${weather === "clear" ? "clear" : weather}. Click to change: rain and fog slow everyone down.`}
+            className="flex h-7 items-center justify-center rounded-full px-2 text-sm text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+          >
+            {weather === "clear" ? "☀️" : weather === "rain" ? "🌧️" : "🌫️"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDayCycle(!dayCycle)}
+            title="Day cycle: demand follows the rush hours and the light follows the clock"
+            className={`flex h-7 items-center justify-center rounded-full px-2.5 text-[11px] font-bold transition ${
+              dayCycle ? "bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow" : "text-zinc-600 hover:bg-black/5 hover:text-zinc-900"
+            }`}
+          >
+            🕒 Day{dayCycle ? " ON" : ""}
+          </button>
+        </>
+      )}
       <div className="h-6 w-px bg-black/10" />
       <button
         type="button"

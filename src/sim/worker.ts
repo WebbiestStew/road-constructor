@@ -26,9 +26,11 @@ import {
   type Edge3D,
   type EdgeSpeedRatio,
   type RoadNetwork,
+  type EmergencyStats,
   type TickStats,
   type VehicleKind,
   type VehicleState,
+  type Weather,
   type WorkerInMessage,
   type WorkerOutMessage,
 } from "./types";
@@ -110,8 +112,54 @@ let lastWallTimeMs = 0;
 
 /** Multiplies every entry's spawn rate while a scripted surge is on. */
 let demandScale = 1;
+
+// ---------------------------------------------------------------------------
+// Weather and the day cycle
+// ---------------------------------------------------------------------------
+
+/** The weather the player chose, and the one a scripted storm has imposed (which wins while it lasts). */
+let manualWeather: Weather = "clear";
+let scriptedWeather: Weather | null = null;
+function currentWeather(): Weather {
+  return scriptedWeather ?? manualWeather;
+}
+/** Drivers slow down and leave more room in bad weather. 1 in clear weather, so classic runs are untouched. */
+function weatherSpeedMult(): number {
+  const w = currentWeather();
+  return w === "rain" ? 0.8 : w === "fog" ? 0.85 : 1;
+}
+function weatherHeadwayMult(): number {
+  const w = currentWeather();
+  return w === "rain" ? 1.3 : w === "fog" ? 1.2 : 1;
+}
+
+let dayCycleOn = false;
+let dayStartHour = 6;
+let dayLengthS = 480;
+/** Hour of the simulated day (0-24), or -1 when the day cycle is off. */
+function clockHour(): number {
+  if (!dayCycleOn) return -1;
+  return (dayStartHour + (simTime / dayLengthS) * 24) % 24;
+}
+/** Demand through the day: quiet nights, a morning peak near 8, a bigger one near 5:30 pm, a lull between. */
+function dayDemandMultiplier(): number {
+  if (!dayCycleOn) return 1;
+  const h = clockHour();
+  const bump = (centre: number, width: number, height: number) => {
+    // Wrap around midnight so the curve is smooth across it.
+    const d = Math.min(Math.abs(h - centre), 24 - Math.abs(h - centre));
+    return height * Math.exp(-(d * d) / (2 * width * width));
+  };
+  return 0.35 + bump(8, 1.3, 1.2) + bump(17.5, 1.6, 1.45) + bump(12.5, 2.5, 0.35);
+}
 /** Scripted events not yet due, soonest first. A surge end is queued as its own entry when the surge starts. */
-type QueuedEvent = { atS: number; kind: "breakdown"; durationS: number } | { atS: number; kind: "surge"; multiplier: number } | { atS: number; kind: "surgeEnd" };
+type QueuedEvent =
+  | { atS: number; kind: "breakdown"; durationS: number }
+  | { atS: number; kind: "surge"; multiplier: number }
+  | { atS: number; kind: "surgeEnd" }
+  | { atS: number; kind: "ambulance" }
+  | { atS: number; kind: "weatherOn"; weather: Exclude<Weather, "clear"> }
+  | { atS: number; kind: "weatherOff" };
 let eventQueue: QueuedEvent[] = [];
 
 const vehicles = new Map<number, VehicleState>();
@@ -154,6 +202,7 @@ const COLOR_STOP = new THREE.Color(0xef4444);
 
 /** Body paint palettes, sampled once per vehicle at spawn — a wide mix for sedans, a duller fleet-like set for semis. */
 const SEDAN_PALETTE = [0xf4f4f5, 0x1c1c22, 0x8a8f98, 0xb0281c, 0x2452a6, 0x2f6b3a, 0xc9a13b, 0x5b5f66];
+const AMBULANCE_COLOR = 0xffffff;
 const BUS_PALETTE = [0xf2c230, 0x2563eb, 0xdc2626];
 const BIKE_PALETTE = [0xff7a00, 0x00b8a0, 0xe0457b, 0x6d5bd0];
 const TRUCK_PALETTE = [0xf4f4f5, 0xc23b2e, 0x2452a6, 0x8a8f98, 0x1c1c22];
@@ -219,6 +268,8 @@ function acquireVehicle(): VehicleState {
     kind: "car",
     passengers: 1,
     maxSpeedFtps: Infinity,
+    yieldUntil: 0,
+    yieldLane: 0,
     weightToPowerLbPerHp: 25,
     bodyColorR: 1,
     bodyColorG: 1,
@@ -245,7 +296,7 @@ function randNormalish(mean: number, spread: number): number {
 
 function sampleExponentialInterarrival(vehiclesPerHour: number): number {
   if (vehiclesPerHour <= 0) return simTime + 1e9;
-  const ratePerSecond = (vehiclesPerHour * demandScale) / 3600;
+  const ratePerSecond = (vehiclesPerHour * demandScale * dayDemandMultiplier()) / 3600;
   const u = Math.max(rng(), 1e-9);
   return simTime + -Math.log(1 - u) / ratePerSecond;
 }
@@ -305,11 +356,13 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   gridlockPenaltyTotal = 0;
   completedTripsTotal = 0;
   peopleMovedTotal = 0;
+  rebuildCrossings();
 
   for (const [id, v] of vehicles) {
     if (!network.edgesById.has(v.edgeId)) {
       releaseVehicle(v);
       vehicles.delete(id);
+      ambulances.delete(id);
     }
   }
 }
@@ -323,6 +376,12 @@ function resetRun() {
   spawnedTotal = 0;
   completedTripsTotal = 0;
   peopleMovedTotal = 0;
+  pedServedTotal = 0;
+  pedIncidentsTotal = 0;
+  crossings.clear();
+  crossingByEdge.clear();
+  resetEmergency();
+  scriptedWeather = null;
   gridlockPenaltyTotal = 0;
   demandScale = 1;
   eventQueue = [];
@@ -406,24 +465,27 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   // includes them, buses and bicycles replace some of the cars.
   const isBus = forcedKind === "bus";
   const isBike = forcedKind === "bike";
-  const isTruck = !isBus && !isBike && rng() < 0.15;
+  const isAmbulance = forcedKind === "ambulance";
+  const isTruck = !isBus && !isBike && !isAmbulance && rng() < 0.15;
   v.isTruck = isTruck;
-  v.kind = isBus ? "bus" : isBike ? "bike" : isTruck ? "truck" : "car";
-  const palette = isBus ? BUS_PALETTE : isBike ? BIKE_PALETTE : isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
+  v.kind = isBus ? "bus" : isBike ? "bike" : isAmbulance ? "ambulance" : isTruck ? "truck" : "car";
+  const palette = isBus ? BUS_PALETTE : isBike ? BIKE_PALETTE : isAmbulance ? [AMBULANCE_COLOR] : isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
   _spawnColor.set(palette[Math.floor(rng() * palette.length)]);
   v.bodyColorR = _spawnColor.r;
   v.bodyColorG = _spawnColor.g;
   v.bodyColorB = _spawnColor.b;
   v.weightToPowerLbPerHp = isBus ? randRange(190, 240) : isBike ? 8 : isTruck ? randRange(260, 340) : randRange(18, 32);
-  v.length = isBus ? randRange(38, 42) : isBike ? 6 : isTruck ? randRange(32, 42) : randRange(13, 19);
-  v.maxAccel = isBus ? randRange(2.2, 2.9) : isBike ? randRange(1.2, 1.8) : isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
-  v.comfortBrake = isBus ? randRange(4.5, 5.5) : isBike ? 3.5 : isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
-  v.passengers = isBus ? Math.round(randRange(22, 42)) : isBike || isTruck ? 1 : 1.4;
+  v.length = isBus ? randRange(38, 42) : isBike ? 6 : isAmbulance ? 21 : isTruck ? randRange(32, 42) : randRange(13, 19);
+  v.maxAccel = isBus ? randRange(2.2, 2.9) : isBike ? randRange(1.2, 1.8) : isAmbulance ? 6 : isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
+  v.comfortBrake = isBus ? randRange(4.5, 5.5) : isBike ? 3.5 : isAmbulance ? 8 : isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
+  v.passengers = isBus ? Math.round(randRange(22, 42)) : isBike || isTruck || isAmbulance ? (isAmbulance ? 0 : 1) : 1.4;
+  v.yieldUntil = 0;
+  v.yieldLane = 0;
   v.maxSpeedFtps = isBike ? mphToFtps(randRange(10, 13)) : Infinity;
   v.jamDistance = isBike ? randRange(2.5, 3.5) : randRange(5.5, 7.5);
-  v.desiredHeadway = isBus || isTruck ? randRange(1.6, 2.0) : isBike ? randRange(0.8, 1.1) : randRange(1.1, 1.7);
+  v.desiredHeadway = isBus || isTruck ? randRange(1.6, 2.0) : isBike ? randRange(0.8, 1.1) : isAmbulance ? 0.9 : randRange(1.1, 1.7);
   v.minGap = v.jamDistance;
-  v.speedFactor = isBus ? randNormalish(0.92, 0.05) : randNormalish(1.0, 0.12);
+  v.speedFactor = isAmbulance ? 1.3 : isBus ? randNormalish(0.92, 0.05) : randNormalish(1.0, 0.12);
   v.speed = Math.min(Math.min(v.speedFactor, 1.0) * mphToFtps(edge.speedLimitMph) * 0.85, v.maxSpeedFtps);
   v.accel = 0;
   v.laneChangeCooldown = randRange(0, 60);
@@ -558,9 +620,274 @@ function ringEntryBlocked(v: VehicleState, edge: Edge3D): boolean {
   return count >= Math.max(1, Math.floor((next.length * next.lanes) / RING_VEHICLE_SLOT_FT));
 }
 
-/** Returns the distance (ft) at which a vehicle must stop for a junction it cannot yet enter, or null if clear. */
+// ---------------------------------------------------------------------------
+// Pedestrian crossings. One per physical place (both carriageways of a two-way road share it). People arrive at
+// random; while they cross, approaching traffic stops. Where people cross without a marked crossing they step
+// out into traffic instead: a short, abrupt stop that counts as an incident if cars were coming.
+// ---------------------------------------------------------------------------
+
+const PED_GAP_DEMAND_S = 20;
+const PED_GAP_MARKED_ONLY_S = 45;
+const PED_WALK_S = 8;
+const PED_DART_S = 4.5;
+const CROSSING_STOP_BEFORE_FT = 12;
+const CROSSING_APPROACH_FT = 120;
+
+interface Crossing {
+  key: string;
+  edgeIds: string[];
+  distByEdge: Map<string, number>;
+  marked: boolean;
+  /** People really want to cross here (set by the level); otherwise only the odd walker uses a placed crossing. */
+  demand: boolean;
+  nextAt: number;
+  walkStart: number;
+  walkUntil: number;
+  dir: 1 | -1;
+  center: [number, number, number];
+  right: [number, number];
+  halfWidth: number;
+}
+
+const crossings = new Map<string, Crossing>();
+const crossingByEdge = new Map<string, Crossing>();
+let pedServedTotal = 0;
+let pedIncidentsTotal = 0;
+const _upAxis = new THREE.Vector3(0, 1, 0);
+
+function crossingGap(c: Crossing): number {
+  const mean = c.demand ? PED_GAP_DEMAND_S : PED_GAP_MARKED_ONLY_S;
+  return -Math.log(1 - Math.max(rng(), 1e-9)) * mean;
+}
+
+/** Rebuilds the crossing list from the network's flags, keeping the timers of crossings that still exist. */
+function rebuildCrossings() {
+  if (!network) return;
+  const previous = new Map(crossings);
+  crossings.clear();
+  crossingByEdge.clear();
+  for (const edge of network.edges) {
+    if ((!edge.crosswalk && !edge.jaywalkers) || edge.isRoundaboutRing) continue;
+    const key = edge.fromNodeId < edge.toNodeId ? `${edge.fromNodeId}|${edge.toNodeId}` : `${edge.toNodeId}|${edge.fromNodeId}`;
+    let c = crossings.get(key);
+    if (!c) {
+      const old = previous.get(key);
+      edge.spline.getPointAt(0.5, _pos);
+      edge.spline.getTangentAt(0.5, _tangent);
+      _right.crossVectors(_tangent, _upAxis).normalize();
+      c = {
+        key,
+        edgeIds: [],
+        distByEdge: new Map(),
+        marked: false,
+        demand: false,
+        nextAt: old ? old.nextAt : simTime + randRange(3, PED_GAP_DEMAND_S),
+        walkStart: old?.walkStart ?? -1e9,
+        walkUntil: old?.walkUntil ?? -1e9,
+        dir: old?.dir ?? 1,
+        center: [_pos.x, _pos.y, _pos.z],
+        right: [_right.x, _right.z],
+        halfWidth: 0,
+      };
+      crossings.set(key, c);
+    }
+    c.edgeIds.push(edge.id);
+    c.distByEdge.set(edge.id, edge.length * 0.5);
+    c.marked = c.marked || edge.crosswalk;
+    c.demand = c.demand || edge.jaywalkers;
+    c.halfWidth = Math.max(c.halfWidth, edge.lateralShiftFt + (edge.lanes * edge.laneWidthFt) / 2 + 3);
+    crossingByEdge.set(edge.id, c);
+  }
+}
+
+function trafficApproachingCrossing(c: Crossing): boolean {
+  for (const v of vehicles.values()) {
+    const at = c.distByEdge.get(v.edgeId);
+    if (at === undefined) continue;
+    const behind = at - v.distanceAlongEdge;
+    if (behind > 0 && behind < CROSSING_APPROACH_FT && v.speed > 8) return true;
+  }
+  return false;
+}
+
+function updateCrossings() {
+  for (const c of crossings.values()) {
+    if (simTime < c.walkUntil || simTime < c.nextAt) continue;
+    c.walkStart = simTime;
+    c.dir = rng() < 0.5 ? 1 : -1;
+    pedServedTotal += 1 + Math.floor(rng() * 3);
+    if (c.marked) {
+      c.walkUntil = simTime + PED_WALK_S;
+    } else {
+      c.walkUntil = simTime + PED_DART_S;
+      if (trafficApproachingCrossing(c)) pedIncidentsTotal++;
+    }
+    c.nextAt = c.walkUntil + crossingGap(c);
+  }
+}
+
+/** Stop line for traffic while people are crossing this road. Emergency vehicles don't stop. */
+function crossingStopDistance(v: VehicleState, edge: Edge3D): number | null {
+  const c = crossingByEdge.get(edge.id);
+  if (!c || simTime >= c.walkUntil || v.kind === "ambulance") return null;
+  const d = (c.distByEdge.get(edge.id) ?? 0) - CROSSING_STOP_BEFORE_FT - v.distanceAlongEdge;
+  return d > 0.5 && d <= CROSSING_APPROACH_FT ? d : null;
+}
+
+/** Crossings with people on the road right now, for the renderer: [x, y, z, rightX, rightZ, halfWidth, progress 0-1, direction, marked 1/0]. */
+function activeCrossingViews(): number[][] {
+  const out: number[][] = [];
+  for (const c of crossings.values()) {
+    if (simTime >= c.walkUntil || simTime < c.walkStart) continue;
+    const progress = (simTime - c.walkStart) / (c.walkUntil - c.walkStart);
+    out.push([c.center[0], c.center[1], c.center[2], c.right[0], c.right[1], c.halfWidth, progress, c.dir, c.marked ? 1 : 0]);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Emergency vehicles
+// ---------------------------------------------------------------------------
+
+const AMBULANCE_YIELD_AHEAD_FT = 220;
+/** Seconds a dispatch may wait for a free spot at an entry before it is dropped. */
+const AMBULANCE_WAIT_LIMIT_S = 25;
+const AMBULANCE_FREE_FLOW_FACTOR = 1.3;
+
+interface AmbulanceTrack {
+  spawnT: number;
+  idealS: number;
+}
+const ambulances = new Map<number, AmbulanceTrack>();
+let ambDispatched = 0;
+let ambCompleted = 0;
+let ambTotalResponseS = 0;
+let ambTotalIdealS = 0;
+let ambLastResponseS = 0;
+let ambLastIdealS = 0;
+/** Dispatches that have not found room on the road yet: the sim time each one was requested. */
+let ambPending: number[] = [];
+
+function resetEmergency() {
+  ambulances.clear();
+  ambDispatched = 0;
+  ambCompleted = 0;
+  ambTotalResponseS = 0;
+  ambTotalIdealS = 0;
+  ambLastResponseS = 0;
+  ambLastIdealS = 0;
+  ambPending = [];
+}
+
+function emergencyStats(): EmergencyStats {
+  return {
+    dispatched: ambDispatched,
+    completed: ambCompleted,
+    waiting: ambPending.length,
+    active: ambulances.size,
+    totalResponseS: ambTotalResponseS,
+    totalIdealS: ambTotalIdealS,
+    lastResponseS: ambLastResponseS,
+    lastIdealS: ambLastIdealS,
+  };
+}
+
+/** Puts one waiting ambulance on the road at a random entry that has room and a route to somewhere. Returns false if nothing fit yet. */
+function trySpawnAmbulance(): boolean {
+  if (!network) return false;
+  const entries = network.edges.filter((e) => e.zone?.type === "entry");
+  const destinations = network.edges.filter((e) => e.zone?.type === "destination");
+  if (entries.length === 0 || destinations.length === 0) return false;
+  const start = Math.floor(rng() * entries.length);
+  for (let k = 0; k < entries.length; k++) {
+    const edge = entries[(start + k) % entries.length];
+    const occupancy = laneOccupancy.get(edge.id);
+    if (!occupancy) continue;
+    const dStart = Math.floor(rng() * destinations.length);
+    let route: string[] | null = null;
+    let destId = "";
+    for (let j = 0; j < destinations.length && !route; j++) {
+      const cand = destinations[(dStart + j) % destinations.length];
+      if (cand.id === edge.id) continue;
+      const r = computeRoute(network, edge.id, cand.id);
+      if (r && r.length > 0) {
+        route = r;
+        destId = cand.id;
+      }
+    }
+    if (!route) continue;
+    for (let lane = 0; lane < edge.lanes; lane++) {
+      const first = occupancy[lane].length > 0 ? vehicles.get(occupancy[lane][0])?.distanceAlongEdge ?? Infinity : Infinity;
+      if (first < MIN_SPAWN_CLEARANCE_FT) continue;
+      spawnVehicle(edge, lane, route, destId, "ambulance");
+      const id = nextVehicleId - 1;
+      let idealS = 0;
+      for (const eid of route) {
+        const e = network.edgesById.get(eid);
+        if (e) idealS += e.length / (mphToFtps(e.speedLimitMph) * AMBULANCE_FREE_FLOW_FACTOR);
+      }
+      ambulances.set(id, { spawnT: simTime, idealS });
+      ambDispatched++;
+      return true;
+    }
+  }
+  return false;
+}
+
+function updateAmbulanceDispatch() {
+  if (ambPending.length === 0) return;
+  if (trySpawnAmbulance()) {
+    ambPending.shift();
+    return;
+  }
+  // Nowhere to put it for too long: drop the request rather than hold the level hostage.
+  while (ambPending.length > 0 && simTime - ambPending[0] > AMBULANCE_WAIT_LIMIT_S) ambPending.shift();
+}
+
+/** Marks the vehicles in an ambulance's way so they pull out of its lane. */
+function markAmbulanceYielders() {
+  if (ambulances.size === 0) return;
+  for (const id of ambulances.keys()) {
+    const amb = vehicles.get(id);
+    if (!amb) continue;
+    const lanes = laneOccupancy.get(amb.edgeId);
+    const edge = network?.edgesById.get(amb.edgeId);
+    if (!lanes || !edge) continue;
+    const laneArr = lanes[clamp(amb.laneIndex, 0, lanes.length - 1)];
+    for (const otherId of laneArr) {
+      const other = vehicles.get(otherId);
+      if (!other || other.id === amb.id) continue;
+      const ahead = other.distanceAlongEdge - amb.distanceAlongEdge;
+      if (ahead > 0 && ahead < AMBULANCE_YIELD_AHEAD_FT) {
+        other.yieldUntil = simTime + 2.5;
+        other.yieldLane = amb.laneIndex;
+      }
+    }
+  }
+}
+
+function recordAmbulanceArrival(v: VehicleState) {
+  const track = ambulances.get(v.id);
+  if (!track) return;
+  ambulances.delete(v.id);
+  ambCompleted++;
+  ambLastResponseS = simTime - track.spawnT;
+  ambLastIdealS = track.idealS;
+  ambTotalResponseS += ambLastResponseS;
+  ambTotalIdealS += ambLastIdealS;
+}
+
+/** Returns the distance (ft) at which a vehicle must stop for a crossing or a junction it cannot yet enter, or null if clear. */
 function computeVirtualStopDistance(v: VehicleState, edge: Edge3D): number | null {
-  if (!network) return null;
+  const junction = junctionStopDistance(v, edge);
+  const crossing = crossingStopDistance(v, edge);
+  if (crossing === null) return junction;
+  return junction === null ? crossing : Math.min(junction, crossing);
+}
+
+/** Returns the distance (ft) at which a vehicle must stop for a junction it cannot yet enter, or null if clear. */
+function junctionStopDistance(v: VehicleState, edge: Edge3D): number | null {
+  if (!network || v.kind === "ambulance") return null;
   if (ringEntryBlocked(v, edge)) {
     const toLine = edge.length - v.distanceAlongEdge;
     if (toLine <= JUNCTION_APPROACH_FT) return Math.max(toLine, 0.1);
@@ -615,6 +942,11 @@ function allowedLanesForNext(v: VehicleState, edge: Edge3D): boolean[] | null {
   if (!edge.laneAllowed) return null;
   const nextRouteEdgeId = v.routeEdgeIds[v.routeIndex + 1];
   return nextRouteEdgeId ? (edge.laneAllowed.get(nextRouteEdgeId) ?? null) : null;
+}
+
+/** How fast a driver wants to go relative to the limit: most cruise near it, an ambulance with its siren on well over. */
+function cruiseFactor(v: VehicleState): number {
+  return v.kind === "ambulance" ? 1.3 : Math.min(v.speedFactor, 1.05);
 }
 
 /** How close to the end of a road a car may slip into a reserved lane if that is the only lane that can make its turn. */
@@ -739,7 +1071,7 @@ function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
 
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
   const v0 = Math.min(
-    mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05),
+    mphToFtps(edge.speedLimitMph) * cruiseFactor(v) * weatherSpeedMult(),
     curvatureSpeedCapFtps(edge, v.distanceAlongEdge),
     v.maxSpeedFtps
   );
@@ -748,7 +1080,7 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
     a: v.maxAccel,
     b: v.comfortBrake,
     s0: v.jamDistance,
-    T: v.desiredHeadway,
+    T: v.desiredHeadway * weatherHeadwayMult(),
     v0,
     delta: IDM_DEFAULTS.delta,
   };
@@ -764,7 +1096,7 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
 // ---------------------------------------------------------------------------
 
 function pairAccel(followerV: VehicleState, followerDist: number, leader: VehicleState | null, edge: Edge3D): number {
-  const v0 = Math.min(mphToFtps(edge.speedLimitMph) * Math.min(followerV.speedFactor, 1.05), followerV.maxSpeedFtps);
+  const v0 = Math.min(mphToFtps(edge.speedLimitMph) * cruiseFactor(followerV) * weatherSpeedMult(), followerV.maxSpeedFtps);
   let gap = NO_LEADER_GAP;
   let leaderSpeed = followerV.speed;
   if (leader) {
@@ -775,7 +1107,7 @@ function pairAccel(followerV: VehicleState, followerDist: number, leader: Vehicl
     a: followerV.maxAccel,
     b: followerV.comfortBrake,
     s0: followerV.jamDistance,
-    T: followerV.desiredHeadway,
+    T: followerV.desiredHeadway * weatherHeadwayMult(),
     v0,
     delta: IDM_DEFAULTS.delta,
   };
@@ -788,7 +1120,8 @@ function pairAccel(followerV: VehicleState, followerDist: number, leader: Vehicl
 
 function tryLaneChange(v: VehicleState, edge: Edge3D) {
   if (edge.lanes < 2) return;
-  if (v.laneChangeCooldown > 0) {
+  const yielding = v.yieldUntil > simTime;
+  if (v.laneChangeCooldown > 0 && !yielding) {
     v.laneChangeCooldown -= 1;
     return;
   }
@@ -837,7 +1170,7 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
   // desired speed (typically a heavy semi losing the fight against a steep
   // grade, or a cyclist) gets an extra shove toward overtaking, on top of whatever
   // incentive MOBIL's own acceleration-gain math already produces.
-  const followerV0 = mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05);
+  const followerV0 = mphToFtps(edge.speedLimitMph) * cruiseFactor(v);
   const truckOvertakeBias =
     !v.isTruck && v.kind !== "bike" && oldLeader && (oldLeader.isTruck || oldLeader.kind === "bike") && oldLeader.speed < followerV0 * 0.6 ? 6 : 0;
 
@@ -880,7 +1213,10 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
     const candidateDirection = candidateLane > v.laneIndex ? 1 : -1;
     const extraBias =
       (requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * 8 : 0) +
-      truckOvertakeBias;
+      truckOvertakeBias +
+      // Pull out of an ambulance's way, and an ambulance swings round anything slow in front of it.
+      (yielding && candidateLane !== v.yieldLane ? 12 : 0) +
+      (v.kind === "ambulance" && oldLeader && oldLeader.speed < followerV0 * 0.7 ? 8 : 0);
 
     const inputs: MobilInputs = {
       currentAccel: v.accel,
@@ -976,6 +1312,9 @@ function runDueEvents() {
   while (eventQueue.length > 0 && eventQueue[0].atS <= simTime) {
     const e = eventQueue.shift()!;
     if (e.kind === "breakdown") breakDownOneCar(e.durationS);
+    else if (e.kind === "ambulance") ambPending.push(simTime);
+    else if (e.kind === "weatherOn") scriptedWeather = e.weather;
+    else if (e.kind === "weatherOff") scriptedWeather = null;
     else if (e.kind === "surge") {
       demandScale = e.multiplier;
       resampleSpawns();
@@ -992,7 +1331,10 @@ function step(dt: number) {
   runDueEvents();
 
   updateSignalPhases(dt);
+  if (crossings.size > 0) updateCrossings();
   rebuildLaneOccupancy();
+  updateAmbulanceDispatch();
+  markAmbulanceYielders();
   rebuildNodeApproaches();
 
   for (const v of vehicles.values()) {
@@ -1030,7 +1372,7 @@ function step(dt: number) {
     } else {
       v.stuckTimeS = 0;
     }
-    if (v.stuckTimeS >= GRIDLOCK_DESPAWN_S) {
+    if (v.stuckTimeS >= GRIDLOCK_DESPAWN_S && v.kind !== "ambulance") {
       toRemove.push(v.id);
       gridlockRemoved.add(v.id);
       gridlockPenaltyTotal++;
@@ -1067,7 +1409,10 @@ function step(dt: number) {
     if (v) {
       // Only trips that actually reached their destination count toward
       // throughput — a gridlock-forced removal is a penalty, not a completion.
-      if (!gridlockRemoved.has(id)) {
+      if (v.kind === "ambulance") {
+        if (!gridlockRemoved.has(id)) recordAmbulanceArrival(v);
+        ambulances.delete(id);
+      } else if (!gridlockRemoved.has(id)) {
         despawnTimestamps.push(simTime);
         completedTripsTotal++;
         peopleMovedTotal += v.passengers;
@@ -1107,8 +1452,14 @@ const edgeSpeedSumMph = new Map<string, number>();
 function writeSnapshot(
   buf: BufferSet,
   collectStats: boolean
-): { activeCount: number; avgSpeedFtS: number; gridlockMarkers: [number, number, number][]; incidentMarkers: [number, number, number][] } {
-  if (!network) return { activeCount: 0, avgSpeedFtS: 0, gridlockMarkers: [], incidentMarkers: [] };
+): {
+  activeCount: number;
+  avgSpeedFtS: number;
+  gridlockMarkers: [number, number, number][];
+  incidentMarkers: [number, number, number][];
+  ambulancePositions: [number, number, number][];
+} {
+  if (!network) return { activeCount: 0, avgSpeedFtS: 0, gridlockMarkers: [], incidentMarkers: [], ambulancePositions: [] };
   if (collectStats) {
     edgeSpeedRatioSum.clear();
     edgeSpeedRatioCount.clear();
@@ -1116,6 +1467,7 @@ function writeSnapshot(
   }
   const gridlockMarkers: [number, number, number][] = [];
   const incidentMarkers: [number, number, number][] = [];
+  const ambulancePositions: [number, number, number][] = [];
   let i = 0;
   let speedSum = 0;
   for (const v of vehicles.values()) {
@@ -1126,8 +1478,8 @@ function writeSnapshot(
     // Trucks get a taller, slightly wider box on top of their already-longer
     // length, so an 18-wheeler reads as a distinct bulkier silhouette next
     // to a sedan using nothing but the one shared box geometry.
-    const widthScale = v.kind === "bus" ? 1.25 : v.kind === "bike" ? 0.32 : v.isTruck ? 1.15 : 1;
-    const heightScale = v.kind === "bus" ? 1.85 : v.kind === "bike" ? 0.75 : v.isTruck ? 1.55 : 1;
+    const widthScale = v.kind === "bus" ? 1.25 : v.kind === "bike" ? 0.32 : v.kind === "ambulance" ? 1.1 : v.isTruck ? 1.15 : 1;
+    const heightScale = v.kind === "bus" ? 1.85 : v.kind === "bike" ? 0.75 : v.kind === "ambulance" ? 1.5 : v.isTruck ? 1.55 : 1;
 
     const t = distanceToT(edge, v.distanceAlongEdge);
     laneCenterPointAt(edge, t, v.laneIndex, _tangent, _right, _pos);
@@ -1138,6 +1490,7 @@ function writeSnapshot(
     _pos.y += (VEHICLE_HEIGHT_FT * heightScale) / 2;
 
     const broken = v.frozenUntil > simTime;
+    if (v.kind === "ambulance") ambulancePositions.push([_pos.x, _pos.y, _pos.z]);
     if (broken) {
       incidentMarkers.push([_pos.x, _pos.y, _pos.z]);
     } else if (v.stuckTimeS >= GRIDLOCK_WARNING_S) {
@@ -1156,6 +1509,12 @@ function writeSnapshot(
       buf.colors[i * 3] = 1;
       buf.colors[i * 3 + 1] = 0.12;
       buf.colors[i * 3 + 2] = 0.12;
+    } else if (v.kind === "ambulance") {
+      // Lights flashing red and blue, four times a second.
+      const red = Math.floor(simTime * 4) % 2 === 0;
+      buf.colors[i * 3] = red ? 1 : 0.15;
+      buf.colors[i * 3 + 1] = red ? 0.1 : 0.35;
+      buf.colors[i * 3 + 2] = red ? 0.1 : 1;
     } else if (heatmapColorMode) {
       speedColorInto(ratio, _color);
       _color.toArray(buf.colors, i * 3);
@@ -1183,7 +1542,7 @@ function writeSnapshot(
     speedSum += v.speed;
     i++;
   }
-  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0, gridlockMarkers, incidentMarkers };
+  return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0, gridlockMarkers, incidentMarkers, ambulancePositions };
 }
 
 function computeEdgeSpeedRatios(): EdgeSpeedRatio[] {
@@ -1253,7 +1612,7 @@ function postSnapshot(forceStats: boolean) {
   const now = performance.now();
   const withStats = forceStats || now - lastStatsPostMs >= STATS_INTERVAL_MS;
   const buf = acquireBufferSet();
-  const { activeCount, avgSpeedFtS, gridlockMarkers, incidentMarkers } = writeSnapshot(buf, withStats);
+  const { activeCount, avgSpeedFtS, gridlockMarkers, incidentMarkers, ambulancePositions } = writeSnapshot(buf, withStats);
   let stats: TickStats | undefined;
   if (withStats) {
     lastStatsPostMs = now;
@@ -1285,6 +1644,13 @@ function postSnapshot(forceStats: boolean) {
     spawnedTotal,
     completedTripsTotal,
     peopleMovedTotal,
+    pedServedTotal,
+    pedIncidentsTotal,
+    pedCrossings: activeCrossingViews(),
+    emergency: emergencyStats(),
+    ambulances: ambulancePositions,
+    weather: currentWeather(),
+    clockHour: clockHour(),
     stats,
   };
   ctx.postMessage(message, [matricesBuffer, colorsBuffer, taillightColorsBuffer]);
@@ -1350,6 +1716,7 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
           const edge = network.edgesById.get(p.id);
           if (edge) patchEdge(edge, network.edgesById, p);
         }
+        rebuildCrossings();
       }
       break;
     case "setTrafficMix":
@@ -1370,10 +1737,26 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
     case "breakdown":
       breakDownOneCar(msg.durationS);
       break;
+    case "ambulance":
+      ambPending.push(simTime);
+      break;
+    case "setWeather":
+      manualWeather = msg.weather;
+      break;
+    case "setDayCycle":
+      dayCycleOn = msg.enabled;
+      dayStartHour = msg.startHour;
+      dayLengthS = Math.max(60, msg.dayLengthS);
+      resampleSpawns();
+      break;
     case "scheduleEvents": {
       eventQueue = [];
       for (const e of msg.events) {
-        eventQueue.push(e.kind === "breakdown" ? { atS: e.atS, kind: "breakdown", durationS: e.durationS } : { atS: e.atS, kind: "surge", multiplier: e.multiplier });
+        if (e.kind === "ambulance") eventQueue.push({ atS: e.atS, kind: "ambulance" });
+        else if (e.kind === "weather") {
+          eventQueue.push({ atS: e.atS, kind: "weatherOn", weather: e.weather });
+          eventQueue.push({ atS: e.atS + e.durationS, kind: "weatherOff" });
+        } else eventQueue.push(e.kind === "breakdown" ? { atS: e.atS, kind: "breakdown", durationS: e.durationS } : { atS: e.atS, kind: "surge", multiplier: e.multiplier });
         if (e.kind === "surge") eventQueue.push({ atS: e.atS + e.durationS, kind: "surgeEnd" });
       }
       eventQueue.sort((a, b) => a.atS - b.atS);

@@ -24,6 +24,9 @@ import FlowFeedback from "./hud/FlowFeedback";
 import ChaosDirector from "./hud/ChaosDirector";
 import ScriptedEventAnnouncer from "./hud/ScriptedEventAnnouncer";
 import CoachBar from "./hud/CoachBar";
+import EmergencyAnnouncer from "./hud/EmergencyAnnouncer";
+import WeatherFx from "./hud/WeatherFx";
+import DayClock from "./hud/DayClock";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import { usePhotoMode } from "@/lib/photoMode";
 import Tutorial from "./hud/Tutorial";
@@ -48,6 +51,7 @@ export default function SimControls({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
+      <WeatherFx sim={sim} />
       <ModeVignette />
       <TouchTip />
       <TopBar sim={sim} />
@@ -68,8 +72,10 @@ export default function SimControls({
       <ToastHost />
       <FlowFeedback sim={sim} />
       <ChaosDirector sim={sim} />
+      <EmergencyAnnouncer sim={sim} />
       <ScriptedEventAnnouncer runner={scenarioRunner} />
       <CoachBar />
+      <DayClock sim={sim} />
       <Tutorial />
     </div>
   );

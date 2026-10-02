@@ -59,6 +59,8 @@ export function useDemoTraffic(network: NetworkSnapshot, active: boolean, visibl
         colors: new Float32Array(msg.colors),
         taillightColors: new Float32Array(msg.taillightColors),
         activeCount: msg.activeCount,
+        pedCrossings: msg.pedCrossings,
+        ambulances: msg.ambulances,
         version: versionRef.current,
       };
 

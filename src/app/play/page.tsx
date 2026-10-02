@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, OrthographicCamera } from "@react-three/drei";
 import { Bloom, EffectComposer, SSAO, ToneMapping, Vignette } from "@react-three/postprocessing";
@@ -9,6 +9,8 @@ import * as THREE from "three";
 import RoadNetworkMesh from "@/components/RoadNetworkMesh";
 import RoadEditor from "@/components/RoadEditor";
 import VehicleRenderer from "@/components/VehicleRenderer";
+import Pedestrians from "@/components/Pedestrians";
+import EmergencyPins from "@/components/EmergencyPins";
 import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulation";
@@ -154,8 +156,13 @@ export default function Play() {
   const rideAlongActive = useEditorStore((s) => s.rideAlongActive);
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
-  const skyColor =
-    timeOfDay === "night" ? SKY_COLOR_NIGHT : timeOfDay === "dusk" ? SKY_COLOR_DUSK : SKY_COLOR_DAY;
+  const weather = sim.metrics.weather;
+  const baseSky = timeOfDay === "night" ? SKY_COLOR_NIGHT : timeOfDay === "dusk" ? SKY_COLOR_DUSK : SKY_COLOR_DAY;
+  // Rain greys the sky and fog whitens it, so the horizon matches the overlay instead of staying sunny.
+  const skyColor = useMemo(() => {
+    if (weather === "clear") return baseSky;
+    return new THREE.Color(baseSky).lerp(new THREE.Color(weather === "rain" ? "#6f8096" : "#cfd6dc"), 0.55).getStyle();
+  }, [baseSky, weather]);
   const canvasCursor = mode === "build" && CROSSHAIR_TOOLS.has(tool) ? "crosshair" : "default";
   const quality = useQuality();
   const q = QUALITY_SETTINGS[quality];
@@ -227,7 +234,7 @@ export default function Play() {
         <PerfGuard active={sim.running} />
         <KeyboardPan />
         <color attach="background" args={[skyColor]} />
-        <fog attach="fog" args={[skyColor, 4200 + FOG_OFFSET_FT, 13000 + FOG_OFFSET_FT]} />
+        <fog attach="fog" args={[skyColor, (weather === "fog" ? 900 : 4200) + FOG_OFFSET_FT, (weather === "fog" ? 4200 : 13000) + FOG_OFFSET_FT]} />
 
         <OrthographicCamera makeDefault position={CAMERA_POSITION} zoom={1.05} near={1} far={60000} />
 
@@ -304,6 +311,8 @@ export default function Play() {
         <Streetlights />
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
+        <Pedestrians snapshotRef={sim.snapshotRef} />
+        <EmergencyPins snapshotRef={sim.snapshotRef} />
         {quality !== "low" && <JointClackDetector snapshotRef={sim.snapshotRef} />}
         <ChaseCamera snapshotRef={sim.snapshotRef} />
         <AmbienceController avgSpeedMph={sim.metrics.avgSpeedMph} />

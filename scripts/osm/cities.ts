@@ -32,4 +32,10 @@ export const CITIES: CityConfig[] = [
   { key: "san-antonio", name: "San Antonio", bbox: [29.4330, -98.4880, 29.4440, -98.4720], highways: FREEWAY, demandScale: 1 },
   // Monterrey: the Macroplaza grid and Avenida Constitución downtown.
   { key: "monterrey", name: "Monterrey", bbox: [25.6660, -100.3200, 25.6760, -100.3040], highways: CITY_STREETS, demandScale: 1 },
+  // Dallas: the High Five, where I-635 meets US-75 on five stacked levels.
+  { key: "dallas", name: "Dallas", bbox: [32.9150, -96.7790, 32.9335, -96.7490], highways: FREEWAY, demandScale: 2 },
+  // Chicago: the Jane Byrne (Circle) Interchange, where the Kennedy, Dan Ryan and Eisenhower meet.
+  { key: "chicago", name: "Chicago", bbox: [41.8705, -87.6525, 41.8805, -87.6385], highways: FREEWAY, demandScale: 1 },
+  // Atlanta: the Tom Moreland ("Spaghetti Junction") interchange of I-85 and I-285.
+  { key: "atlanta", name: "Atlanta", bbox: [33.8865, -84.2665, 33.8970, -84.2515], highways: FREEWAY, demandScale: 1.4 },
 ];

@@ -696,6 +696,22 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
           />
         </div>
 
+        {metrics.pedServedTotal > 0 && (
+          <div
+            className={`flex items-center gap-2 rounded-xl p-2.5 text-[11px] leading-snug ${
+              metrics.pedIncidentsTotal > 0 ? "bg-orange-500/15 text-orange-800" : "bg-emerald-500/15 text-emerald-800"
+            }`}
+          >
+            <span className="text-base leading-none">🚶</span>
+            <span>
+              {metrics.pedServedTotal} {metrics.pedServedTotal === 1 ? "person has" : "people have"} crossed
+              {metrics.pedIncidentsTotal > 0
+                ? `, and ${metrics.pedIncidentsTotal} stepped into traffic. A marked crossing there would be safer.`
+                : ", all safely."}
+            </span>
+          </div>
+        )}
+
         {metrics.gridlockPenaltyTotal > 0 && (
           <div className="flex items-center gap-2 rounded-xl bg-red-500/15 p-2.5 text-[11px] leading-snug text-red-800">
             <span className="animate-warn-pulse flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-700">

@@ -55,6 +55,10 @@ export const LANE_MOVES: LaneMove[] = ["left", "straight", "right"];
 /** Something that happens at an exact moment of a level's run, so every attempt faces the same trouble. */
 export type ScriptedEvent =
   | { atS: number; kind: "breakdown"; durationS: number }
+  /** An ambulance is dispatched from a random entry to a random destination; how fast it gets through is scored. */
+  | { atS: number; kind: "ambulance" }
+  /** The weather turns for `durationS` seconds (slower, more cautious drivers), then goes back to what the player set. */
+  | { atS: number; kind: "weather"; weather: Exclude<Weather, "clear">; durationS: number }
   /** Every entry's demand is multiplied for `durationS` seconds, then returns to normal. */
   | { atS: number; kind: "surge"; multiplier: number; durationS: number };
 
@@ -108,6 +112,8 @@ export interface EdgeSpec {
 }
 
 export type ReservedLane = "bus" | "bike";
+
+export type Weather = "clear" | "rain" | "fog";
 
 /** What a simulated road user is. Most are cars; the rest only appear when the level or sandbox asks for mixed traffic. */
 export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance";
@@ -226,6 +232,9 @@ export interface VehicleState {
   passengers: number;
   /** Hard ceiling on this vehicle's speed regardless of the limit (a bicycle, say). Infinity = none. */
   maxSpeedFtps: number;
+  /** While the sim clock is below this, an ambulance is behind this vehicle and it should pull out of that lane. */
+  yieldUntil: number;
+  yieldLane: number;
   /** Weight-to-power ratio, lb/hp — drives how hard road grade hits this vehicle's climbing speed. */
   weightToPowerLbPerHp: number;
   /** Fixed body paint color (0-1 components), assigned once at spawn from a truck- or sedan-specific palette. */
@@ -253,6 +262,12 @@ export type WorkerInMessage =
   | { type: "patchEdges"; edges: EdgePatch[] }
   /** How much of the traffic is buses and bikes (0-1 each). Zero keeps the classic cars-and-trucks mix. */
   | { type: "setTrafficMix"; bus: number; bike: number }
+  /** Dispatches an ambulance now (Chaos mode, sandbox button). */
+  | { type: "ambulance" }
+  /** The weather the player picked. Scripted weather events override it while they last. */
+  | { type: "setWeather"; weather: Weather }
+  /** Turns the 24-hour demand cycle on or off: demand follows rush hours and the clock starts at `startHour`, one day lasting `dayLengthS` sim-seconds. */
+  | { type: "setDayCycle"; enabled: boolean; startHour: number; dayLengthS: number }
   | { type: "patchNodes"; nodes: { id: string; control: JunctionControl | null }[] }
   | { type: "setDemand"; edgeId: string; vehiclesPerHour: number }
   | { type: "setColorMode"; heatmap: boolean }
@@ -265,6 +280,19 @@ export interface EdgePatch {
   laneMoves: LaneMove[][] | null;
   reservedLane?: ReservedLane | null;
   crosswalk?: boolean;
+}
+
+/** How the run's emergency responses are going. Times are sim-seconds; "ideal" is the route at the ambulance's own free-flow speed. */
+export interface EmergencyStats {
+  dispatched: number;
+  completed: number;
+  /** Dispatched but not yet on the road because every lane at the entry was busy. */
+  waiting: number;
+  active: number;
+  totalResponseS: number;
+  totalIdealS: number;
+  lastResponseS: number;
+  lastIdealS: number;
 }
 
 export interface ContractStatus {
@@ -306,6 +334,19 @@ export type WorkerOutMessage =
       avgSpeedFtS: number;
       throughputLastMinute: number;
       spawnedTotal: number;
+      emergency: EmergencyStats;
+      /** The weather in effect right now (the player's choice, or a scripted storm). */
+      weather: Weather;
+      /** Clock hour 0-24 while the day cycle is on, else -1. */
+      clockHour: number;
+      /** World positions of ambulances on the road right now, for the pins. */
+      ambulances: [number, number, number][];
+      /** People who have crossed at a crossing or stepped into traffic since the run began. */
+      pedServedTotal: number;
+      /** Times someone stepped into traffic with cars coming (no marked crossing there). */
+      pedIncidentsTotal: number;
+      /** Crossings with people on the road right now: [x, y, z, rightX, rightZ, halfWidth, progress 0-1, direction, marked 1/0]. */
+      pedCrossings: number[][];
       /** People carried by the vehicles that completed their routes (a bus counts for all its riders). */
       peopleMovedTotal: number;
       /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */

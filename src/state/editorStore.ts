@@ -28,6 +28,7 @@ import type {
   NetworkSnapshot,
   NodeSpec,
   ReservedLane,
+  Weather,
   ZoneSpec,
 } from "@/sim/types";
 import {
@@ -220,6 +221,12 @@ interface EditorState {
    */
   hydrateAutosave: () => void;
 
+  /** The weather the player chose in free play (scripted storms in a level override it). */
+  weather: Weather;
+  setWeather: (w: Weather) => void;
+  /** A 24-hour day: demand follows the rush hours and the lighting follows the clock. Free play only. */
+  dayCycle: boolean;
+  setDayCycle: (on: boolean) => void;
   /** Share of traffic that is buses and bikes (0 = the classic cars-and-trucks mix). Levels set it; the sandbox turns it on. */
   trafficMix: TrafficMix;
   setTrafficMix: (mix: TrafficMix) => void;
@@ -1328,6 +1335,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeScenarioId: null,
   buildLocked: false,
   realCityActive: false,
+  weather: "clear",
+  setWeather: (w) => set({ weather: w }),
+  dayCycle: false,
+  setDayCycle: (on) => set({ dayCycle: on }),
   trafficMix: CLASSIC_MIX,
   setTrafficMix: (mix) => set({ trafficMix: mix }),
   simEpoch: 0,
@@ -1349,6 +1360,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       buildLocked: scenario.kind === "manage",
       realCityActive: scenario.real === true,
       trafficMix: scenario.trafficMix ?? CLASSIC_MIX,
+      weather: "clear",
+      dayCycle: false,
       simEpoch: get().simEpoch + 1,
       // Frame the whole city: zoom out to the farthest node.
       pendingCameraFit: {

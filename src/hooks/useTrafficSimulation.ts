@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ContractStatus,
+  Weather,
+  EmergencyStats,
   EdgePatch,
   EdgeSpec,
   EdgeSpeedRatio,
@@ -22,6 +24,10 @@ export interface VehicleSnapshot {
   colors: Float32Array;
   taillightColors: Float32Array;
   activeCount: number;
+  /** Crossings with people on the road right now (see WorkerOutMessage). */
+  pedCrossings: number[][];
+  /** World positions of ambulances on the road right now. */
+  ambulances: [number, number, number][];
   version: number;
 }
 
@@ -33,6 +39,12 @@ export interface SimMetricsState {
   spawnedTotal: number;
   completedTripsTotal: number;
   peopleMovedTotal: number;
+  pedServedTotal: number;
+  pedIncidentsTotal: number;
+  emergency: EmergencyStats;
+  weather: Weather;
+  /** Hour of the simulated day (0-24) while the day cycle is on, else -1. */
+  clockHour: number;
   contracts: ContractStatus[];
   edgeSpeedRatios: EdgeSpeedRatio[];
   problemEdgeIds: string[];
@@ -50,6 +62,11 @@ const DEFAULT_METRICS: SimMetricsState = {
   spawnedTotal: 0,
   completedTripsTotal: 0,
   peopleMovedTotal: 0,
+  pedServedTotal: 0,
+  pedIncidentsTotal: 0,
+  emergency: { dispatched: 0, completed: 0, waiting: 0, active: 0, totalResponseS: 0, totalIdealS: 0, lastResponseS: 0, lastIdealS: 0 },
+  weather: "clear",
+  clockHour: -1,
   contracts: [],
   edgeSpeedRatios: [],
   problemEdgeIds: [],
@@ -142,6 +159,8 @@ export function useTrafficSimulation() {
           colors: new Float32Array(msg.colors),
           taillightColors: new Float32Array(msg.taillightColors),
           activeCount: msg.activeCount,
+          pedCrossings: msg.pedCrossings,
+          ambulances: msg.ambulances,
           version: versionCounterRef.current,
         };
 
@@ -157,6 +176,11 @@ export function useTrafficSimulation() {
             spawnedTotal: msg.spawnedTotal,
             completedTripsTotal: msg.completedTripsTotal,
             peopleMovedTotal: msg.peopleMovedTotal,
+            pedServedTotal: msg.pedServedTotal,
+            pedIncidentsTotal: msg.pedIncidentsTotal,
+            emergency: msg.emergency,
+            weather: msg.weather,
+            clockHour: msg.clockHour,
             contracts: stats.contracts,
             edgeSpeedRatios: stats.edgeSpeedRatios,
             problemEdgeIds: stats.problemEdgeIds,
@@ -186,6 +210,17 @@ export function useTrafficSimulation() {
   useEffect(() => {
     workerRef.current?.postMessage({ type: "setMaxVehicles", value: VEHICLE_CAP[quality] } satisfies WorkerInMessage);
   }, [quality]);
+
+  const manualWeather = useEditorStore((s) => s.weather);
+  useEffect(() => {
+    workerRef.current?.postMessage({ type: "setWeather", weather: manualWeather } satisfies WorkerInMessage);
+  }, [manualWeather]);
+
+  const dayCycle = useEditorStore((s) => s.dayCycle);
+  useEffect(() => {
+    // Starts at 6 am; a day lasts eight minutes of sim time.
+    workerRef.current?.postMessage({ type: "setDayCycle", enabled: dayCycle, startHour: 6, dayLengthS: 480 } satisfies WorkerInMessage);
+  }, [dayCycle]);
 
   const trafficMix = useEditorStore((s) => s.trafficMix);
   useEffect(() => {
@@ -303,6 +338,11 @@ export function useTrafficSimulation() {
     workerRef.current?.postMessage({ type: "breakdown", durationS } satisfies WorkerInMessage);
   }, []);
 
+  /** Dispatches an ambulance from a random entry to a random exit; how fast it gets through is scored. */
+  const triggerAmbulance = useCallback(() => {
+    workerRef.current?.postMessage({ type: "ambulance" } satisfies WorkerInMessage);
+  }, []);
+
   /** Re-sends the current network to the worker with the same fixed seed, restarting traffic from a clean slate without leaving Simulate mode. */
   const resetTraffic = useCallback(() => {
     const worker = workerRef.current;
@@ -329,6 +369,7 @@ export function useTrafficSimulation() {
     setDemand,
     resetTraffic,
     triggerBreakdown,
+    triggerAmbulance,
   };
 }
 
