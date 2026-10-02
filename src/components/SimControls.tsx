@@ -27,6 +27,7 @@ import CoachBar from "./hud/CoachBar";
 import EmergencyAnnouncer from "./hud/EmergencyAnnouncer";
 import WeatherFx from "./hud/WeatherFx";
 import PlaceCredit from "./hud/PlaceCredit";
+import SoundScape from "./hud/SoundScape";
 import DayClock from "./hud/DayClock";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import { usePhotoMode } from "@/lib/photoMode";
@@ -78,6 +79,7 @@ export default function SimControls({
       <CoachBar />
       <DayClock sim={sim} />
       <PlaceCredit />
+      <SoundScape sim={sim} />
       <Tutorial />
     </div>
   );

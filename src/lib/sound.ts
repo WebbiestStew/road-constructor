@@ -49,6 +49,7 @@ export function setMuted(value: boolean): void {
     ambience.engineGain.gain.value = 0;
     ambience.rumbleGain.gain.value = 0;
   }
+  if (fx) applyFxLevels();
   for (const l of listeners) l(muted);
 }
 
@@ -294,4 +295,95 @@ export function updateEngineDynamics(avgSpeedMph: number): void {
   }
   const trafficMoving = avgSpeedMph > 0.5 ? 1 : 0;
   graph.rumbleGain.gain.linearRampToValueAtTime(trafficMoving * 0.02, now + 0.6);
+}
+
+// ---------------------------------------------------------------------------
+// Weather and emergency layers: steady rain, and an ambulance siren. Created the first time they are needed and
+// then only nudged, like the ambience above. Both go silent while muted.
+// ---------------------------------------------------------------------------
+
+interface FxGraph {
+  rainGain: GainNode;
+  sirenGain: GainNode;
+}
+let fx: FxGraph | null = null;
+let wantRain = false;
+let wantSiren = false;
+
+function applyFxLevels(): void {
+  const audio = getCtx();
+  if (!fx || !audio) return;
+  const now = audio.currentTime;
+  fx.rainGain.gain.cancelScheduledValues(now);
+  fx.sirenGain.gain.cancelScheduledValues(now);
+  fx.rainGain.gain.linearRampToValueAtTime(!muted && wantRain ? 0.05 : 0, now + 0.8);
+  fx.sirenGain.gain.linearRampToValueAtTime(!muted && wantSiren ? 0.03 : 0, now + 0.15);
+}
+
+function ensureFx(): FxGraph | null {
+  const audio = getCtx();
+  if (!audio) return null;
+  if (fx) return fx;
+
+  // Rain: looping noise, band-limited so it hisses rather than rumbles.
+  const len = audio.sampleRate * 2;
+  const buf = audio.createBuffer(1, len, audio.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const rainSrc = audio.createBufferSource();
+  rainSrc.buffer = buf;
+  rainSrc.loop = true;
+  const rainFilter = audio.createBiquadFilter();
+  rainFilter.type = "bandpass";
+  rainFilter.frequency.value = 2600;
+  rainFilter.Q.value = 0.5;
+  const rainGain = audio.createGain();
+  rainGain.gain.value = 0;
+  rainSrc.connect(rainFilter);
+  rainFilter.connect(rainGain);
+  rainGain.connect(audio.destination);
+  rainSrc.start();
+
+  // Siren: a tone whose pitch swings up and down, driven by a slow oscillator.
+  const sirenOsc = audio.createOscillator();
+  sirenOsc.type = "triangle";
+  sirenOsc.frequency.value = 820;
+  const lfo = audio.createOscillator();
+  lfo.frequency.value = 0.9;
+  const lfoDepth = audio.createGain();
+  lfoDepth.gain.value = 190;
+  lfo.connect(lfoDepth);
+  lfoDepth.connect(sirenOsc.frequency);
+  const sirenGain = audio.createGain();
+  sirenGain.gain.value = 0;
+  sirenOsc.connect(sirenGain);
+  sirenGain.connect(audio.destination);
+  sirenOsc.start();
+  lfo.start();
+
+  fx = { rainGain, sirenGain };
+  return fx;
+}
+
+/** Turns the rain sound on or off with the weather. */
+export function setRainSound(on: boolean): void {
+  wantRain = on;
+  if (!on && !fx) return;
+  if (!ensureFx()) return;
+  applyFxLevels();
+}
+
+/** Turns the siren on while an ambulance is on the road. */
+export function setSirenSound(on: boolean): void {
+  wantSiren = on;
+  if (!on && !fx) return;
+  if (!ensureFx()) return;
+  applyFxLevels();
+}
+
+/** A soft double beep for a pedestrian crossing signal. */
+export function playCrossingBeep(): void {
+  if (muted) return;
+  tone(1040, 0, 0.07, 0.035, "square");
+  tone(1040, 0.12, 0.07, 0.035, "square");
 }

@@ -269,6 +269,9 @@ const FEATURES = [
   { icon: IconHeatmap, title: "Heatmap & jam markers", body: "See where traffic flows and where it dies, in colorblind-safe colors." },
   { icon: IconGauge, title: "Real traffic models", body: "IDM car-following and MOBIL lane changes, the models real traffic engineers use." },
   { icon: IconRoad, title: "Unlimited sandbox", body: "Want to build? An empty map with no money limit: draw roads, bridges, viaducts and roundabouts from scratch." },
+  { icon: IconRoad, title: "Bus & bike lanes", body: "A bus carries forty people, a car carries one. Reserve a lane, make streets one-way, add crossings, and watch who it helps." },
+  { icon: IconWarning, title: "A living city", body: "Ambulances race through, people cross the road, rain slows everyone down and rush hour comes around on a 24-hour clock." },
+  { icon: IconPlay, title: "Play anywhere", body: "Search any place on Earth and play on its real roads, or play on your phone: drag to pan, pinch to zoom, tap to build." },
 ] as const;
 
 function Sections() {
