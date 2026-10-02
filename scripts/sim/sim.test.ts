@@ -47,7 +47,7 @@ test("a level can be improved: adding lanes beats the three-star target in Houst
 // The levels that score something other than vehicles moved: each needs a real route to its stars.
 // ---------------------------------------------------------------------------
 
-function runLevel(id: string, variant: string): { trips: number; people: number; incidents: number; amb: string } {
+function runLevel(id: string, variant: string): { trips: number; people: number; incidents: number; amb: string; crashes?: string } {
   const out = execFileSync("npx", ["tsx", "scripts/sim/level.ts", id, variant], { encoding: "utf8" });
   return JSON.parse(out.trim().split("\n").pop()!);
 }
@@ -74,4 +74,16 @@ test("Transit Street: bus lanes move more people than leaving the street alone",
   const none = runLevel("transit-street", "none");
   const bus = runLevel("transit-street", "bus");
   assert.ok(bus.people > none.people * 1.08, `${bus.people} vs ${none.people}`);
+});
+
+test("Pile-Up: a fixed city clears every crash within the three-star time, an untouched one does not", () => {
+  const parse = (r: { crashes?: string }) => {
+    const m = /^(\d+)\/(\d+) avg (\d+|-)s$/.exec(r.crashes ?? "");
+    return { cleared: Number(m?.[1] ?? 0), happened: Number(m?.[2] ?? 0), avg: m?.[3] === "-" ? Infinity : Number(m?.[3] ?? Infinity) };
+  };
+  const fixed = parse(runLevel("pile-up", "fixed") as { crashes?: string });
+  assert.equal(fixed.cleared, 4);
+  assert.ok(fixed.avg <= 75, `fixed city averaged ${fixed.avg}s`);
+  const none = parse(runLevel("pile-up", "none") as { crashes?: string });
+  assert.ok(none.cleared < 4 || none.avg > 75, "an untouched city should not earn three stars");
 });

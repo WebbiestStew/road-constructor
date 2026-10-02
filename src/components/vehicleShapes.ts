@@ -22,6 +22,7 @@ export const KIND_DIMS: Record<VehicleKind, { w: number; h: number; l: number }>
   bus: { w: 8.2, h: 10.6, l: 40 },
   bike: { w: 1.6, h: 6.8, l: 6 },
   ambulance: { w: 7, h: 8.4, l: 21 },
+  police: { w: 6.3, h: 5.6, l: 16 },
 };
 
 interface PartOptions {
@@ -138,7 +139,23 @@ function bike(): THREE.BufferGeometry {
   ]);
 }
 
-const DETAILED: Record<VehicleKind, () => THREE.BufferGeometry> = { car, truck, bus, bike, ambulance };
+/** A patrol car: a sedan with a black-and-white body (the white doors come from the paint tint) and a lightbar. */
+function police(): THREE.BufferGeometry {
+  return merge([
+    box(6.3, 2.1, 16, 0, 1.0, 0, PAINT),
+    box(5.6, 1.7, 8.6, 0, 3.1, -1.0, GLASS, { top: PAINT, taper: 0.1 }),
+    box(6.35, 0.5, 1.2, 0, 1.0, 7.8, DARK),
+    box(6.35, 0.5, 1.2, 0, 1.0, -7.8, DARK),
+    box(2.4, 0.6, 1.2, 1.2, 4.8, -1.0, [1, 0.2, 0.2]),
+    box(2.4, 0.6, 1.2, -1.2, 4.8, -1.0, [0.2, 0.35, 1]),
+    wheel(1.15, 0.9, 3.0, 5.0),
+    wheel(1.15, 0.9, -3.0, 5.0),
+    wheel(1.15, 0.9, 3.0, -4.9),
+    wheel(1.15, 0.9, -3.0, -4.9),
+  ]);
+}
+
+const DETAILED: Record<VehicleKind, () => THREE.BufferGeometry> = { car, truck, bus, bike, ambulance, police };
 
 /** Plain box fallback: same footprint and height, no detail. */
 function plain(kind: VehicleKind): THREE.BufferGeometry {

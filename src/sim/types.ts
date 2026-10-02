@@ -57,6 +57,8 @@ export type ScriptedEvent =
   | { atS: number; kind: "breakdown"; durationS: number }
   /** An ambulance is dispatched from a random entry to a random destination; how fast it gets through is scored. */
   | { atS: number; kind: "ambulance" }
+  /** Two cars collide on an open stretch. They block their lane until a police car actually reaches them. */
+  | { atS: number; kind: "crash" }
   /** The weather turns for `durationS` seconds (slower, more cautious drivers), then goes back to what the player set. */
   | { atS: number; kind: "weather"; weather: Exclude<Weather, "clear">; durationS: number }
   /** Every entry's demand is multiplied for `durationS` seconds, then returns to normal. */
@@ -120,11 +122,11 @@ export type ReservedLane = "bus" | "bike";
 export type Weather = "clear" | "rain" | "fog";
 
 /** The number each kind is sent as in the snapshot (see VehicleRenderer, which turns it back into a shape). */
-export const VEHICLE_KIND_CODE: Record<VehicleKind, number> = { car: 0, truck: 1, bus: 2, bike: 3, ambulance: 4 };
-export const VEHICLE_KIND_BY_CODE: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance"];
+export const VEHICLE_KIND_CODE: Record<VehicleKind, number> = { car: 0, truck: 1, bus: 2, bike: 3, ambulance: 4, police: 5 };
+export const VEHICLE_KIND_BY_CODE: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance", "police"];
 
 /** What a simulated road user is. Most are cars; the rest only appear when the level or sandbox asks for mixed traffic. */
-export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance";
+export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance" | "police";
 
 /** The editable network as plain, structured-cloneable data. */
 export interface NetworkSnapshot {
@@ -291,6 +293,8 @@ export type WorkerInMessage =
   | { type: "setTrafficMix"; bus: number; bike: number }
   /** Dispatches an ambulance now (Chaos mode, sandbox button). */
   | { type: "ambulance" }
+  /** Causes a crash now (Chaos mode). */
+  | { type: "crash" }
   /** The weather the player picked. Scripted weather events override it while they last. */
   | { type: "setWeather"; weather: Weather }
   /** Turns the 24-hour demand cycle on or off: demand follows rush hours and the clock starts at `startHour`, one day lasting `dayLengthS` sim-seconds. */
@@ -322,6 +326,16 @@ export interface EmergencyStats {
   totalIdealS: number;
   lastResponseS: number;
   lastIdealS: number;
+}
+
+/** How the run's crashes are going. Times are sim-seconds from the crash to the road being clear. */
+export interface CrashStats {
+  happened: number;
+  cleared: number;
+  /** Crashes still blocking a lane right now. */
+  open: number;
+  totalClearS: number;
+  lastClearS: number;
 }
 
 export interface ContractStatus {
@@ -364,6 +378,7 @@ export type WorkerOutMessage =
       throughputLastMinute: number;
       spawnedTotal: number;
       emergency: EmergencyStats;
+      crashes: CrashStats;
       /** The weather in effect right now (the player's choice, or a scripted storm). */
       weather: Weather;
       /** Clock hour 0-24 while the day cycle is on, else -1. */

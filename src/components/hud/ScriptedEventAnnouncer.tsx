@@ -28,7 +28,7 @@ export default function ScriptedEventAnnouncer({ runner }: { runner: UseScenario
     events.forEach((e, i) => {
       const warnKey = `${scenario.id}:${i}:warn`;
       const goKey = `${scenario.id}:${i}:go`;
-      const what = e.kind === "surge" ? "a traffic surge" : e.kind === "ambulance" ? "an ambulance call" : "a breakdown";
+      const what = e.kind === "surge" ? "a traffic surge" : e.kind === "ambulance" ? "an ambulance call" : e.kind === "crash" ? "a crash" : "a breakdown";
       if (elapsed >= e.atS - WARN_LEAD_S && elapsed < e.atS && !fired.current.has(warnKey)) {
         fired.current.add(warnKey);
         pushToast(`⚠️ Heads up: ${what} in ${WARN_LEAD_S} seconds`, "alert");
@@ -37,6 +37,7 @@ export default function ScriptedEventAnnouncer({ runner }: { runner: UseScenario
         fired.current.add(goKey);
         if (e.kind === "surge") pushToast(`🚗💨 SURGE! Demand is up ${Math.round((e.multiplier - 1) * 100)}% for ${e.durationS}s`, "alert");
         else if (e.kind === "ambulance") pushToast("🚑 Ambulance dispatched! Clear its way", "alert");
+        else if (e.kind === "crash") pushToast("💥 Crash! Two cars are blocking the road. Police are on their way", "alert");
         else pushToast("🚨 Breakdown! A car has stalled in the road", "alert");
       }
     });

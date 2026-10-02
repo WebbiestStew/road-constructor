@@ -10,8 +10,9 @@ import { pushToast } from "@/lib/toast";
  * Renders nothing.
  */
 export default function EmergencyAnnouncer({ sim }: { sim: UseTrafficSimulationReturn }) {
-  const { emergency } = sim.metrics;
+  const { emergency, crashes } = sim.metrics;
   const seen = useRef({ dispatched: 0, completed: 0 });
+  const seenCrash = useRef({ happened: 0, cleared: 0 });
 
   useEffect(() => {
     const s = seen.current;
@@ -34,6 +35,23 @@ export default function EmergencyAnnouncer({ sim }: { sim: UseTrafficSimulationR
       else pushToast(`🚑 Ambulance took ${took}s, against ${ideal}s on an empty road. Too slow`, "bad");
     }
   }, [emergency]);
+
+  useEffect(() => {
+    const s = seenCrash.current;
+    if (crashes.happened < s.happened || crashes.cleared < s.cleared) {
+      s.happened = 0;
+      s.cleared = 0;
+    }
+    // Crashes that arrive from a level's script are announced by its own announcer; these are the player-started ones.
+    if (crashes.happened > s.happened) s.happened = crashes.happened;
+    if (crashes.cleared > s.cleared) {
+      s.cleared = crashes.cleared;
+      const took = Math.round(crashes.lastClearS);
+      if (took <= 75) pushToast(`🚓 Crash cleared in ${took}s. The road is open again`, "good");
+      else if (took <= 100) pushToast(`🚓 Crash cleared in ${took}s. A little slow`, "alert");
+      else pushToast(`🚓 Crash took ${took}s to clear. Traffic made it hard for the police to reach it`, "bad");
+    }
+  }, [crashes]);
 
   return null;
 }

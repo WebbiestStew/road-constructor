@@ -9,7 +9,7 @@ const [levelId, variantArg = "none", seed = "1337"] = process.argv.slice(2);
 const variants = new Set(variantArg.split(","));
 
 function fixedNetwork(id: string): NetworkSnapshot | null {
-  if (id === "code-three" || id === "transit-street") return buildMidtown(false);
+  if (id === "code-three" || id === "transit-street" || id === "pile-up") return buildMidtown(false);
   if (id === "rainy-rush" || id === "school-run" || id === "first-shift") return buildHarborDrive(false);
   return null;
 }
@@ -61,6 +61,7 @@ async function main() {
       people: Math.round(last?.peopleMovedTotal ?? 0),
       incidents: last?.pedIncidentsTotal ?? 0,
       peds: last?.pedServedTotal ?? 0,
+      crashes: last?.crashes ? `${last.crashes.cleared}/${last.crashes.happened} avg ${last.crashes.cleared ? Math.round(last.crashes.totalClearS / last.crashes.cleared) : "-"}s` : "-",
       amb: em ? `${em.completed}/${em.dispatched} x${em.totalIdealS ? (em.totalResponseS / em.totalIdealS).toFixed(2) : "-"}` : "-",
       mph: Math.round(r.avgMph),
     })

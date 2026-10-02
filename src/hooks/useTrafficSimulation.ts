@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ContractStatus,
   Weather,
+  CrashStats,
   EmergencyStats,
   EdgePatch,
   EdgeSpec,
@@ -42,6 +43,7 @@ export interface SimMetricsState {
   pedServedTotal: number;
   pedIncidentsTotal: number;
   emergency: EmergencyStats;
+  crashes: CrashStats;
   weather: Weather;
   /** Hour of the simulated day (0-24) while the day cycle is on, else -1. */
   clockHour: number;
@@ -65,6 +67,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   pedServedTotal: 0,
   pedIncidentsTotal: 0,
   emergency: { dispatched: 0, completed: 0, waiting: 0, active: 0, totalResponseS: 0, totalIdealS: 0, lastResponseS: 0, lastIdealS: 0 },
+  crashes: { happened: 0, cleared: 0, open: 0, totalClearS: 0, lastClearS: 0 },
   weather: "clear",
   clockHour: -1,
   contracts: [],
@@ -179,6 +182,7 @@ export function useTrafficSimulation() {
             pedServedTotal: msg.pedServedTotal,
             pedIncidentsTotal: msg.pedIncidentsTotal,
             emergency: msg.emergency,
+            crashes: msg.crashes,
             weather: msg.weather,
             clockHour: msg.clockHour,
             contracts: stats.contracts,
@@ -340,6 +344,11 @@ export function useTrafficSimulation() {
     workerRef.current?.postMessage({ type: "breakdown", durationS } satisfies WorkerInMessage);
   }, []);
 
+  /** Causes a crash on an open stretch; it blocks its lane until police arrive. */
+  const triggerCrash = useCallback(() => {
+    workerRef.current?.postMessage({ type: "crash" } satisfies WorkerInMessage);
+  }, []);
+
   /** Dispatches an ambulance from a random entry to a random exit; how fast it gets through is scored. */
   const triggerAmbulance = useCallback(() => {
     workerRef.current?.postMessage({ type: "ambulance" } satisfies WorkerInMessage);
@@ -372,6 +381,7 @@ export function useTrafficSimulation() {
     resetTraffic,
     triggerBreakdown,
     triggerAmbulance,
+    triggerCrash,
   };
 }
 

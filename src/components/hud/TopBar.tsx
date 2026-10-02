@@ -317,6 +317,16 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           {!scenarioActive && (
             <button
               type="button"
+              onClick={sim.triggerCrash}
+              title="Cause a crash and see how long it takes police to clear it"
+              className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-xs font-bold text-zinc-600 transition hover:text-zinc-900"
+            >
+              💥 Crash
+            </button>
+          )}
+          {!scenarioActive && (
+            <button
+              type="button"
               onClick={() => setChaos(!chaos)}
               title="Chaos mode: random breakdowns and rush hours while traffic runs"
               className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${

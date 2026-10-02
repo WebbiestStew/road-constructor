@@ -85,6 +85,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
       pedServedTotal: sim.metrics.pedServedTotal,
       pedIncidentsTotal: sim.metrics.pedIncidentsTotal,
       emergency: sim.metrics.emergency,
+      crashes: sim.metrics.crashes,
       gridlockPenaltyTotal: sim.metrics.gridlockPenaltyTotal,
       edgeTrafficStats: sim.metrics.edgeTrafficStats,
       gridlockMarkers: sim.metrics.gridlockMarkers,

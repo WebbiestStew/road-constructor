@@ -1,6 +1,6 @@
 import { buildHarborDrive, buildInterchangeSite, buildMidtown } from "./cities";
 import { REAL_CITY_DATA } from "./real";
-import type { EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
+import type { CrashStats, EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "./grade";
@@ -39,6 +39,7 @@ export interface ScenarioEvalContext {
   pedServedTotal: number;
   pedIncidentsTotal: number;
   emergency: EmergencyStats;
+  crashes: CrashStats;
   gridlockPenaltyTotal: number;
   edgeTrafficStats: EdgeTrafficStats[];
   gridlockMarkers: [number, number, number][];
@@ -602,12 +603,33 @@ function createSafeStreetsEvaluator(par: number, durationS: number): () => Scena
   };
 }
 
+/** Pile-Up: how fast crashes are cleared. Police have to drive to the wreck, so a jammed road makes a crash last longer. */
+function createCrashEvaluator(calls: number, durationS: number): () => ScenarioEvaluator {
+  return () => (ctx) => {
+    const c = ctx.crashes;
+    const avg = c.cleared > 0 ? c.totalClearS / c.cleared : 0;
+    const allDone = c.cleared >= calls;
+    const stars: 1 | 2 | 3 = allDone && avg <= 75 ? 3 : c.cleared >= calls - 1 && avg <= 100 ? 2 : 1;
+    return {
+      won: ctx.elapsedS >= durationS - 0.5,
+      stars,
+      label: `💥 ${c.cleared}/${calls} cleared${c.cleared > 0 ? ` · avg ${Math.round(avg)}s` : ""}`,
+      detailLines: [
+        `Crashes cleared: ${c.cleared} of ${calls}`,
+        c.cleared > 0 ? `Average time to clear: ${Math.round(avg)}s` : "None cleared yet",
+        "3 stars: all cleared, averaging 75 s or less. 2 stars: all but one, 100 s or less",
+      ],
+    };
+  };
+}
+
 /** A copy of a network with people wanting to cross the named roads (both directions of each). */
 function withJaywalkers(net: NetworkSnapshot, roadIds: string[]): NetworkSnapshot {
   const ids = new Set(roadIds.flatMap((id) => [`${id}f`, `${id}b`]));
   return { nodes: net.nodes, edges: net.edges.map((e) => (ids.has(e.id) ? { ...e, jaywalkers: true } : e)) };
 }
 
+const PILE_UP_EVENTS: ScriptedEvent[] = [40, 100, 160, 220].map((atS) => ({ atS, kind: "crash" as const }));
 const CODE_THREE_EVENTS: ScriptedEvent[] = [30, 85, 140, 195].map((atS) => ({ atS, kind: "ambulance" as const }));
 const RAINY_EVENTS: ScriptedEvent[] = [
   { atS: 30, kind: "weather", weather: "rain", durationS: 220 },
@@ -1492,6 +1514,20 @@ export const SCENARIOS: ScenarioDef[] = [
     targetAvgSpeedMph: 20,
     scriptedEvents: CODE_THREE_EVENTS,
     createEvaluator: createEmergencyEvaluator(4, CODE_THREE_RATIO, 300),
+  },
+  {
+    id: "pile-up",
+    kind: "manage",
+    name: "Pile-Up",
+    tagline: "Four crashes. Police can only clear what they can reach.",
+    briefing:
+      "Midtown, with four crashes at fixed moments. Each blocks a lane until a police car drives there and clears it, so the worse the traffic, the longer the wreck stays. Get the avenues moving so the police can get through, and keep the queues from locking up. Scored on how fast the crashes are cleared.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 330,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: PILE_UP_EVENTS,
+    createEvaluator: createCrashEvaluator(4, 330),
   },
   {
     id: "rainy-rush",
