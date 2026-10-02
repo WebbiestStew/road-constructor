@@ -45,6 +45,14 @@ npm run build && npm start
 Next.js 16 / React 19 / React Three Fiber / Zustand / Tailwind 4. No backend; progress is stored in
 `localStorage`, and layouts can be shared as a link (`#data=…`, compressed and schema-validated with zod).
 
+## Daily leaderboard (optional)
+
+The daily challenge can post scores to a public board. It needs a Redis database; the free Upstash tier is plenty.
+Set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (see `.env.example`), or add Upstash from the Vercel
+Marketplace, which sets the equivalent `KV_REST_API_*` variables. Without them the game works exactly the same and
+just hides the board. Scores are reported by the browser, so it is an honour-system board: the API checks that a
+score is plausible and rate-limits posting, but cannot prove a run was played.
+
 ## How it works
 
 ```

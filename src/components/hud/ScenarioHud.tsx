@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SCENARIOS, buildDailyScenario, getScenarioById, type ScenarioDef } from "@/sim/scenarios";
-import { useDaily } from "@/lib/daily";
+import { DAILY_PREFIX, SCENARIOS, buildDailyScenario, getScenarioById, type ScenarioDef } from "@/sim/scenarios";
+import { dateKey, useDaily } from "@/lib/daily";
 import { isSandboxBudget, useEditorStore } from "@/state/editorStore";
 import { totalStars, useProgress } from "@/lib/progress";
 import { pushToast } from "@/lib/toast";
@@ -10,6 +10,7 @@ import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import { playFailTone, playVictoryFanfare } from "@/lib/sound";
 import { IconClock, IconFlag, IconStar } from "./icons";
 import PlaceSearch from "./PlaceSearch";
+import DailyBoard from "./DailyBoard";
 import type { NetworkSnapshot } from "@/sim/types";
 
 function formatMMSS(seconds: number): string {
@@ -172,6 +173,7 @@ function StarRow({ stars }: { stars: 0 | 1 | 2 | 3 }) {
 
 function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
   const { scenario, results } = runner;
+  const { bestToday } = useDaily();
 
   useEffect(() => {
     if (!results) return;
@@ -182,6 +184,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
   if (!scenario || !results) return null;
 
   const isLast = SCENARIOS[SCENARIOS.length - 1].id === scenario.id;
+  const isDaily = scenario.id.startsWith(DAILY_PREFIX);
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
@@ -212,6 +215,8 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
             <StatRow label="Budget left" value={`$${Math.max(0, results.budgetRemaining).toLocaleString()}`} />
           )}
         </div>
+
+        {isDaily && results.won && <DailyBoard day={scenario.id.slice(DAILY_PREFIX.length) || dateKey()} score={bestToday} />}
 
         <div className="mt-2 flex w-full gap-2">
           <button
