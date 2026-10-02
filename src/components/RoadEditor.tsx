@@ -33,6 +33,7 @@ function RoadEditor() {
   const twoWay = useEditorStore((s) => s.twoWay);
   const selection = useEditorStore((s) => s.selection);
   const budget = useEditorStore((s) => s.budget);
+  const realCity = useEditorStore((s) => s.realCityActive);
 
   const [hoverPoint, setHoverPoint] = useState<[number, number, number] | null>(null);
   const lastWhooshPointRef = useRef<[number, number, number] | null>(null);
@@ -73,6 +74,9 @@ function RoadEditor() {
       shiftTaperEnd: false,
       startsAtJunction: false,
       endsAtJunction: false,
+      taperStartFt: 0,
+      taperEndFt: 0,
+      sunken: false,
       reservedLane: null,
       crosswalk: false,
       jaywalkers: false,
@@ -153,6 +157,9 @@ function RoadEditor() {
   if (mode !== "build") return null;
 
   const elevationFt = ELEVATION_BY_ID[selectedElevationId].elevationFt;
+  // The junction discs are for clicking when building. On a real city's hundreds of junctions they just clutter the
+  // view, so they appear only while drawing or deleting there.
+  const showMarkers = tool === "draw" || tool === "delete" || (!realCity && tool === "inspect");
 
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
     if (tool !== "draw" || !drawFromNodeId) return;
@@ -253,7 +260,7 @@ function RoadEditor() {
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {nodes.map((node) => {
+      {showMarkers && nodes.map((node) => {
         const isDrawSource = node.id === drawFromNodeId;
         const isSelected = selection?.kind === "node" && selection.id === node.id;
         const isSignal = node.control?.type === "signal";

@@ -166,6 +166,14 @@ export interface Edge3D {
   /** This end meets three or more roads (a merge, diverge or crossing), where barriers and edge lines must stop short. */
   startsAtJunction: boolean;
   endsAtJunction: boolean;
+  /**
+   * Length (ft) over which this road narrows toward its centreline at an end where it merges into, or splits off,
+   * a bigger road, so a ramp's pavement ends as a taper inside the main road instead of a blunt slab. 0 = no taper.
+   */
+  taperStartFt: number;
+  taperEndFt: number;
+  /** A real underpass or cutting (dips well below ground). Everything else is kept at or above the grass. */
+  sunken: boolean;
   /** Distances (ft, rounded) along a bridge where a pier would stand on a road below it and is left out. Set by the renderer. */
   pierSkips?: Set<number>;
   /** Which kind of road user the rightmost lane is reserved for, or null. */

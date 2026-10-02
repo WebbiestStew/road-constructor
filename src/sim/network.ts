@@ -62,6 +62,67 @@ function singleOtherNeighbor(
   return null;
 }
 
+/** Roads closer than this in heading at a node are one road joining or leaving another, not a crossing. */
+const MERGE_MAX_ANGLE_RAD = (50 * Math.PI) / 180;
+const MERGE_TAPER_FT = 70;
+
+/**
+ * Finds the ends where one road merges into, or splits off, another along the same line of travel (a ramp joining a
+ * freeway, an exit leaving it) and marks the smaller road to taper there. The biggest road of the group (highest class,
+ * then most lanes, then straightest) keeps its full width; the others narrow toward their centreline over the last
+ * stretch, so the pavement blends in rather than ending in a blunt slab lying across the main road's lanes.
+ */
+function classifyMergesAndDiverges(edges: Edge3D[]): void {
+  const tIn = new THREE.Vector3();
+  const tOut = new THREE.Vector3();
+  const angleBetween = (a: THREE.Vector3, b: THREE.Vector3) => {
+    const la = Math.hypot(a.x, a.z) || 1;
+    const lb = Math.hypot(b.x, b.z) || 1;
+    return Math.acos(Math.max(-1, Math.min(1, (a.x * b.x + a.z * b.z) / (la * lb))));
+  };
+  const inByNode = new Map<string, Edge3D[]>();
+  const outByNode = new Map<string, Edge3D[]>();
+  for (const e of edges) {
+    if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
+    (inByNode.get(e.toNodeId) ?? inByNode.set(e.toNodeId, []).get(e.toNodeId)!).push(e);
+    (outByNode.get(e.fromNodeId) ?? outByNode.set(e.fromNodeId, []).get(e.fromNodeId)!).push(e);
+  }
+  const rank = (e: Edge3D, ang: number) => e.priority * 1000 + e.lanes * 10 - ang;
+  const taperFor = (e: Edge3D) => Math.min(MERGE_TAPER_FT, e.length * 0.4);
+
+  for (const [nodeId, ins] of inByNode) {
+    const outs = outByNode.get(nodeId) ?? [];
+    // Merges: several roads arriving along one road's line of travel.
+    for (const out of outs) {
+      out.spline.getTangentAt(0, tOut);
+      const group: { e: Edge3D; ang: number }[] = [];
+      for (const i of ins) {
+        if (i.fromNodeId === out.toNodeId) continue; // the road coming back the other way
+        i.spline.getTangentAt(1, tIn);
+        const ang = angleBetween(tIn, tOut);
+        if (ang <= MERGE_MAX_ANGLE_RAD) group.push({ e: i, ang });
+      }
+      if (group.length < 2) continue;
+      const main = group.reduce((a, b) => (rank(b.e, b.ang) > rank(a.e, a.ang) ? b : a));
+      for (const g of group) if (g.e !== main.e) g.e.taperEndFt = Math.max(g.e.taperEndFt, taperFor(g.e));
+    }
+    // Diverges: one road arriving and several leaving along its line of travel.
+    for (const i of ins) {
+      i.spline.getTangentAt(1, tIn);
+      const group: { e: Edge3D; ang: number }[] = [];
+      for (const o of outs) {
+        if (o.toNodeId === i.fromNodeId) continue;
+        o.spline.getTangentAt(0, tOut);
+        const ang = angleBetween(tIn, tOut);
+        if (ang <= MERGE_MAX_ANGLE_RAD) group.push({ e: o, ang });
+      }
+      if (group.length < 2) continue;
+      const main = group.reduce((a, b) => (rank(b.e, b.ang) > rank(a.e, a.ang) ? b : a));
+      for (const g of group) if (g.e !== main.e) g.e.taperStartFt = Math.max(g.e.taperStartFt, taperFor(g.e));
+    }
+  }
+}
+
 /** Shared heading at the two ends of a road, so a road that continues into another leaves exactly as it arrived. */
 interface JointTangents {
   start?: THREE.Vector3;
@@ -256,6 +317,18 @@ function buildSpline(
   return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
 }
 
+/** How far below ground a road must dip to count as an underpass or cutting rather than a rounding overshoot at the base of a ramp. */
+const SUNKEN_DEPTH_FT = 1.5;
+
+function isSunken(curve: THREE.CatmullRomCurve3): boolean {
+  const p = new THREE.Vector3();
+  for (let i = 0; i <= ELEVATION_SAMPLE_STEPS; i++) {
+    curve.getPointAt(i / ELEVATION_SAMPLE_STEPS, p);
+    if (p.y < -SUNKEN_DEPTH_FT) return true;
+  }
+  return false;
+}
+
 function computeIsElevated(curve: THREE.CatmullRomCurve3): boolean {
   const p = new THREE.Vector3();
   for (let i = 0; i <= ELEVATION_SAMPLE_STEPS; i++) {
@@ -307,6 +380,9 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       shiftTaperEnd: false,
       startsAtJunction: (neighborsByNode.get(spec.fromNodeId)?.size ?? 0) >= 3,
       endsAtJunction: (neighborsByNode.get(spec.toNodeId)?.size ?? 0) >= 3,
+      taperStartFt: 0,
+      taperEndFt: 0,
+      sunken: isSunken(spline),
       reservedLane: spec.lanes >= 2 ? (spec.reservedLane ?? null) : null,
       crosswalk: spec.crosswalk ?? false,
       jaywalkers: spec.jaywalkers ?? false,
@@ -336,6 +412,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
     edge.shiftTaperStart = (neighborsByNode.get(edge.fromNodeId)?.size ?? 0) !== 2;
     edge.shiftTaperEnd = (neighborsByNode.get(edge.toNodeId)?.size ?? 0) !== 2;
   }
+
+  classifyMergesAndDiverges(edges);
 
   for (const edge of edges) {
     edge.nextEdgeIds = edges

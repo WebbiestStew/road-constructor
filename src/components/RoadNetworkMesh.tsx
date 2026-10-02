@@ -25,6 +25,7 @@ import {
   buildTaperedPierColumn,
   computePierDescriptors,
   indexPierConflicts,
+  visibleRanges,
   type PierDescriptor,
 } from "./roadGeometry";
 
@@ -119,12 +120,9 @@ function edgeMinY(edge: Edge3D): number {
   return minY;
 }
 
-/** A dip this deep puts the pavement under the grass, so the road needs its flat overlay and must not grow barriers. */
-const SUNKEN_DEPTH_FT = -1;
-
 function buildBelowGradeOverlay(edge: Edge3D): THREE.BufferGeometry | null {
-  // Spline smoothing can dip a few inches below zero at the base of a ramp; anything deeper is a real cutting or underpass.
-  if (edgeMinY(edge) > SUNKEN_DEPTH_FT) return null;
+  // Only a real cutting or underpass (see Edge3D.sunken) needs the flat overlay; a few tenths of a foot of overshoot does not.
+  if (!edge.sunken) return null;
   const geo = buildAsphaltRibbon(edge, SHOULDER_FT + 2, 0);
   const pos = geo.getAttribute("position");
   for (let i = 0; i < pos.count; i++) {
@@ -148,6 +146,11 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     edge.length > ft * 3 ? [edge.startsAtJunction ? ft / edge.length : 0, edge.endsAtJunction ? 1 - ft / edge.length : 1] : [0, 1];
   const [barT0, barT1] = trimRange(JUNCTION_TRIM_FT);
   const [lineT0, lineT1] = trimRange(EDGE_LINE_TRIM_FT);
+  /** The stretches of a line or barrier at this offset that are not lying on another road's pavement, within [lo, hi]. */
+  const runs = (offset: number, lo: number, hi: number): [number, number][] =>
+    visibleRanges(edge, offset)
+      .map(([a, b]) => [Math.max(a, lo), Math.min(b, hi)] as [number, number])
+      .filter(([a, b]) => (b - a) * edge.length > 12);
 
   const stripes: StripeSpec[] = [];
   // On an undivided two-way road this carriageway's left edge is the road's centerline: a double yellow line
@@ -157,9 +160,13 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth - CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
     stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth + CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
   } else {
-    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5, 0.03, lineT0, lineT1), color: WHITE_COLOR });
+    for (const [a, b] of runs(-pavedHalfWidth, lineT0, lineT1)) {
+      stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5, 0.03, a, b), color: WHITE_COLOR });
+    }
   }
-  stripes.push({ geometry: buildSolidStripe(edge, pavedHalfWidth, 0.5, 0.03, lineT0, lineT1), color: WHITE_COLOR });
+  for (const [a, b] of runs(pavedHalfWidth, lineT0, lineT1)) {
+    stripes.push({ geometry: buildSolidStripe(edge, pavedHalfWidth, 0.5, 0.03, a, b), color: WHITE_COLOR });
+  }
 
   for (let k = 1; k < edge.lanes; k++) {
     const offset = (k - edge.lanes / 2) * edge.laneWidthFt;
@@ -176,8 +183,11 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   }
 
   if (edge.isFreeway) {
-    stripes.push({ geometry: buildSolidStripe(edge, -(pavedHalfWidth + 1.0), 0.4, 0.03, barT0, barT1), color: YELLOW_COLOR });
-    stripes.push({ geometry: buildSolidStripe(edge, -(pavedHalfWidth + 1.7), 0.4, 0.03, barT0, barT1), color: YELLOW_COLOR });
+    for (const off of [-(pavedHalfWidth + 1.0), -(pavedHalfWidth + 1.7)]) {
+      for (const [a, b] of runs(off, barT0, barT1)) {
+        stripes.push({ geometry: buildSolidStripe(edge, off, 0.4, 0.03, a, b), color: YELLOW_COLOR });
+      }
+    }
   }
 
   if (edge.length > 90) {
@@ -193,21 +203,23 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const barriers: THREE.BufferGeometry[] = [];
   const parapets: THREE.BufferGeometry[] = [];
   // A road that runs below the grass has no barriers to show: their tops would poke through as stray lines.
-  const sunken = edgeMinY(edge) <= SUNKEN_DEPTH_FT;
+  const sunken = edge.sunken;
   if (sunken) {
     // nothing
   } else if (edge.isFreeway) {
     // Freeways keep the heavier F-shape Jersey barrier at grade or elevated.
     const barrierOffset = pavedHalfWidth + SHOULDER_FT - 0.5;
-    barriers.push(buildJerseyBarrier(edge, -barrierOffset, barT0, barT1));
-    barriers.push(buildJerseyBarrier(edge, barrierOffset, barT0, barT1));
+    for (const off of [-barrierOffset, barrierOffset]) {
+      for (const [a, b] of runs(off, barT0, barT1)) barriers.push(buildJerseyBarrier(edge, off, a, b));
+    }
   } else if (edge.isElevated && !edge.isRoundaboutRing) {
     // A raised non-freeway road (a Tier-1+ street/avenue) still has a real
     // fall hazard along its exposed edge — give it a plainer concrete
     // parapet rail instead of leaving the drop-off unguarded.
     const parapetOffset = pavedHalfWidth + 0.5;
-    parapets.push(buildParapet(edge, -parapetOffset, barT0, barT1));
-    parapets.push(buildParapet(edge, parapetOffset, barT0, barT1));
+    for (const off of [-parapetOffset, parapetOffset]) {
+      for (const [a, b] of runs(off, barT0, barT1)) parapets.push(buildParapet(edge, off, a, b));
+    }
   }
 
   const markingMeshes: THREE.BufferGeometry[] = [];
@@ -885,10 +897,14 @@ export default function RoadNetworkMesh({
     for (const e of network.edges) {
       if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
       const destNode = network.nodesById.get(e.toNodeId);
-      const isJunction = (neighborsByNode.get(e.toNodeId)?.size ?? 0) >= 2;
-      if (!destNode || !isJunction) continue;
+      // A stop bar belongs at a real intersection: three or more roads meeting, and not at a freeway merge, a ramp
+      // tapering into another road, or a simple joint where a road just carries on.
+      const isIntersection = (neighborsByNode.get(e.toNodeId)?.size ?? 0) >= 3;
+      if (!destNode || !isIntersection || e.taperEndFt > 0) continue;
+      const signal = destNode.control?.type === "signal";
+      if (e.isFreeway && !signal) continue;
       stopBars.add(e.id);
-      if (destNode.control?.type === "signal") crosswalks.add(e.id);
+      if (signal) crosswalks.add(e.id);
     }
     return { stopBarEdgeIdSet: stopBars, crosswalkEdgeIdSet: crosswalks };
   }, [network]);

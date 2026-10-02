@@ -32,6 +32,22 @@ function smooth01(x: number): number {
   return c * c * (3 - 2 * c);
 }
 
+/** How narrow a tapering end gets (fraction of full width) right at the node. */
+const TAPER_MIN_SCALE = 0.1;
+
+/** 1 along most of a road; shrinks toward the node over a merge or diverge taper so pavement and lanes close in together. */
+export function widthScaleAt(edge: Edge3D, distanceFt: number): number {
+  let k = 1;
+  if (edge.taperStartFt > 0 && distanceFt < edge.taperStartFt) {
+    k = Math.min(k, TAPER_MIN_SCALE + (1 - TAPER_MIN_SCALE) * smooth01(distanceFt / edge.taperStartFt));
+  }
+  const toEnd = edge.length - distanceFt;
+  if (edge.taperEndFt > 0 && toEnd < edge.taperEndFt) {
+    k = Math.min(k, TAPER_MIN_SCALE + (1 - TAPER_MIN_SCALE) * smooth01(toEnd / edge.taperEndFt));
+  }
+  return k;
+}
+
 /** Where a vehicle at `distanceFt` along the edge really sits laterally: the carriageway shift, eased to zero into junctions. */
 export function lateralShiftAt(edge: Edge3D, distanceFt: number): number {
   if (edge.lateralShiftFt === 0) return 0;
@@ -95,8 +111,10 @@ export function laneCenterPointAt(
   const ct = clampT(t);
   edgePointAt(edge, ct, out);
   edgeRightVectorAt(edge, ct, tangentScratch, rightScratch);
-  const offset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) + lateralShiftAt(edge, ct * edge.length);
+  const d = ct * edge.length;
+  const offset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) * widthScaleAt(edge, d) + lateralShiftAt(edge, d);
   out.addScaledVector(rightScratch, offset);
+  if (!edge.sunken && out.y < 0) out.y = 0;
   return out;
 }
 

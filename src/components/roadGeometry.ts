@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { edgePointAt, edgeRightVectorAt, laneOffsetFt } from "@/sim/laneGeometry";
+import { edgePointAt, edgeRightVectorAt, laneOffsetFt, widthScaleAt } from "@/sim/laneGeometry";
 import type { Edge3D } from "@/sim/types";
 
 /** A single point of a 2D cross-section profile: x = lateral (along the road's "right" vector), y = vertical (world up). */
@@ -14,6 +14,12 @@ function clamp01(t: number): number {
 
 function segmentsForLength(lengthFt: number, minSegments = 16, ftPerSegment = 35): number {
   return Math.max(minSegments, Math.round(lengthFt / ftPerSegment));
+}
+
+/** Slices for a stretch of an edge: the usual count for a whole road, proportionally fewer for a short run of it. */
+function rangeSegments(edge: Edge3D, tStart: number, tEnd: number): number {
+  const range = tEnd - tStart;
+  return Math.max(range >= 0.999 ? 12 : 2, Math.round((edge.length * range) / 35));
 }
 
 /**
@@ -38,14 +44,25 @@ export function sweepProfileAlongCurve(
   const pointScratch = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
 
+  // A taper is only a few dozen feet long, so give a tapering road enough slices to draw it smoothly.
+  if (edge.taperStartFt > 0 || edge.taperEndFt > 0) segments = Math.max(segments, Math.round(((tEnd - tStart) * edge.length) / 8));
+
   const rings: THREE.Vector3[][] = [];
   for (let i = 0; i <= segments; i++) {
     const t = tStart + (tEnd - tStart) * (i / segments);
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
-    const railOrigin = pointScratch.clone().addScaledVector(rightScratch, centerlineOffsetFt + edge.lateralShiftFt);
+    // Where this road tapers into another, everything across its width (pavement, lines, barriers) closes toward
+    // the centreline together; the carriageway's own shift to its side of the road does not.
+    const k = widthScaleAt(edge, t * edge.length);
+    // A spline can overshoot a few tenths of a foot below ground at the base of a ramp; that would bury the pavement
+    // and leave only barrier tops showing, so a road that isn't a real underpass is held at the surface.
+    const surfaceLift = !edge.sunken && pointScratch.y < 0 ? -pointScratch.y : 0;
     const ring: THREE.Vector3[] = profile.map((p) =>
-      railOrigin.clone().addScaledVector(rightScratch, p.x).addScaledVector(up, p.y)
+      pointScratch
+        .clone()
+        .addScaledVector(rightScratch, edge.lateralShiftFt + (centerlineOffsetFt + p.x) * k)
+        .addScaledVector(up, p.y + surfaceLift)
     );
     rings.push(ring);
   }
@@ -113,7 +130,7 @@ export function buildSolidStripe(
     { x: -widthFt / 2, y: verticalOffsetFt },
     { x: widthFt / 2, y: verticalOffsetFt },
   ];
-  return sweepProfileAlongCurve(edge, lateralOffsetFt, profile, segmentsForLength(edge.length, 12), false, tStart, tEnd);
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, profile, rangeSegments(edge, tStart, tEnd), false, tStart, tEnd);
 }
 
 /** Builds a solid stop-bar stripe spanning the full paved width, a short distance before the edge's end — the painted line drivers hold behind at a junction. */
@@ -182,7 +199,7 @@ export function buildDashedStripe(
     const t = clamp01(distFt / totalLen);
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
-    out.copy(pointScratch).addScaledVector(rightScratch, lateral + edge.lateralShiftFt).addScaledVector(up, verticalOffsetFt);
+    out.copy(pointScratch).addScaledVector(rightScratch, lateral * widthScaleAt(edge, t * totalLen) + edge.lateralShiftFt).addScaledVector(up, verticalOffsetFt);
   };
 
   const positions: number[] = [];
@@ -236,7 +253,7 @@ export function buildLaneArrows(
   const rightScratch = new THREE.Vector3();
   const pointScratch = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
-  const laneOffset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) + edge.lateralShiftFt;
+  const laneOffsetBase = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt);
   // A turn lane's arrowhead kinks sideways toward its exit direction instead
   // of pointing straight ahead, so drivers read it the way real lane-use
   // signage reads: straight arrow for through lanes, angled for turn lanes.
@@ -254,7 +271,7 @@ export function buildLaneArrows(
 
     const center = pointScratch
       .clone()
-      .addScaledVector(rightScratch, laneOffset)
+      .addScaledVector(rightScratch, laneOffsetBase * widthScaleAt(edge, s + lengthFt / 2) + edge.lateralShiftFt)
       .addScaledVector(up, verticalOffsetFt);
 
     const tip = center
@@ -291,7 +308,7 @@ const JERSEY_PROFILE: ProfilePoint[] = [
 ];
 
 export function buildJerseyBarrier(edge: Edge3D, lateralOffsetFt: number, tStart = 0, tEnd = 1): THREE.BufferGeometry {
-  return sweepProfileAlongCurve(edge, lateralOffsetFt, JERSEY_PROFILE, segmentsForLength(edge.length, 12), true, tStart, tEnd);
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, JERSEY_PROFILE, rangeSegments(edge, tStart, tEnd), true, tStart, tEnd);
 }
 
 /** Simpler bridge parapet cross-section (in feet) — a plain vertical concrete rail, shorter than a full Jersey barrier, for non-freeway elevated roads. */
@@ -303,7 +320,7 @@ const PARAPET_PROFILE: ProfilePoint[] = [
 ];
 
 export function buildParapet(edge: Edge3D, lateralOffsetFt: number, tStart = 0, tEnd = 1): THREE.BufferGeometry {
-  return sweepProfileAlongCurve(edge, lateralOffsetFt, PARAPET_PROFILE, segmentsForLength(edge.length, 12), true, tStart, tEnd);
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, PARAPET_PROFILE, rangeSegments(edge, tStart, tEnd), true, tStart, tEnd);
 }
 
 /**
@@ -425,6 +442,67 @@ export function computePierDescriptors(edge: Edge3D, intervalFt = 90, ignoreSkip
   return descriptors;
 }
 
+/** One sample of a road's pavement, for asking "is this point on someone else's road?". */
+interface PavementSample {
+  x: number;
+  z: number;
+  y: number;
+  /** Half the paved width at this point (narrowing along a taper). */
+  paved: number;
+  edge: Edge3D;
+}
+let pavementGrid = new Map<string, PavementSample[]>();
+
+/**
+ * The stretches (as [t0, t1] fractions of the edge) of a painted line or barrier at `lateralOffsetFt` that do NOT lie
+ * on another road's pavement at about the same height. A ramp's edge line and barrier run on into the freeway lanes
+ * it merges with; those stretches are dropped so only the part that really borders its own road is drawn.
+ */
+export function visibleRanges(edge: Edge3D, lateralOffsetFt: number): [number, number][] {
+  if (pavementGrid.size === 0 || edge.length < 30) return [[0, 1]];
+  const step = 10;
+  const n = Math.max(2, Math.ceil(edge.length / step));
+  const tangent = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  const ranges: [number, number][] = [];
+  let runStart = -1;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    edgePointAt(edge, t, p);
+    edgeRightVectorAt(edge, t, tangent, right);
+    const lateral = edge.lateralShiftFt + lateralOffsetFt * widthScaleAt(edge, t * edge.length);
+    const x = p.x + right.x * lateral;
+    const z = p.z + right.z * lateral;
+    const cx = Math.floor(x / PIER_GRID_CELL_FT);
+    const cz = Math.floor(z / PIER_GRID_CELL_FT);
+    let blocked = false;
+    for (let dx = -1; dx <= 1 && !blocked; dx++) {
+      for (let dz = -1; dz <= 1 && !blocked; dz++) {
+        const arr = pavementGrid.get(`${cx + dx},${cz + dz}`);
+        if (!arr) continue;
+        for (const s of arr) {
+          const o = s.edge;
+          if (o === edge || Math.abs(s.y - p.y) > 3.5) continue;
+          // the opposite carriageway of the same road borders this one; it is not "another road"
+          if (o.fromNodeId === edge.toNodeId && o.toNodeId === edge.fromNodeId) continue;
+          if (Math.hypot(s.x - x, s.z - z) < s.paved - 0.8) {
+            blocked = true;
+            break;
+          }
+        }
+      }
+    }
+    if (!blocked && runStart < 0) runStart = t;
+    if ((blocked || i === n) && runStart >= 0) {
+      const end = blocked ? (i - 1) / n : t;
+      if ((end - runStart) * edge.length > 15) ranges.push([runStart, end]);
+      runStart = -1;
+    }
+  }
+  return ranges;
+}
+
 /** Cell size (ft) of the lookup grid used to find roads running underneath a bridge. */
 const PIER_GRID_CELL_FT = 60;
 const PIER_SAMPLE_STEP_FT = 24;
@@ -440,6 +518,7 @@ export function indexPierConflicts(edges: Edge3D[]): void {
   const right = new THREE.Vector3();
   const p = new THREE.Vector3();
   const cellOf = (v: number) => Math.floor(v / PIER_GRID_CELL_FT);
+  pavementGrid = new Map();
 
   for (const e of edges) {
     const half = (e.lanes * e.laneWidthFt) / 2 + 5;
@@ -454,6 +533,12 @@ export function indexPierConflicts(edges: Edge3D[]): void {
       const sample = { x, z, y: p.y, half, edge: e };
       if (arr) arr.push(sample);
       else grid.set(key, [sample]);
+      // The same point, for the line/barrier overlap test: paved half-width only (narrowing along a taper).
+      const paved = ((e.lanes * e.laneWidthFt) / 2) * widthScaleAt(e, d);
+      const pave: PavementSample = { x, z, y: p.y, paved, edge: e };
+      const parr = pavementGrid.get(key);
+      if (parr) parr.push(pave);
+      else pavementGrid.set(key, [pave]);
     }
   }
 
