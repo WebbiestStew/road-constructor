@@ -31,6 +31,7 @@ import SoundScape from "./hud/SoundScape";
 import EconomyTicker from "./hud/EconomyTicker";
 import GuidedTour from "./hud/GuidedTour";
 import SettingsMenu from "./hud/SettingsMenu";
+import KeyboardRoads from "./KeyboardRoads";
 import DayClock from "./hud/DayClock";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import { usePhotoMode } from "@/lib/photoMode";
@@ -84,6 +85,7 @@ export default function SimControls({
       <DayClock sim={sim} />
       <PlaceCredit />
       <SettingsMenu />
+      <KeyboardRoads />
       <SoundScape sim={sim} />
       <EconomyTicker sim={sim} />
       <Tutorial />

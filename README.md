@@ -26,6 +26,14 @@ speed limits and signal timing, while every car drives for real. Play it on desk
   clearance checks.
 - **Photo mode, share links, night/dusk lighting, ride-along camera, heatmap.** Save a shareable result card from any
   finished level, or record an 8-second clip of your city from photo mode.
+- **Shaped vehicles and real scenery.** Cars, semis, buses, ambulances, police cars and cyclists each have their own
+  model; real cities are surrounded by their actual buildings from OpenStreetMap.
+- **Crashes, transit and challenges.** Crashes block a lane until police actually drive there. Draw your own bus lines.
+  Turn any city into a "beat my score" link a friend can open, with no server.
+- **Settings menu.** Graphics presets plus advanced toggles (shadows, bloom, vehicles, scenery, resolution, frame cap,
+  car limit), sound, and accessibility options (reduce motion, larger text, bold markers). Keyboard play: N steps through
+  roads for the lane, speed, street and bus-line tools; messages are announced to screen readers.
+- **A cinematic tour.** One click hides the UI and flies around the city.
 - **A guided first level.** *First Shift* walks a new player through the three core tools and ticks each step off by
   what they actually changed.
 - **Runs cool on weak machines.** Three quality tiers, an adaptive frame limiter that idles when nothing moves,
