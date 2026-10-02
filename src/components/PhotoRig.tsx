@@ -5,6 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { registerCapture, registerGrabber, usePhotoMode } from "@/lib/photoMode";
+import { getPrefs } from "@/lib/prefs";
 
 const ORBIT_RAD_PER_S = 0.07;
 const _offset = new THREE.Vector3();
@@ -70,7 +71,7 @@ export default function PhotoRig() {
   }, [advance, gl]);
 
   useFrame((_, delta) => {
-    if (!photo || !controls) return;
+    if (!photo || !controls || getPrefs().reducedMotion) return;
     _offset.copy(camera.position).sub(controls.target);
     _offset.applyAxisAngle(camera.up, ORBIT_RAD_PER_S * Math.min(delta, 0.1));
     camera.position.copy(controls.target).add(_offset);

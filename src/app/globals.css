@@ -298,3 +298,27 @@ input[type="range"]::-moz-range-thumb {
     opacity: 1;
   }
 }
+
+/* Player-chosen reduced motion (settings menu): the same calm as the OS setting, on request. */
+:root[data-reduced-motion] .animate-pop,
+:root[data-reduced-motion] .animate-idle-pulse,
+:root[data-reduced-motion] .animate-warn-pulse,
+:root[data-reduced-motion] .hover-wiggle,
+:root[data-reduced-motion] .fade-up {
+  animation: none !important;
+  opacity: 1;
+}
+
+/* Heavier markers for jams and incidents, so they read without colour. */
+:root[data-bold-markers] .animate-warn-pulse {
+  outline: 3px solid #1f1235;
+  outline-offset: 2px;
+  transform-origin: center;
+  scale: 1.35;
+}
+
+/* Keyboard users can see where they are. */
+:focus-visible {
+  outline: 3px solid #7c3aed;
+  outline-offset: 2px;
+}

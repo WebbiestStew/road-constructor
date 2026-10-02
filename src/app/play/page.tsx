@@ -29,7 +29,7 @@ import KeyboardPan from "@/components/KeyboardPan";
 import PhotoRig from "@/components/PhotoRig";
 import { togglePhotoMode, usePhotoMode } from "@/lib/photoMode";
 import PerfGuard from "@/components/PerfGuard";
-import { QUALITY_SETTINGS, useHydrated, useQuality } from "@/lib/quality";
+import { useGraphics, useHydrated, useQuality } from "@/lib/quality";
 import FrameLimiter from "@/components/FrameLimiter";
 import { useWebGLSupported } from "@/lib/webgl";
 
@@ -166,7 +166,7 @@ export default function Play() {
   }, [baseSky, weather]);
   const canvasCursor = mode === "build" && CROSSHAIR_TOOLS.has(tool) ? "crosshair" : "default";
   const quality = useQuality();
-  const q = QUALITY_SETTINGS[quality];
+  const q = useGraphics();
   const webglSupported = useWebGLSupported();
   const hydrated = useHydrated();
   const photoMode = usePhotoMode();
@@ -216,7 +216,7 @@ export default function Play() {
       <ShareLinkLoader />
       <Canvas
         // gl options are fixed at creation, so switching quality remounts the canvas.
-        key={quality}
+        key={`${q.antialias}-${q.shadows}`}
         shadows={q.shadows}
         dpr={q.dpr}
         // We drive frames ourselves (FrameLimiter): capped rate, and a trickle while idle.

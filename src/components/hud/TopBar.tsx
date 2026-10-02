@@ -7,7 +7,8 @@ import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { downloadNetworkFile, encodePayloadToShareHash, parseNetworkFile } from "@/state/persistence";
 import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
 import { requestOpenTutorial } from "@/lib/tutorial";
-import { nextQuality, setQuality, useQuality } from "@/lib/quality";
+import { useQuality } from "@/lib/quality";
+import { setSettingsOpen } from "@/lib/settingsMenu";
 import { setChaos, useChaos } from "@/lib/chaos";
 import { togglePhotoMode } from "@/lib/photoMode";
 import { useCompact } from "@/lib/compact";
@@ -390,11 +391,13 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       </button>
       <button
         type="button"
-        onClick={() => setQuality(nextQuality(quality))}
-        title={`Graphics: ${quality === "high" ? "High" : quality === "medium" ? "Medium" : "Low"} — click to change. Lower settings run cooler and quieter.`}
-        className="flex h-7 items-center justify-center rounded-full px-2 text-[10px] font-extrabold uppercase text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+        onClick={() => setSettingsOpen(true)}
+        title="Settings: graphics, sound and accessibility"
+        aria-label="Settings"
+        className="flex h-7 items-center justify-center gap-1 rounded-full px-2 text-sm text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
       >
-        {quality === "high" ? "HQ" : quality === "medium" ? "MQ" : "LQ"}
+        ⚙️
+        <span className="text-[10px] font-extrabold uppercase">{quality === "high" ? "High" : quality === "medium" ? "Med" : "Low"}</span>
       </button>
       {FEEDBACK_URL && (
         <a

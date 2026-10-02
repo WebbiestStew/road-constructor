@@ -17,7 +17,7 @@ import { ftpsToMph } from "@/sim/types";
 import type { EdgeTrafficStats } from "@/sim/los";
 import { useEditorStore } from "@/state/editorStore";
 import { getScenarioById } from "@/sim/scenarios";
-import { VEHICLE_CAP, useQuality } from "@/lib/quality";
+import { useGraphics } from "@/lib/quality";
 
 export interface VehicleSnapshot {
   matrices: Float32Array;
@@ -114,7 +114,7 @@ export function useTrafficSimulation() {
   const [speedMultiplier, setSpeedMultiplierState] = useState(1);
   const [ready, setReady] = useState(false);
   const [workerFailed, setWorkerFailed] = useState(false);
-  const quality = useQuality();
+  const graphics = useGraphics();
 
   const mode = useEditorStore((s) => s.mode);
   const simEpoch = useEditorStore((s) => s.simEpoch);
@@ -208,8 +208,8 @@ export function useTrafficSimulation() {
   }, []);
 
   useEffect(() => {
-    workerRef.current?.postMessage({ type: "setMaxVehicles", value: VEHICLE_CAP[quality] } satisfies WorkerInMessage);
-  }, [quality]);
+    workerRef.current?.postMessage({ type: "setMaxVehicles", value: graphics.vehicleCap } satisfies WorkerInMessage);
+  }, [graphics.vehicleCap]);
 
   const manualWeather = useEditorStore((s) => s.weather);
   useEffect(() => {

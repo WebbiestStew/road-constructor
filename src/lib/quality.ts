@@ -25,13 +25,54 @@ export interface QualitySettings {
   postprocessing: boolean;
   /** Scales decorative scenery counts (trees) on the landing hero. */
   scenery: number;
+  /** Cars drawn as shaped vehicles (cabin, wheels, lights) rather than plain boxes. */
+  detailedVehicles: boolean;
+  /** Buildings, water and other set dressing around real cities and the landing hero. */
+  setDressing: boolean;
+  /** Rain streaks over the screen in wet weather (the tint and fog stay either way). */
+  weatherEffects: boolean;
 }
 
+/** Everything the player can switch individually in the settings menu. */
+export type GraphicsOptionKey = "shadows" | "postprocessing" | "antialias" | "detailedVehicles" | "setDressing" | "weatherEffects" | "maxFps" | "dprMax" | "vehicleCap";
+
 export const QUALITY_SETTINGS: Record<Quality, QualitySettings> = {
-  high: { vehicleCap: 1500, maxFps: 60, dpr: [1, 1.5], shadows: true, shadowMapSize: 2048, antialias: true, postprocessing: true, scenery: 1 },
-  medium: { vehicleCap: 1000, maxFps: 45, dpr: [1, 1], shadows: true, shadowMapSize: 1024, antialias: true, postprocessing: false, scenery: 0.6 },
-  low: { vehicleCap: 500, maxFps: 30, dpr: [1, 1], shadows: false, shadowMapSize: 512, antialias: false, postprocessing: false, scenery: 0.3 },
+  high: { vehicleCap: 1500, maxFps: 60, dpr: [1, 1.5], shadows: true, shadowMapSize: 2048, antialias: true, postprocessing: true, scenery: 1, detailedVehicles: true, setDressing: true, weatherEffects: true },
+  medium: { vehicleCap: 1000, maxFps: 45, dpr: [1, 1], shadows: true, shadowMapSize: 1024, antialias: true, postprocessing: false, scenery: 0.6, detailedVehicles: true, setDressing: true, weatherEffects: true },
+  low: { vehicleCap: 500, maxFps: 30, dpr: [1, 1], shadows: false, shadowMapSize: 512, antialias: false, postprocessing: false, scenery: 0.3, detailedVehicles: false, setDressing: false, weatherEffects: false },
 };
+
+/** The player's individual overrides on top of the chosen preset; only keys they changed are present. */
+export interface GraphicsOverrides {
+  shadows?: boolean;
+  postprocessing?: boolean;
+  antialias?: boolean;
+  detailedVehicles?: boolean;
+  setDressing?: boolean;
+  weatherEffects?: boolean;
+  maxFps?: number;
+  /** Highest pixel ratio the canvas may use. */
+  dprMax?: number;
+  vehicleCap?: number;
+}
+
+/** A preset with the player's overrides applied: what the renderer and the simulation actually use. */
+export function resolveSettings(base: Quality, o: GraphicsOverrides): QualitySettings {
+  const b = QUALITY_SETTINGS[base];
+  const dprMax = o.dprMax ?? b.dpr[1];
+  return {
+    ...b,
+    ...(o.shadows !== undefined ? { shadows: o.shadows } : {}),
+    ...(o.postprocessing !== undefined ? { postprocessing: o.postprocessing } : {}),
+    ...(o.antialias !== undefined ? { antialias: o.antialias } : {}),
+    ...(o.detailedVehicles !== undefined ? { detailedVehicles: o.detailedVehicles } : {}),
+    ...(o.setDressing !== undefined ? { setDressing: o.setDressing } : {}),
+    ...(o.weatherEffects !== undefined ? { weatherEffects: o.weatherEffects } : {}),
+    maxFps: o.maxFps ?? b.maxFps,
+    vehicleCap: o.vehicleCap ?? b.vehicleCap,
+    dpr: [Math.min(1, dprMax), dprMax],
+  };
+}
 
 export const VEHICLE_CAP: Record<Quality, number> = {
   high: QUALITY_SETTINGS.high.vehicleCap,
@@ -82,6 +123,9 @@ function detectDefaultQuality(): Quality {
   return "medium";
 }
 
+const OVERRIDES_KEY = "road-constructor:graphics-overrides:v1";
+let overrides: GraphicsOverrides = {};
+let resolved: QualitySettings = QUALITY_SETTINGS.high;
 let quality: Quality = "high";
 let autoDowngraded = false;
 let hydrated = false;
@@ -91,19 +135,64 @@ function emit() {
   listeners.forEach((l) => l());
 }
 
+function recompute() {
+  resolved = resolveSettings(quality, overrides);
+}
+
 function hydrate() {
   if (hydrated || typeof window === "undefined") return;
   hydrated = true;
   try {
+    const raw = window.localStorage.getItem(OVERRIDES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const clean: Record<string, boolean | number> = {};
+      for (const [k, v] of Object.entries(parsed)) if (typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) clean[k] = v;
+      overrides = clean as GraphicsOverrides;
+    }
+  } catch {
+    overrides = {};
+  }
+  try {
     const saved = window.localStorage.getItem(QUALITY_KEY);
     if (saved === "high" || saved === "medium" || saved === "low") {
       quality = saved;
+      recompute();
       return;
     }
   } catch {
     // storage unavailable — fall through to detection
   }
   quality = detectDefaultQuality();
+  recompute();
+}
+
+function saveOverrides() {
+  try {
+    window.localStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides));
+  } catch {
+    // ignore
+  }
+}
+
+/** Switches one option on top of the current preset. Setting it back to the preset's own value drops the override. */
+export function setGraphicsOption<K extends keyof GraphicsOverrides>(key: K, value: GraphicsOverrides[K]): void {
+  hydrate();
+  const base = resolveSettings(quality, {});
+  const baseValue = key === "dprMax" ? base.dpr[1] : (base as unknown as Record<string, unknown>)[key as string];
+  const next = { ...overrides };
+  if (value === baseValue || value === undefined) delete next[key];
+  else next[key] = value;
+  overrides = next;
+  saveOverrides();
+  recompute();
+  emit();
+}
+
+/** The player's individual overrides, for showing which options differ from the preset. */
+export function getGraphicsOverrides(): GraphicsOverrides {
+  hydrate();
+  return overrides;
 }
 
 export function setQuality(value: Quality, auto = false): void {
@@ -112,6 +201,12 @@ export function setQuality(value: Quality, auto = false): void {
   const wasLower = ORDER.indexOf(value) > ORDER.indexOf(quality);
   quality = value;
   autoDowngraded = auto && wasLower;
+  // Picking a preset means "use that preset": it replaces any individual tweaks.
+  if (!auto) {
+    overrides = {};
+    saveOverrides();
+  }
+  recompute();
   try {
     window.localStorage.setItem(QUALITY_KEY, value);
   } catch {
@@ -145,6 +240,24 @@ export function useQuality(): Quality {
     },
     () => SERVER_QUALITY
   );
+}
+
+/** The settings in force: the chosen preset with the player's own tweaks applied. Stable between changes. */
+export function useGraphics(): QualitySettings {
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      hydrate();
+      return resolved;
+    },
+    () => QUALITY_SETTINGS.high
+  );
+}
+
+/** Same as `useGraphics`, for code outside React (e.g. the vehicle cap sent to the worker). */
+export function currentGraphics(): QualitySettings {
+  hydrate();
+  return resolved;
 }
 
 export function useAutoDowngraded(): boolean {

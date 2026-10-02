@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { playSuccessChime } from "@/lib/sound";
+import { getPrefs } from "@/lib/prefs";
 
 interface Piece {
   id: number;
@@ -34,7 +35,8 @@ export default function Confetti({ sim }: { sim: UseTrafficSimulationReturn }) {
     if (newlyMet.length === 0) return;
     for (const id of newlyMet) metContractsRef.current.add(id);
 
-    const burst: Piece[] = Array.from({ length: 26 }, () => ({
+    // Reduced motion: keep the chime, skip the falling pieces.
+    const burst: Piece[] = Array.from({ length: getPrefs().reducedMotion ? 0 : 26 }, () => ({
       id: pieceSeq++,
       left: 30 + Math.random() * 40,
       color: COLORS[Math.floor(Math.random() * COLORS.length)],

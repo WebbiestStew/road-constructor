@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { NetworkSnapshot, WorkerInMessage, WorkerOutMessage } from "@/sim/types";
 import { ftpsToMph } from "@/sim/types";
-import { VEHICLE_CAP, useQuality } from "@/lib/quality";
+import { useGraphics } from "@/lib/quality";
 import type { VehicleSnapshot } from "./useTrafficSimulation";
 
 export interface DemoStats {
@@ -29,7 +29,7 @@ export function useDemoTraffic(network: NetworkSnapshot, active: boolean, visibl
   const lastStatsRef = useRef(0);
   const [stats, setStats] = useState<DemoStats>({ cars: 0, avgSpeedMph: 0, throughputPerMinute: 0 });
   const [failed, setFailed] = useState(false);
-  const quality = useQuality();
+  const graphics = useGraphics();
 
   useEffect(() => {
     const worker = new Worker(new URL("../sim/worker.ts", import.meta.url), { type: "module" });
@@ -84,8 +84,8 @@ export function useDemoTraffic(network: NetworkSnapshot, active: boolean, visibl
   }, []);
 
   useEffect(() => {
-    workerRef.current?.postMessage({ type: "setMaxVehicles", value: VEHICLE_CAP[quality] } satisfies WorkerInMessage);
-  }, [quality]);
+    workerRef.current?.postMessage({ type: "setMaxVehicles", value: graphics.vehicleCap } satisfies WorkerInMessage);
+  }, [graphics.vehicleCap]);
 
   // Load the full city into the sim once traffic is due to open.
   useEffect(() => {

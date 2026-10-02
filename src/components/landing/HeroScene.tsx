@@ -8,7 +8,7 @@ import Terrain from "@/components/Terrain";
 import VehicleRenderer from "@/components/VehicleRenderer";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { getDemoCity, getDemoRoadSegments } from "@/sim/demoCity";
-import { QUALITY_SETTINGS, useQuality } from "@/lib/quality";
+import { useGraphics } from "@/lib/quality";
 import FrameLimiter from "@/components/FrameLimiter";
 
 const HAZE = "#ffd9e6";
@@ -79,14 +79,13 @@ export default function HeroScene({
   visible: boolean;
   reducedMotion: boolean;
 }) {
-  const quality = useQuality();
-  const q = QUALITY_SETTINGS[quality];
+  const q = useGraphics();
   const city = useMemo(() => getDemoCity(), []);
   const avoid = useMemo(() => getDemoRoadSegments(), []);
 
   return (
     <Canvas
-      key={quality}
+      key={`${q.antialias}`}
       shadows={q.shadows}
       dpr={q.dpr}
       // FrameLimiter drives frames: capped rate, and no rendering at all while the hero is off-screen.

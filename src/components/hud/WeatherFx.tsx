@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
-import { useQuality } from "@/lib/quality";
+import { useGraphics, useQuality } from "@/lib/quality";
+import { useReducedMotion } from "@/lib/prefs";
 
 const TARGET_FPS = 24;
 
@@ -14,16 +15,17 @@ const TARGET_FPS = 24;
 export default function WeatherFx({ sim }: { sim: UseTrafficSimulationReturn }) {
   const weather = sim.metrics.weather;
   const quality = useQuality();
+  const graphics = useGraphics();
+  const prefReduced = useReducedMotion();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (weather !== "rain") return;
+    if (weather !== "rain" || !graphics.weatherEffects) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx2d = canvas.getContext("2d");
     if (!ctx2d) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) return;
+    if (prefReduced || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     const count = quality === "high" ? 260 : quality === "medium" ? 170 : 100;
     let w = 0;
@@ -69,7 +71,7 @@ export default function WeatherFx({ sim }: { sim: UseTrafficSimulationReturn }) 
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
     };
-  }, [weather, quality]);
+  }, [weather, quality, graphics.weatherEffects, prefReduced]);
 
   if (weather === "clear") return null;
   return (
@@ -77,7 +79,7 @@ export default function WeatherFx({ sim }: { sim: UseTrafficSimulationReturn }) 
       className="pointer-events-none absolute inset-0 z-[5]"
       style={{ background: weather === "rain" ? "rgba(52, 70, 96, 0.28)" : "rgba(235, 240, 245, 0.42)" }}
     >
-      {weather === "rain" && <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />}
+      {weather === "rain" && graphics.weatherEffects && !prefReduced && <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { assembleNetwork, assembleNetworkCached, planTexasTurnaround, type Texas
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
 import { useEditorStore } from "@/state/editorStore";
+import { getPrefs } from "@/lib/prefs";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio, NetworkSnapshot, NodeSpec } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import { IconWarning } from "./hud/icons";
@@ -550,7 +551,7 @@ const EdgeGroup = memo(function EdgeGroup({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   // animateIn is captured once, at mount: later changes to it must not retrigger roads that already exist.
-  const animateAtMount = useRef(animateIn);
+  const animateAtMount = useRef(animateIn && !getPrefs().reducedMotion);
   const bornAt = useRef<number | null>(null);
   const centerXZ = useRef<[number, number]>([0, 0]);
   useLayoutEffect(() => {
