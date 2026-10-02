@@ -9,6 +9,7 @@ import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolati
 import { ROAD_CLASSES } from "@/sim/roadClasses";
 import { useEditorStore } from "@/state/editorStore";
 import { getPrefs } from "@/lib/prefs";
+import { usePhotoMode } from "@/lib/photoMode";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio, NetworkSnapshot, NodeSpec } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import { IconWarning } from "./hud/icons";
@@ -794,6 +795,7 @@ export default function RoadNetworkMesh({
   const tool = useEditorStore((s) => s.tool);
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const hideClearanceWarnings = useEditorStore((s) => s.realCityActive);
+  const photo = usePhotoMode();
   const nodes = networkOverride?.nodes ?? storeNodes;
   const edges = networkOverride?.edges ?? storeEdges;
   const decorative = networkOverride !== undefined;
@@ -928,7 +930,7 @@ export default function RoadNetworkMesh({
 
   return (
     <group>
-      {!decorative &&
+      {!decorative && !photo &&
         network.edges
           .filter((edge) => edge.zone && badgeIndexByEdgeId.get(edge.id) !== undefined)
           .map((edge) => (

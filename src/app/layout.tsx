@@ -31,12 +31,19 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "Road Constructor (Beta) — Traffic Engineering Sandbox",
   applicationName: "Road Constructor",
+  keywords: ["traffic game", "traffic simulation", "city builder", "road builder", "OpenStreetMap", "browser game", "free game"],
+  authors: [{ name: "Diego Villarreal" }],
+  alternates: { canonical: "/" },
   openGraph: {
     title: "Road Constructor (Beta)",
-    description: "The city is built. The traffic is a mess. Make it flow.",
+    description: "The city is built. The traffic is a mess. Make it flow. A free 3D traffic game with real cities.",
     type: "website",
+    siteName: "Road Constructor",
+    locale: "en_US",
+    url: "/",
   },
-  twitter: { card: "summary_large_image" },
+  twitter: { card: "summary_large_image", title: "Road Constructor (Beta)", description: "The city is built. The traffic is a mess. Make it flow." },
+  appleWebApp: { capable: true, title: "Road Constructor", statusBarStyle: "black-translucent" },
   description:
     "A 3D traffic-management sandbox. The city is built; fix the gridlock with lane arrows, speed limits and signal timing while every car drives for real (IDM + MOBIL models, Three.js).",
 };
