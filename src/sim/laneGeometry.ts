@@ -33,7 +33,7 @@ function smooth01(x: number): number {
 }
 
 /** How narrow a tapering end gets (fraction of full width) right at the node. */
-const TAPER_MIN_SCALE = 0.1;
+const TAPER_MIN_SCALE = 0.4;
 
 /** 1 along most of a road; shrinks toward the node over a merge or diverge taper so pavement and lanes close in together. */
 export function widthScaleAt(edge: Edge3D, distanceFt: number): number {

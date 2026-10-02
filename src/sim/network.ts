@@ -64,7 +64,7 @@ function singleOtherNeighbor(
 
 /** Roads closer than this in heading at a node are one road joining or leaving another, not a crossing. */
 const MERGE_MAX_ANGLE_RAD = (50 * Math.PI) / 180;
-const MERGE_TAPER_FT = 70;
+const MERGE_TAPER_FT = 220;
 
 /**
  * Finds the ends where one road merges into, or splits off, another along the same line of travel (a ramp joining a
@@ -88,7 +88,7 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
     (outByNode.get(e.fromNodeId) ?? outByNode.set(e.fromNodeId, []).get(e.fromNodeId)!).push(e);
   }
   const rank = (e: Edge3D, ang: number) => e.priority * 1000 + e.lanes * 10 - ang;
-  const taperFor = (e: Edge3D) => Math.min(MERGE_TAPER_FT, e.length * 0.4);
+  const taperFor = (e: Edge3D) => Math.min(MERGE_TAPER_FT, e.length * 0.55);
 
   for (const [nodeId, ins] of inByNode) {
     const outs = outByNode.get(nodeId) ?? [];
