@@ -221,6 +221,10 @@ interface EditorState {
    */
   hydrateAutosave: () => void;
 
+  /** Name of the real-world place loaded with "Load any place", for the map credit; null otherwise. */
+  placeName: string | null;
+  /** Opens a real place's roads (from OpenStreetMap) as an open sandbox: unlimited money, nothing locked. */
+  startPlace: (network: NetworkSnapshot, name: string) => void;
   /** The weather the player chose in free play (scripted storms in a level override it). */
   weather: Weather;
   setWeather: (w: Weather) => void;
@@ -1335,6 +1339,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeScenarioId: null,
   buildLocked: false,
   realCityActive: false,
+  placeName: null,
+  startPlace: (network, name) =>
+    set((s) => ({
+      nodes: network.nodes,
+      edges: network.edges,
+      nodesById: new Map(network.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(network.edges.map((e) => [e.id, e])),
+      budget: SANDBOX_BUDGET,
+      nextNodeSeq: 1,
+      nextEdgeSeq: 1,
+      selection: null,
+      drawFromNodeId: null,
+      mode: "build",
+      tool: "inspect",
+      buildLocked: false,
+      realCityActive: true,
+      activeScenarioId: null,
+      trafficMix: MIXED_MIX,
+      weather: "clear",
+      dayCycle: false,
+      placeName: name,
+      simEpoch: s.simEpoch + 1,
+      pendingCameraFit: {
+        centerX: 0,
+        centerZ: 0,
+        radiusFt: 1.2 * network.nodes.reduce((r, n) => Math.max(r, Math.abs(n.position[0]), Math.abs(n.position[2])), 0),
+      },
+      past: [],
+      future: [],
+    })),
   weather: "clear",
   setWeather: (w) => set({ weather: w }),
   dayCycle: false,
@@ -1359,6 +1393,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tool: scenario.kind === "manage" ? "inspect" : get().tool,
       buildLocked: scenario.kind === "manage",
       realCityActive: scenario.real === true,
+      placeName: null,
       trafficMix: scenario.trafficMix ?? CLASSIC_MIX,
       weather: "clear",
       dayCycle: false,
@@ -1377,7 +1412,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, trafficMix: CLASSIC_MIX }),
+  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, placeName: null, trafficMix: CLASSIC_MIX }),
   enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, budget: SANDBOX_BUDGET }),
   startSandbox: () => {
     get().clearNetwork();
@@ -1385,6 +1420,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       activeScenarioId: null,
       buildLocked: false,
       realCityActive: false,
+      placeName: null,
       trafficMix: MIXED_MIX,
       budget: SANDBOX_BUDGET,
       mode: "build",

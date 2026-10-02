@@ -9,6 +9,8 @@ import { pushToast } from "@/lib/toast";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import { playFailTone, playVictoryFanfare } from "@/lib/sound";
 import { IconClock, IconFlag, IconStar } from "./icons";
+import PlaceSearch from "./PlaceSearch";
+import type { NetworkSnapshot } from "@/sim/types";
 
 function formatMMSS(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -87,8 +89,10 @@ function ScenarioPicker({
   hasActiveScenario,
   onFreeBuild,
   onSandbox,
+  onPlace,
 }: {
   onSandbox: () => void;
+  onPlace: (network: NetworkSnapshot, name: string) => void;
   onStart: (id: string) => void;
   onClose: () => void;
   hasActiveScenario: boolean;
@@ -110,6 +114,7 @@ function ScenarioPicker({
 
         <DailyCard onStart={onStart} />
         <SandboxCard onSandbox={onSandbox} />
+        <PlaceSearch onPlace={onPlace} />
         <h3 className="text-[10.5px] font-extrabold uppercase tracking-wide text-emerald-600">
           Traffic Manager — the city is built, fix the flow
         </h3>
@@ -264,8 +269,8 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
 }
 
 /** First-visit menu over an empty map: pick a pre-built city to manage, or start from scratch. */
-function StartMenu({ onStart, onSandbox }: { onStart: (id: string) => void; onSandbox: () => void }) {
-  const cities = SCENARIOS.filter((s) => s.kind === "manage" && !s.scriptedEvents);
+function StartMenu({ onStart, onSandbox, onPlace }: { onStart: (id: string) => void; onSandbox: () => void; onPlace: (network: NetworkSnapshot, name: string) => void }) {
+  const cities = SCENARIOS.filter((s) => s.id === "midtown" || s.id === "harbor-drive");
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
       <div className="hud-panel flex max-h-[90vh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-2xl p-6">
@@ -296,6 +301,7 @@ function StartMenu({ onStart, onSandbox }: { onStart: (id: string) => void; onSa
           <span className="font-display text-base font-extrabold uppercase text-[#3b2410]">♾️ Sandbox</span>
           <span className="text-xs font-bold text-[#3b2410]/80">Build your own roads with no money limit</span>
         </button>
+        <PlaceSearch onPlace={onPlace} />
       </div>
     </div>
   );
@@ -306,6 +312,7 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
   const [startDismissed, setStartDismissed] = useState(false);
   const isEmptyMap = useEditorStore((s) => s.nodes.length === 0);
   const startSandbox = useEditorStore((s) => s.startSandbox);
+  const startPlace = useEditorStore((s) => s.startPlace);
   const starTotal = totalStars(useProgress());
   const inSandbox = useEditorStore((s) => isSandboxBudget(s.budget));
   const { scenario } = runner;
@@ -355,6 +362,10 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
             const def = getScenarioById(id);
             if (def) runner.startScenario(def);
           }}
+          onPlace={(network, name) => {
+            startPlace(network, name);
+            setStartDismissed(true);
+          }}
           onSandbox={() => {
             startSandbox();
             setStartDismissed(true);
@@ -373,6 +384,10 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
           onClose={() => setPickerOpen(false)}
           onFreeBuild={() => {
             runner.exitToFreeBuild();
+            setPickerOpen(false);
+          }}
+          onPlace={(network, name) => {
+            startPlace(network, name);
             setPickerOpen(false);
           }}
           onSandbox={() => {

@@ -26,6 +26,7 @@ import ScriptedEventAnnouncer from "./hud/ScriptedEventAnnouncer";
 import CoachBar from "./hud/CoachBar";
 import EmergencyAnnouncer from "./hud/EmergencyAnnouncer";
 import WeatherFx from "./hud/WeatherFx";
+import PlaceCredit from "./hud/PlaceCredit";
 import DayClock from "./hud/DayClock";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import { usePhotoMode } from "@/lib/photoMode";
@@ -76,6 +77,7 @@ export default function SimControls({
       <ScriptedEventAnnouncer runner={scenarioRunner} />
       <CoachBar />
       <DayClock sim={sim} />
+      <PlaceCredit />
       <Tutorial />
     </div>
   );
