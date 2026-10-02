@@ -105,13 +105,15 @@ export function buildSolidStripe(
   edge: Edge3D,
   lateralOffsetFt: number,
   widthFt = 0.45,
-  verticalOffsetFt = 0.03
+  verticalOffsetFt = 0.03,
+  tStart = 0,
+  tEnd = 1
 ): THREE.BufferGeometry {
   const profile: ProfilePoint[] = [
     { x: -widthFt / 2, y: verticalOffsetFt },
     { x: widthFt / 2, y: verticalOffsetFt },
   ];
-  return sweepProfileAlongCurve(edge, lateralOffsetFt, profile, segmentsForLength(edge.length, 12));
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, profile, segmentsForLength(edge.length, 12), false, tStart, tEnd);
 }
 
 /** Builds a solid stop-bar stripe spanning the full paved width, a short distance before the edge's end — the painted line drivers hold behind at a junction. */
@@ -288,8 +290,8 @@ const JERSEY_PROFILE: ProfilePoint[] = [
   { x: -0.6, y: 1.25 },
 ];
 
-export function buildJerseyBarrier(edge: Edge3D, lateralOffsetFt: number): THREE.BufferGeometry {
-  return sweepProfileAlongCurve(edge, lateralOffsetFt, JERSEY_PROFILE, segmentsForLength(edge.length, 12), true);
+export function buildJerseyBarrier(edge: Edge3D, lateralOffsetFt: number, tStart = 0, tEnd = 1): THREE.BufferGeometry {
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, JERSEY_PROFILE, segmentsForLength(edge.length, 12), true, tStart, tEnd);
 }
 
 /** Simpler bridge parapet cross-section (in feet) — a plain vertical concrete rail, shorter than a full Jersey barrier, for non-freeway elevated roads. */
@@ -300,8 +302,8 @@ const PARAPET_PROFILE: ProfilePoint[] = [
   { x: -0.5, y: 2.2 },
 ];
 
-export function buildParapet(edge: Edge3D, lateralOffsetFt: number): THREE.BufferGeometry {
-  return sweepProfileAlongCurve(edge, lateralOffsetFt, PARAPET_PROFILE, segmentsForLength(edge.length, 12), true);
+export function buildParapet(edge: Edge3D, lateralOffsetFt: number, tStart = 0, tEnd = 1): THREE.BufferGeometry {
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, PARAPET_PROFILE, segmentsForLength(edge.length, 12), true, tStart, tEnd);
 }
 
 /**
@@ -394,7 +396,7 @@ export interface PierDescriptor {
  * regular intervals along the centerline wherever the deck is raised more
  * than 2 ft above grade.
  */
-export function computePierDescriptors(edge: Edge3D, intervalFt = 90): PierDescriptor[] {
+export function computePierDescriptors(edge: Edge3D, intervalFt = 90, ignoreSkips = false): PierDescriptor[] {
   if (!edge.isElevated) return [];
 
   const tangentScratch = new THREE.Vector3();
@@ -405,6 +407,7 @@ export function computePierDescriptors(edge: Edge3D, intervalFt = 90): PierDescr
   const descriptors: PierDescriptor[] = [];
   for (let dist = intervalFt / 2; dist < edge.length; dist += intervalFt) {
     const t = clamp01(dist / edge.length);
+    if (!ignoreSkips && edge.pierSkips?.has(Math.round(dist))) continue;
     edgePointAt(edge, t, pointScratch);
     if (pointScratch.y <= 2) continue;
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
@@ -420,4 +423,67 @@ export function computePierDescriptors(edge: Edge3D, intervalFt = 90): PierDescr
     });
   }
   return descriptors;
+}
+
+/** Cell size (ft) of the lookup grid used to find roads running underneath a bridge. */
+const PIER_GRID_CELL_FT = 60;
+const PIER_SAMPLE_STEP_FT = 24;
+
+/**
+ * A bridge's piers are spaced evenly along it, which is fine over grass but puts a column in the middle of the lanes
+ * wherever the bridge crosses another road. This finds every pier whose column would stand on a lower road's pavement
+ * and marks it on the edge (as `pierSkips`) so it is not built: the deck simply spans the road, as a real flyover does.
+ */
+export function indexPierConflicts(edges: Edge3D[]): void {
+  const grid = new Map<string, { x: number; z: number; y: number; half: number; edge: Edge3D }[]>();
+  const tangent = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  const cellOf = (v: number) => Math.floor(v / PIER_GRID_CELL_FT);
+
+  for (const e of edges) {
+    const half = (e.lanes * e.laneWidthFt) / 2 + 5;
+    for (let d = 0; d <= e.length + 0.01; d += PIER_SAMPLE_STEP_FT) {
+      const t = clamp01(d / e.length);
+      edgePointAt(e, t, p);
+      edgeRightVectorAt(e, t, tangent, right);
+      const x = p.x + right.x * e.lateralShiftFt;
+      const z = p.z + right.z * e.lateralShiftFt;
+      const key = `${cellOf(x)},${cellOf(z)}`;
+      const arr = grid.get(key);
+      const sample = { x, z, y: p.y, half, edge: e };
+      if (arr) arr.push(sample);
+      else grid.set(key, [sample]);
+    }
+  }
+
+  const blockedAt = (x: number, z: number, deckY: number, self: Edge3D): boolean => {
+    const cx = cellOf(x);
+    const cz = cellOf(z);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const arr = grid.get(`${cx + dx},${cz + dz}`);
+        if (!arr) continue;
+        for (const s of arr) {
+          if (s.edge === self || s.y > deckY - 10) continue; // only roads well below the deck count
+          if (Math.hypot(s.x - x, s.z - z) < s.half + 1.5) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  for (const e of edges) {
+    e.pierSkips = undefined;
+    if (!e.isElevated) continue;
+    for (const d of computePierDescriptors(e, 90, true)) {
+      const sinY = Math.sin(d.rotationY);
+      const cosY = Math.cos(d.rotationY);
+      const deckY = d.capPosition[1] + 1.2;
+      const spots = [0, ...d.columnOffsets].map((off) => [d.capPosition[0] + sinY * off, d.capPosition[2] + cosY * off] as const);
+      if (spots.some(([x, z]) => blockedAt(x, z, deckY, e))) {
+        (e.pierSkips ??= new Set()).add(Math.round(d.distanceFt));
+      }
+    }
+  }
 }

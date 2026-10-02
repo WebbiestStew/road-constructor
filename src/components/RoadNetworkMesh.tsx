@@ -24,6 +24,7 @@ import {
   buildStopBar,
   buildTaperedPierColumn,
   computePierDescriptors,
+  indexPierConflicts,
   type PierDescriptor,
 } from "./roadGeometry";
 
@@ -107,15 +108,23 @@ const CENTERLINE_GAP_FT = 0.3;
  * barrier rails poking through). This lays a ground-level strip over just the underground stretch — the real
  * ribbon still runs below it — so the player can see where the road dives and where it surfaces.
  */
-function buildBelowGradeOverlay(edge: Edge3D): THREE.BufferGeometry | null {
+/** The lowest point of an edge's centreline. */
+function edgeMinY(edge: Edge3D): number {
   let minY = Infinity;
   const p = new THREE.Vector3();
   for (let i = 0; i <= 24; i++) {
     edge.spline.getPointAt(i / 24, p);
     minY = Math.min(minY, p.y);
   }
-  // Spline smoothing can dip a foot or two below zero at the base of a ramp; only a real cutting or tunnel gets an overlay.
-  if (minY > -4) return null;
+  return minY;
+}
+
+/** A dip this deep puts the pavement under the grass, so the road needs its flat overlay and must not grow barriers. */
+const SUNKEN_DEPTH_FT = -1;
+
+function buildBelowGradeOverlay(edge: Edge3D): THREE.BufferGeometry | null {
+  // Spline smoothing can dip a few inches below zero at the base of a ramp; anything deeper is a real cutting or underpass.
+  if (edgeMinY(edge) > SUNKEN_DEPTH_FT) return null;
   const geo = buildAsphaltRibbon(edge, SHOULDER_FT + 2, 0);
   const pos = geo.getAttribute("position");
   for (let i = 0; i < pos.count; i++) {
@@ -131,6 +140,15 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const roadClass = ROAD_CLASSES[edge.roadClassId];
   const isCenterlineEdge = isTwoWay && !edge.isRoundaboutRing && !edge.isTexasTurnaround;
 
+  // Where a road merges into, diverges from or crosses others, barriers and edge lines stop short rather than running
+  // across the lanes of the road it joins.
+  const JUNCTION_TRIM_FT = 45;
+  const EDGE_LINE_TRIM_FT = 16;
+  const trimRange = (ft: number): [number, number] =>
+    edge.length > ft * 3 ? [edge.startsAtJunction ? ft / edge.length : 0, edge.endsAtJunction ? 1 - ft / edge.length : 1] : [0, 1];
+  const [barT0, barT1] = trimRange(JUNCTION_TRIM_FT);
+  const [lineT0, lineT1] = trimRange(EDGE_LINE_TRIM_FT);
+
   const stripes: StripeSpec[] = [];
   // On an undivided two-way road this carriageway's left edge is the road's centerline: a double yellow line
   // (the opposite carriageway draws the same one from its side). Everywhere else it is a plain white edge line.
@@ -139,9 +157,9 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth - CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
     stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth + CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
   } else {
-    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5), color: WHITE_COLOR });
+    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5, 0.03, lineT0, lineT1), color: WHITE_COLOR });
   }
-  stripes.push({ geometry: buildSolidStripe(edge, pavedHalfWidth, 0.5), color: WHITE_COLOR });
+  stripes.push({ geometry: buildSolidStripe(edge, pavedHalfWidth, 0.5, 0.03, lineT0, lineT1), color: WHITE_COLOR });
 
   for (let k = 1; k < edge.lanes; k++) {
     const offset = (k - edge.lanes / 2) * edge.laneWidthFt;
@@ -158,8 +176,8 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   }
 
   if (edge.isFreeway) {
-    stripes.push({ geometry: buildSolidStripe(edge, -(pavedHalfWidth + 1.0), 0.4), color: YELLOW_COLOR });
-    stripes.push({ geometry: buildSolidStripe(edge, -(pavedHalfWidth + 1.7), 0.4), color: YELLOW_COLOR });
+    stripes.push({ geometry: buildSolidStripe(edge, -(pavedHalfWidth + 1.0), 0.4, 0.03, barT0, barT1), color: YELLOW_COLOR });
+    stripes.push({ geometry: buildSolidStripe(edge, -(pavedHalfWidth + 1.7), 0.4, 0.03, barT0, barT1), color: YELLOW_COLOR });
   }
 
   if (edge.length > 90) {
@@ -174,18 +192,22 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
 
   const barriers: THREE.BufferGeometry[] = [];
   const parapets: THREE.BufferGeometry[] = [];
-  if (edge.isFreeway) {
+  // A road that runs below the grass has no barriers to show: their tops would poke through as stray lines.
+  const sunken = edgeMinY(edge) <= SUNKEN_DEPTH_FT;
+  if (sunken) {
+    // nothing
+  } else if (edge.isFreeway) {
     // Freeways keep the heavier F-shape Jersey barrier at grade or elevated.
     const barrierOffset = pavedHalfWidth + SHOULDER_FT - 0.5;
-    barriers.push(buildJerseyBarrier(edge, -barrierOffset));
-    barriers.push(buildJerseyBarrier(edge, barrierOffset));
+    barriers.push(buildJerseyBarrier(edge, -barrierOffset, barT0, barT1));
+    barriers.push(buildJerseyBarrier(edge, barrierOffset, barT0, barT1));
   } else if (edge.isElevated && !edge.isRoundaboutRing) {
     // A raised non-freeway road (a Tier-1+ street/avenue) still has a real
     // fall hazard along its exposed edge — give it a plainer concrete
     // parapet rail instead of leaving the drop-off unguarded.
     const parapetOffset = pavedHalfWidth + 0.5;
-    parapets.push(buildParapet(edge, -parapetOffset));
-    parapets.push(buildParapet(edge, parapetOffset));
+    parapets.push(buildParapet(edge, -parapetOffset, barT0, barT1));
+    parapets.push(buildParapet(edge, parapetOffset, barT0, barT1));
   }
 
   const markingMeshes: THREE.BufferGeometry[] = [];
@@ -756,10 +778,12 @@ export default function RoadNetworkMesh({
   const edges = networkOverride?.edges ?? storeEdges;
   const decorative = networkOverride !== undefined;
 
-  const network = useMemo(
-    () => (decorative ? assembleNetwork({ nodes, edges }) : assembleNetworkCached(nodes, edges)),
-    [nodes, edges, decorative]
-  );
+  const network = useMemo(() => {
+    const assembled = decorative ? assembleNetwork({ nodes, edges }) : assembleNetworkCached(nodes, edges);
+    // Leave out the bridge piers that would stand in the lanes of a road below.
+    indexPierConflicts(assembled.edges);
+    return assembled;
+  }, [nodes, edges, decorative]);
 
   const [turnaroundHover, setTurnaroundHover] = useState<{ edgeId: string; point: THREE.Vector3 } | null>(null);
   const lastHoverPointRef = useRef<THREE.Vector3 | null>(null);

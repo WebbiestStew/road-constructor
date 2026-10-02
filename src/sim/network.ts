@@ -62,10 +62,96 @@ function singleOtherNeighbor(
   return null;
 }
 
+/** Shared heading at the two ends of a road, so a road that continues into another leaves exactly as it arrived. */
+interface JointTangents {
+  start?: THREE.Vector3;
+  end?: THREE.Vector3;
+}
+
+/** Roads that join at more than this plan angle are real turns, not one road continuing, and keep their own shape. */
+const JOINT_MAX_ANGLE_RAD = (35 * Math.PI) / 180;
+/** How far from a joint the helper control point sits, so the curve leaves along the shared heading. */
+const JOINT_HELPER_FT = 25;
+
+/**
+ * For every road with authored shape, works out the heading it should share with the road it continues into (and the
+ * road that continues into it). Without this each road ends along its own last segment, so two roads meeting at a
+ * node arrive and leave at slightly different angles and slopes: on a ramp or a bridge that reads as a kink or a dip.
+ */
+function computeJointTangents(specs: EdgeSpec[], nodesById: Map<string, NodeSpec>): Map<string, JointTangents> {
+  interface Dirs {
+    start: THREE.Vector3;
+    end: THREE.Vector3;
+  }
+  const dirs = new Map<string, Dirs>();
+  for (const e of specs) {
+    const a = nodesById.get(e.fromNodeId);
+    const b = nodesById.get(e.toNodeId);
+    if (!a || !b) continue;
+    const first = e.interiorPoints[0] ?? b.position;
+    const last = e.interiorPoints[e.interiorPoints.length - 1] ?? a.position;
+    const start = new THREE.Vector3(first[0] - a.position[0], first[1] - a.position[1], first[2] - a.position[2]);
+    const end = new THREE.Vector3(b.position[0] - last[0], b.position[1] - last[1], b.position[2] - last[2]);
+    if (start.lengthSq() < 1e-6 || end.lengthSq() < 1e-6) continue;
+    dirs.set(e.id, { start: start.normalize(), end: end.normalize() });
+  }
+
+  const planAngle = (u: THREE.Vector3, v: THREE.Vector3) => {
+    const ux = u.x, uz = u.z, vx = v.x, vz = v.z;
+    const lu = Math.hypot(ux, uz) || 1;
+    const lv = Math.hypot(vx, vz) || 1;
+    return Math.acos(Math.max(-1, Math.min(1, (ux * vx + uz * vz) / (lu * lv))));
+  };
+
+  const inByNode = new Map<string, EdgeSpec[]>();
+  const outByNode = new Map<string, EdgeSpec[]>();
+  for (const e of specs) {
+    (inByNode.get(e.toNodeId) ?? inByNode.set(e.toNodeId, []).get(e.toNodeId)!).push(e);
+    (outByNode.get(e.fromNodeId) ?? outByNode.set(e.fromNodeId, []).get(e.fromNodeId)!).push(e);
+  }
+
+  const result = new Map<string, JointTangents>();
+  const set = (id: string, which: "start" | "end", v: THREE.Vector3) => {
+    const cur = result.get(id) ?? {};
+    cur[which] = v;
+    result.set(id, cur);
+  };
+  for (const [nodeId, ins] of inByNode) {
+    const outs = outByNode.get(nodeId) ?? [];
+    const bestInFor = new Map<string, { e: EdgeSpec; ang: number }>();
+    for (const e of ins) {
+      const de = dirs.get(e.id);
+      if (!de) continue;
+      let best: { n: EdgeSpec; ang: number } | null = null;
+      for (const n of outs) {
+        if (n.toNodeId === e.fromNodeId) continue; // the road coming back the other way is not a continuation
+        const dn = dirs.get(n.id);
+        if (!dn) continue;
+        const ang = planAngle(de.end, dn.start);
+        if (!best || ang < best.ang) best = { n, ang };
+        const prev = bestInFor.get(n.id);
+        if (!prev || ang < prev.ang) bestInFor.set(n.id, { e, ang });
+      }
+      if (best && best.ang <= JOINT_MAX_ANGLE_RAD && e.interiorPoints.length > 0) {
+        const dn = dirs.get(best.n.id)!;
+        set(e.id, "end", de.end.clone().add(dn.start).normalize());
+      }
+    }
+    for (const [outId, { e, ang }] of bestInFor) {
+      if (ang > JOINT_MAX_ANGLE_RAD) continue;
+      const spec = specs.find((s) => s.id === outId);
+      if (!spec || spec.interiorPoints.length === 0) continue;
+      set(outId, "start", dirs.get(e.id)!.end.clone().add(dirs.get(outId)!.start).normalize());
+    }
+  }
+  return result;
+}
+
 function buildSpline(
   spec: EdgeSpec,
   nodesById: Map<string, NodeSpec>,
-  neighborsByNode: Map<string, Set<string>>
+  neighborsByNode: Map<string, Set<string>>,
+  joint?: JointTangents
 ): THREE.CatmullRomCurve3 {
   const fromNode = nodesById.get(spec.fromNodeId);
   const toNode = nodesById.get(spec.toNodeId);
@@ -153,6 +239,20 @@ function buildSpline(
   const points: THREE.Vector3[] = [new THREE.Vector3(...from)];
   for (const p of spec.interiorPoints) points.push(new THREE.Vector3(...p));
   points.push(new THREE.Vector3(...to));
+  // Make the ends leave along the heading shared with the neighbouring road: a helper point a short way in, on that
+  // heading, pins the curve's end tangent to it.
+  if (joint && points.length >= 3) {
+    if (joint.end) {
+      const last = points[points.length - 1];
+      const h = Math.min(JOINT_HELPER_FT, last.distanceTo(points[points.length - 2]) * 0.4);
+      points.splice(points.length - 1, 0, last.clone().addScaledVector(joint.end, -h));
+    }
+    if (joint.start) {
+      const first = points[0];
+      const h = Math.min(JOINT_HELPER_FT, first.distanceTo(points[1]) * 0.4);
+      points.splice(1, 0, first.clone().addScaledVector(joint.start, h));
+    }
+  }
   return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
 }
 
@@ -176,8 +276,9 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   const nodesById = new Map(snapshot.nodes.map((n) => [n.id, n]));
   const neighborsByNode = buildNeighborsByNode(snapshot.edges);
 
+  const jointTangents = computeJointTangents(snapshot.edges, nodesById);
   const edges: Edge3D[] = snapshot.edges.map((spec) => {
-    const spline = buildSpline(spec, nodesById, neighborsByNode);
+    const spline = buildSpline(spec, nodesById, neighborsByNode, jointTangents.get(spec.id));
     const length = spline.getLength();
     const roadClass = ROAD_CLASSES[spec.roadClassId];
     return {
@@ -204,6 +305,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       lateralShiftFt: 0,
       shiftTaperStart: false,
       shiftTaperEnd: false,
+      startsAtJunction: (neighborsByNode.get(spec.fromNodeId)?.size ?? 0) >= 3,
+      endsAtJunction: (neighborsByNode.get(spec.toNodeId)?.size ?? 0) >= 3,
       reservedLane: spec.lanes >= 2 ? (spec.reservedLane ?? null) : null,
       crosswalk: spec.crosswalk ?? false,
       jaywalkers: spec.jaywalkers ?? false,

@@ -71,6 +71,8 @@ function RoadEditor() {
       lateralShiftFt: 0,
       shiftTaperStart: false,
       shiftTaperEnd: false,
+      startsAtJunction: false,
+      endsAtJunction: false,
       reservedLane: null,
       crosswalk: false,
       jaywalkers: false,

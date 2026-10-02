@@ -247,13 +247,50 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
   // A node shared by roads at different heights sits at the lowest, so ramps meet the ground and bridges rise from it.
   const nodeY = (id: number) => {
     const hs = nodeHeights.get(id) ?? [0];
+    // A node where a tunnel meets a bridge is a data quirk (mismatched layer tags): ground level is the sane meeting point.
+    if (hs.some((h) => h > 0) && hs.some((h) => h < 0)) return 0;
     return hs.reduce((a, b) => (Math.abs(b) < Math.abs(a) ? b : a), hs[0]);
   };
+
+  // Real ramps climb gently; the raw layer heights would have them climb 26 ft or more in a couple of hundred feet,
+  // which no truck can drive. Relax the node heights so no road is steeper than the game's own 6% design maximum:
+  // a deck rises as fast as it is allowed to from wherever it meets the ground, and stays level above that.
+  const MAX_GRADE = 0.06;
+  const finalY = new Map<number, number>();
+  const links: { a: number; b: number; len: number }[] = [];
+  for (const d of drafts) {
+    const pts = d.seg.pts;
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+    if (len > 6) links.push({ a: pts[0].id, b: pts[pts.length - 1].id, len });
+  }
+  for (const l of links) {
+    finalY.set(l.a, nodeY(l.a));
+    finalY.set(l.b, nodeY(l.b));
+  }
+  for (let pass = 0; pass < 200; pass++) {
+    let changed = false;
+    for (const l of links) {
+      const reach = MAX_GRADE * l.len;
+      const ha = finalY.get(l.a)!;
+      const hb = finalY.get(l.b)!;
+      const diff = ha - hb;
+      if (Math.abs(diff) > reach) {
+        // Whichever end is further from ground level gives way: a bridge end comes down, a tunnel end comes up.
+        const moveA = Math.abs(ha) > Math.abs(hb) || (Math.abs(ha) === Math.abs(hb) && ha > hb);
+        if (moveA) finalY.set(l.a, hb + Math.sign(diff) * reach);
+        else finalY.set(l.b, ha - Math.sign(diff) * reach);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  const gradedY = (id: number) => finalY.get(id) ?? nodeY(id);
 
   const nodes = new Map<number, NodeSpec>();
   const ensureNode = (p: Pt): string => {
     const id = `n${p.id}`;
-    if (!nodes.has(p.id)) nodes.set(p.id, { id, position: [round1(p.x), nodeY(p.id), round1(p.z)] });
+    if (!nodes.has(p.id)) nodes.set(p.id, { id, position: [round1(p.x), round1(gradedY(p.id)), round1(p.z)] });
     return id;
   };
 
@@ -266,8 +303,8 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
     const b = nodePos.get(pts[pts.length - 1].id)!;
     void a;
     void b;
-    const startY = nodeY(pts[0].id);
-    const endY = nodeY(pts[pts.length - 1].id);
+    const startY = gradedY(pts[0].id);
+    const endY = gradedY(pts[pts.length - 1].id);
     const h = d.elevation.heightFt;
 
     // cumulative length along the simplified polyline
@@ -291,7 +328,6 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
       }
       shape = resampled;
     }
-    const ramp = Math.min(260, total / 2);
     const interior: [number, number, number][] = [];
     for (let i = 1; i < shape.length - 1; i++) {
       let dist = 0;
@@ -301,16 +337,28 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
         // for flat edges the interior y is simply the node height blend
         dist = 0;
       }
-      let y = 0;
+      // Along an elevated or sunken way the deck climbs from each end at the maximum grade and levels off at the
+      // way's own height, so a bridge between two ground-level nodes still rises to clear what it crosses.
+      let y: number;
       if (h !== 0) {
-        const fromStart = smoothstep(dist / ramp);
-        const fromEnd = smoothstep((total - dist) / ramp);
-        y = h - (h - startY) * (1 - fromStart) - (h - endY) * (1 - fromEnd);
-        y = h > 0 ? Math.max(0, Math.min(h, y)) : Math.min(0, Math.max(h, y));
+        const up = startY + MAX_GRADE * dist;
+        const down = endY + MAX_GRADE * (total - dist);
+        const sunkUp = startY - MAX_GRADE * dist;
+        const sunkDown = endY - MAX_GRADE * (total - dist);
+        y = h > 0 ? Math.min(h, up, down) : Math.max(h, sunkUp, sunkDown);
       } else {
         y = startY + (endY - startY) * (cum[i] / total);
       }
       interior.push([round1(shape[i].x), round1(y), round1(shape[i].z)]);
+    }
+
+    // Round off the knees where a climb meets the level deck (two passes of a 1-2-1 average on the interior heights,
+    // end points held), so the curve through them doesn't overshoot into a steeper stretch than the grade limit.
+    if (h !== 0 && interior.length >= 3) {
+      for (let pass = 0; pass < 2; pass++) {
+        const ys = interior.map((p) => p[1]);
+        for (let i = 1; i < interior.length - 1; i++) interior[i][1] = round1((ys[i - 1] + 2 * ys[i] + ys[i + 1]) / 4);
+      }
     }
 
     const fromId = ensureNode(pts[0]);

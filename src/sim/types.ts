@@ -163,6 +163,11 @@ export interface Edge3D {
   /** Vehicles drift toward the centerline over the last/first stretch of an end that meets a junction or dead end, instead of snapping sideways. */
   shiftTaperStart: boolean;
   shiftTaperEnd: boolean;
+  /** This end meets three or more roads (a merge, diverge or crossing), where barriers and edge lines must stop short. */
+  startsAtJunction: boolean;
+  endsAtJunction: boolean;
+  /** Distances (ft, rounded) along a bridge where a pier would stand on a road below it and is left out. Set by the renderer. */
+  pierSkips?: Set<number>;
   /** Which kind of road user the rightmost lane is reserved for, or null. */
   reservedLane: ReservedLane | null;
   crosswalk: boolean;

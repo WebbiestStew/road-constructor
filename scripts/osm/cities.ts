@@ -21,13 +21,13 @@ const CITY_STREETS = [...GRID, "residential", "unclassified"];
 
 export const CITIES: CityConfig[] = [
   // Downtown LA: the Four Level Interchange where US-101 meets the Harbor Freeway.
-  { key: "los-angeles", name: "Los Angeles", bbox: [34.0478, -118.2680, 34.0585, -118.2540], highways: FREEWAY, demandScale: 1 },
+  { key: "los-angeles", name: "Los Angeles", bbox: [34.0478, -118.2680, 34.0585, -118.2540], highways: FREEWAY, demandScale: 1.6 },
   // Midtown Manhattan around Times Square: one-way avenues and streets, signal after signal.
   { key: "new-york", name: "New York", bbox: [40.7545, -73.9915, 40.7620, -73.9795], highways: CITY_STREETS, demandScale: 1 },
   // Toronto's waterfront: the Gardiner Expressway and Lake Shore Boulevard east of downtown.
   { key: "toronto", name: "Toronto", bbox: [43.6395, -79.3790, 43.6500, -79.3640], highways: ARTERIAL, demandScale: 1 },
   // Houston: where I-45 meets I-10 just north of downtown, the densest knot of ramps in the city.
-  { key: "houston", name: "Houston", bbox: [29.7635, -95.3715, 29.7745, -95.3565], highways: FREEWAY, demandScale: 1 },
+  { key: "houston", name: "Houston", bbox: [29.7635, -95.3715, 29.7745, -95.3565], highways: FREEWAY, demandScale: 1.9 },
   // San Antonio: just north of downtown, where I-35, I-10 and US-281 all come together.
   { key: "san-antonio", name: "San Antonio", bbox: [29.4330, -98.4880, 29.4440, -98.4720], highways: FREEWAY, demandScale: 1 },
   // Monterrey: the Macroplaza grid and Avenida Constitución downtown.

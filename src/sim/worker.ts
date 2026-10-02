@@ -1144,8 +1144,16 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
     edgeSinThetaAt(edge, v.distanceAlongEdge),
     climbSensitivityFromWeightToPower(v.weightToPowerLbPerHp)
   );
-  return clamp(idmAccel(v.speed, gapInfo.gap, deltaV, v0, params) + gradeAccel, -20, params.a);
+  const free = idmAccel(v.speed, gapInfo.gap, deltaV, v0, params);
+  let accel = free + gradeAccel;
+  // A heavy truck on a steep climb slows to a crawl; it does not stop for good. Without a floor the grade's pull
+  // beats the engine, the truck rolls to a halt, and it blocks the lane for everyone behind it.
+  if (gradeAccel < 0 && free > 0 && v.speed <= CRAWL_SPEED_FTPS && accel < 0.4) accel = 0.4;
+  return clamp(accel, -20, params.a);
 }
+
+/** The slowest a vehicle will hold on a climb it could otherwise not manage (about 10 mph). */
+const CRAWL_SPEED_FTPS = mphToFtps(10);
 
 // ---------------------------------------------------------------------------
 // MOBIL lane changing (within the current edge only)
@@ -1855,6 +1863,19 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
   }
 };
+
+// The headless harness sets this before importing the worker to get at the live state when diagnosing jams.
+const debugSlot = (globalThis as { __simDebug?: Record<string, unknown> }).__simDebug;
+if (debugSlot) {
+  debugSlot.state = () => ({ vehicles, network, laneOccupancy, signalPhaseState, nodeApproaches, simTime });
+  debugSlot.stopFor = (v: VehicleState, edge: Edge3D) => ({
+    junction: junctionStopDistance(v, edge),
+    crossing: crossingStopDistance(v, edge),
+    busStop: busStopDistance(v, edge),
+    wrongLane: wrongLaneStopDistance(v, edge),
+    gap: findLeaderGapForVehicle(v, edge),
+  });
+}
 
 lastWallTimeMs = performance.now();
 setInterval(loopTick, LOOP_INTERVAL_MS);
