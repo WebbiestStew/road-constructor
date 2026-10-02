@@ -109,7 +109,7 @@ export default function OnboardingChecklist() {
   };
 
   return (
-    <div className="animate-pop pointer-events-auto absolute left-4 top-60 z-20 w-64 max-w-[calc(50vw-1.5rem)] lg:top-20">
+    <div className="animate-pop pointer-events-auto absolute left-4 top-60 z-20 max-md:hidden w-64 max-w-[calc(50vw-1.5rem)] lg:top-20">
       <div className="hud-panel flex flex-col gap-2.5 rounded-2xl p-3.5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-zinc-800">Quick start 🚧</span>

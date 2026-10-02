@@ -14,7 +14,7 @@ export default function ToastHost() {
   const toast = useToast();
   if (!toast) return null;
   return (
-    <div className="pointer-events-none absolute left-1/2 top-28 z-[60] -translate-x-1/2 lg:top-24">
+    <div className="pointer-events-none absolute left-1/2 top-28 z-[60] -translate-x-1/2 max-md:top-[7.5rem] lg:top-24">
       {/* keyed by id so each new toast replays its pop-in */}
       <div
         key={toast.id}

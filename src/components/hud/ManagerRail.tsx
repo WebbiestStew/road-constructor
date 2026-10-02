@@ -28,8 +28,8 @@ export default function ManagerRail() {
   }, []);
 
   return (
-    <div className="pointer-events-auto absolute bottom-24 left-4 z-20 flex flex-col items-center gap-1.5 rounded-2xl hud-panel p-1.5">
-      <span className="font-display px-1 pt-0.5 text-[8.5px] font-extrabold uppercase leading-none tracking-wider text-zinc-400">
+    <div className="pointer-events-auto absolute bottom-24 left-4 z-20 flex flex-col items-center gap-1.5 rounded-2xl hud-panel p-1.5 max-md:bottom-auto max-md:left-2 max-md:top-[3.9rem] max-md:flex-row max-md:gap-1 max-md:p-1">
+      <span className="font-display px-1 pt-0.5 max-md:hidden text-[8.5px] font-extrabold uppercase leading-none tracking-wider text-zinc-400">
         Traffic
       </span>
       {TOOLS.map((t) => {
@@ -42,11 +42,11 @@ export default function ManagerRail() {
               data-active={tool === t.id}
               aria-label={t.label}
               aria-pressed={tool === t.id}
-              className="icon-btn h-11 w-11"
+              className="icon-btn h-11 w-11 max-md:h-10 max-md:w-10"
             >
               <Icon className="h-5 w-5" />
             </button>
-            <span className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[11px] font-medium text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+            <span className="pointer-events-none max-md:hidden absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-zinc-900 px-2.5 py-1.5 text-[11px] font-medium text-white opacity-0 shadow-lg transition group-hover:opacity-100">
               <b>{t.label}</b> <kbd className="ml-1 rounded bg-white/15 px-1 text-[10px]">{t.key}</kbd>
               <span className="block text-[10px] font-normal text-white/70">{t.hint}</span>
             </span>

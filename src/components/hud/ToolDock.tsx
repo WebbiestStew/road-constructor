@@ -62,7 +62,7 @@ function RoadClassPanel() {
   const setTool = useEditorStore((s) => s.setTool);
 
   return (
-    <div className="hud-panel flex max-w-[calc(100vw-2rem)] items-stretch gap-1 overflow-x-auto rounded-2xl p-2">
+    <div className="hud-panel flex max-w-[calc(100vw-1rem)] items-stretch gap-1 overflow-x-auto rounded-2xl p-2 max-md:p-1.5">
       {ROAD_CLASS_LIST.map((cls, i) => {
         const active = tool === "draw" && selectedRoadClassId === cls.id;
         const pricePerFt = Math.round(cls.costPerFtPerLane * cls.lanesPerDirection);
@@ -133,9 +133,9 @@ function ElevationPanel() {
   const cancelDrawChain = useEditorStore((s) => s.cancelDrawChain);
 
   return (
-    <div className="hud-panel flex flex-col gap-2 rounded-2xl p-2.5">
-      <span className="text-center text-[9.5px] font-bold uppercase tracking-wider text-zinc-400">Elevation</span>
-      <div className="flex items-stretch gap-1">
+    <div className="hud-panel flex flex-col gap-2 rounded-2xl p-2.5 max-md:gap-1 max-md:p-1.5">
+      <span className="text-center text-[9.5px] max-md:hidden font-bold uppercase tracking-wider text-zinc-400">Elevation</span>
+      <div className="flex items-stretch gap-1 max-md:justify-center">
         {ELEVATION_LEVELS.map((lvl, i) => {
           const active = selectedElevationId === lvl.id;
           const belowGrade = BELOW_GRADE_IDS.has(lvl.id);
@@ -149,7 +149,7 @@ function ElevationPanel() {
                 <button
                   type="button"
                   onClick={() => setElevation(lvl.id)}
-                  className={`relative flex w-11 flex-col items-center gap-1 rounded-lg py-1.5 text-[8px] font-medium leading-none transition active:scale-95 ${
+                  className={`relative flex w-11 flex-col items-center gap-1 rounded-lg py-1.5 max-md:w-[3.1rem] text-[8px] font-medium leading-none transition active:scale-95 ${
                     active
                       ? belowGrade
                         ? "bg-gradient-to-br from-amber-700 to-amber-900 text-white shadow-sm"
@@ -178,7 +178,7 @@ function ElevationPanel() {
           );
         })}
       </div>
-      <p className="text-center text-[9.5px] font-semibold uppercase tracking-wide text-zinc-400">Q / E to step tier</p>
+      <p className="text-center text-[9.5px] font-semibold uppercase tracking-wide text-zinc-400 max-md:hidden">Q / E to step tier</p>
       <label className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-600">
         <input type="checkbox" checked={twoWay} onChange={(e) => setTwoWay(e.target.checked)} className="accent-sky-600" />
         Two-way
@@ -205,15 +205,15 @@ export default function ToolDock() {
   if (mode !== "build" || buildLocked) return null;
 
   return (
-    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center gap-2">
+    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 flex-col items-center gap-2 max-md:bottom-16">
       {(tool === "draw" || tool === "turnaround") && (
-        <div className="animate-pop flex max-w-[calc(100vw-2rem)] items-end gap-2 overflow-x-auto">
+        <div className="animate-pop flex max-w-[calc(100vw-1rem)] items-end gap-2 overflow-x-auto max-md:flex-col max-md:items-stretch max-md:overflow-visible">
           <RoadClassPanel />
           {tool === "draw" && <ElevationPanel />}
         </div>
       )}
 
-      <div className="hud-panel flex items-center gap-1.5 rounded-2xl p-1.5">
+      <div className="hud-panel flex max-w-full items-center gap-1.5 overflow-x-auto rounded-2xl p-1.5 hud-scrollbar">
         {TOOLS.map((t) => (
           <DockButton
             key={t.id}

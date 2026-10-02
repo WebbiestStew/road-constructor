@@ -323,6 +323,8 @@ export default function Play() {
               MIDDLE: THREE.MOUSE.PAN,
               RIGHT: THREE.MOUSE.ROTATE,
             }}
+            // Touch: one finger pans (taps still reach the editor), two fingers pinch-zoom and twist-rotate.
+            touches={{ ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE }}
           />
         )}
 

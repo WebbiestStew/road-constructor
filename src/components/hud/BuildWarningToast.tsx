@@ -20,7 +20,7 @@ export default function BuildWarningToast() {
   if (!buildWarning) return null;
 
   return (
-    <div className="pointer-events-none absolute top-44 left-1/2 z-30 -translate-x-1/2 lg:top-20">
+    <div className="pointer-events-none absolute top-44 left-1/2 z-30 -translate-x-1/2 max-md:top-[7.5rem] lg:top-20">
       <div className="animate-pop flex items-center gap-2 rounded-full border-2 border-amber-700/40 bg-gradient-to-br from-amber-500 to-orange-600 px-4 py-2 text-xs font-bold text-white shadow-lg">
         <IconWarning className="h-3.5 w-3.5" />
         {buildWarning}

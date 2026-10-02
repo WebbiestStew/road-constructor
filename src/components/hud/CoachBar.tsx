@@ -76,7 +76,7 @@ export default function CoachBar() {
   const finished = measured;
 
   return (
-    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-30 w-[min(32rem,92vw)] -translate-x-1/2">
+    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-30 w-[min(32rem,92vw)] max-md:bottom-[5rem] -translate-x-1/2">
       <div className="hud-panel flex items-start gap-3 rounded-2xl border-violet-500 p-3.5">
         <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5">
           {STEPS.map((_, i) => (

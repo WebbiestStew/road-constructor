@@ -254,17 +254,20 @@ const ZoneBadge = memo(function ZoneBadge({
   badgeIndex,
   typeIndex,
   contract,
+  compact,
 }: {
   edge: Edge3D;
   badgeIndex: number;
   typeIndex: number;
   contract?: ContractStatus;
+  /** Real cities have 20+ zones; a small lettered pin keeps the map readable when zoomed out. */
+  compact?: boolean;
 }) {
   if (!edge.zone) return null;
   const isEntry = edge.zone.type === "entry";
   const p = edge.spline.getPointAt(isEntry ? 0 : 1);
   const color = badgeColorForIndex(badgeIndex);
-  const label = isEntry ? `Entry ${typeIndex + 1}` : `Dest ${typeIndex + 1}`;
+  const label = compact ? `${isEntry ? "E" : "D"}${typeIndex + 1}` : isEntry ? `Entry ${typeIndex + 1}` : `Dest ${typeIndex + 1}`;
 
   let statusColor: string | null = null;
   if (!isEntry) {
@@ -278,9 +281,9 @@ const ZoneBadge = memo(function ZoneBadge({
           style={{
             background: color,
             color: "#fff",
-            fontSize: 11,
+            fontSize: compact ? 9 : 11,
             fontWeight: 700,
-            padding: "3px 9px",
+            padding: compact ? "1px 5px" : "3px 9px",
             borderRadius: 7,
             whiteSpace: "nowrap",
             boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
@@ -290,7 +293,7 @@ const ZoneBadge = memo(function ZoneBadge({
         >
           {label}
         </div>
-        <div style={{ width: 2, height: 24, background: color }} />
+        <div style={{ width: 2, height: compact ? 10 : 24, background: color }} />
         {statusColor && (
           <div
             style={{
@@ -873,6 +876,7 @@ export default function RoadNetworkMesh({
               badgeIndex={badgeIndexByEdgeId.get(edge.id)!}
               typeIndex={typeIndexByEdgeId.get(edge.id)!}
               contract={contractsByEdgeId.get(edge.id)}
+              compact={hideClearanceWarnings}
             />
           ))}
       {network.edges.map((edge) => (

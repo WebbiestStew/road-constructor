@@ -10,6 +10,7 @@ import { requestOpenTutorial } from "@/lib/tutorial";
 import { nextQuality, setQuality, useQuality } from "@/lib/quality";
 import { setChaos, useChaos } from "@/lib/chaos";
 import { togglePhotoMode } from "@/lib/photoMode";
+import { useCompact } from "@/lib/compact";
 import {
   IconArrowLeft,
   IconDownload,
@@ -97,8 +98,10 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
     setTimeout(() => setShareState("idle"), 2000);
   };
 
-  return (
-    <div className="pointer-events-auto absolute left-4 top-4 z-20 flex max-w-[calc(100vw-5.5rem)] flex-wrap items-center gap-1 rounded-2xl p-1.5 hud-panel lg:max-w-none lg:flex-nowrap lg:rounded-full">
+  const compact = useCompact();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const logo = (
       <Link href="/" title="Back to home" className="flex items-center gap-1.5 pl-1.5 pr-2.5">
         <span className="hover-wiggle flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-pink-500 text-white shadow-sm">
           <IconRoad className="h-4 w-4" />
@@ -113,9 +116,10 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           Beta
         </span>
       </Link>
+  );
 
-      <div className="h-6 w-px bg-black/10" />
-
+  const modeBlock = (
+    <>
       {mode === "build" ? (
         <div className="flex items-center gap-1 rounded-full bg-black/5 p-1">
           <button
@@ -187,11 +191,15 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           </button>
         </div>
       )}
+    </>
+  );
 
+  const buildTools = (
+    <>
       {mode === "build" && (
         <>
           <div className="h-6 w-px bg-black/10" />
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 max-md:hidden">
             <button
               type="button"
               onClick={undo}
@@ -252,7 +260,11 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           </div>
         </>
       )}
+    </>
+  );
 
+  const simTools = (
+    <>
       {mode === "simulate" && (
         <>
           <div className="h-6 w-px bg-black/10" />
@@ -303,7 +315,11 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
           )}
         </>
       )}
+    </>
+  );
 
+  const envTools = (
+    <>
       <div className="h-6 w-px bg-black/10" />
       <div className="flex items-center gap-0.5 rounded-full bg-black/5 p-1">
         {TIME_OF_DAY_OPTIONS.map((opt) => (
@@ -370,6 +386,131 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       >
         <IconHelp className="h-3.5 w-3.5" />
       </button>
+    </>
+  );
+
+  if (compact) {
+    return (
+      <>
+        <div className="pointer-events-auto absolute left-2 right-2 top-2 z-20 flex items-center gap-1 rounded-2xl p-1 hud-panel">
+          <Link href="/" title="Back to home" className="flex shrink-0 items-center pl-1 pr-1.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-pink-500 text-white shadow-sm">
+              <IconRoad className="h-4 w-4" />
+            </span>
+          </Link>
+          {mode === "build" ? (
+            <div className="flex items-center gap-0.5 rounded-full bg-black/5 p-0.5">
+              <span className="rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 px-3 py-2 text-xs font-bold text-white shadow">
+                Build
+              </span>
+              <button
+                type="button"
+                onClick={() => setMode("simulate")}
+                className="rounded-full px-3 py-2 text-xs font-bold text-zinc-600"
+              >
+                Traffic 🚦
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 rounded-full bg-gradient-to-br from-emerald-50 to-teal-50 p-0.5 ring-1 ring-inset ring-emerald-200">
+              {buildLocked ? (
+                <span className="px-2 text-xs font-bold text-emerald-700">Manager 🚦</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setMode("build")}
+                  className="flex items-center gap-1 rounded-full px-2.5 py-2 text-xs font-bold text-emerald-700"
+                >
+                  <IconArrowLeft className="h-3.5 w-3.5" />
+                  Build
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setRunning(!running)}
+                aria-label={running ? "Pause" : "Play"}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow"
+              >
+                {running ? <IconPause className="h-4 w-4" /> : <IconPlay className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpeedMultiplier(SPEED_OPTIONS[(SPEED_OPTIONS.indexOf(speedMultiplier) + 1) % SPEED_OPTIONS.length])}
+                aria-label="Change simulation speed"
+                className="h-8 min-w-9 rounded-full bg-white/70 px-2 text-[11px] font-extrabold tabular-nums text-sky-700"
+              >
+                {speedMultiplier}×
+              </button>
+            </div>
+          )}
+          <div className="flex-1" />
+          {mode === "build" && (
+            <>
+              <button
+                type="button"
+                onClick={undo}
+                disabled={!canUndo}
+                aria-label="Undo"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-600 disabled:opacity-30"
+              >
+                <IconUndo className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={redo}
+                disabled={!canRedo}
+                aria-label="Redo"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-600 disabled:opacity-30"
+              >
+                <IconRedo className="h-4 w-4" />
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="More options"
+            aria-expanded={menuOpen}
+            className={`flex h-9 w-9 items-center justify-center rounded-full text-lg font-black leading-none ${
+              menuOpen ? "bg-[#241b3d] text-white" : "text-zinc-600"
+            }`}
+          >
+            ⋯
+          </button>
+        </div>
+        {menuOpen && (
+          <div className="animate-pop pointer-events-auto absolute left-2 right-2 top-[3.75rem] z-30 flex flex-wrap items-center gap-1.5 rounded-2xl p-2.5 hud-panel [&_.h-6.w-px]:hidden">
+            {mode === "simulate" && (
+              <button
+                type="button"
+                onClick={resetTraffic}
+                className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-2 text-xs font-bold text-emerald-700"
+              >
+                <IconReset className="h-3.5 w-3.5" />
+                Reset Traffic
+              </button>
+            )}
+            {mode === "build" ? buildTools : simTools}
+            {envTools}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="pointer-events-auto absolute left-4 top-4 z-20 flex max-w-[calc(100vw-5.5rem)] flex-wrap items-center gap-1 rounded-2xl p-1.5 hud-panel lg:max-w-none lg:flex-nowrap lg:rounded-full">
+      {logo}
+
+      <div className="h-6 w-px bg-black/10" />
+
+      {modeBlock}
+
+      {buildTools}
+
+      {simTools}
+
+      {envTools}
     </div>
   );
 }
