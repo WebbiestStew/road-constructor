@@ -53,6 +53,8 @@ export interface ScenarioProgress {
   label: string;
   /** Multi-line breakdown shown on the results screen once the run ends. */
   detailLines: string[];
+  /** The player's number for challenges: vehicles moved (or people moved), where it makes sense to compare runs. */
+  score?: number;
   /** Challenge levels set their own star rating (from how many vehicles got through) instead of the speed/budget formula. */
   stars?: 1 | 2 | 3;
 }
@@ -89,6 +91,8 @@ export interface ScenarioDef {
 }
 
 export interface ScenarioResult {
+  /** The run's comparable score, if its level has one (see ScenarioProgress.score). */
+  score: number | null;
   won: boolean;
   stars: 0 | 1 | 2 | 3;
   avgSpeedMph: number;
@@ -126,6 +130,7 @@ export function finalizeScenario(
 ): ScenarioResult {
   const budgetRemainingFraction = ctx.budgetRemaining / scenario.startingBudget;
   return {
+    score: null,
     won,
     stars: won
       ? ctx.starsOverride !== undefined
@@ -491,6 +496,7 @@ export function createChallengeEvaluator(par: number, durationS: number): () => 
     return {
       won: done,
       stars,
+      score: ctx.completedTripsTotal,
       label: `${ctx.completedTripsTotal} moved · par ${par}`,
       detailLines: [
         `Vehicles moved: ${ctx.completedTripsTotal} (par ${par}, a fully fixed city)`,
@@ -521,6 +527,7 @@ function createRealCityEvaluator(baseline: number, durationS: number): () => Sce
     return {
       won: ctx.elapsedS >= durationS - 0.5,
       stars,
+      score: ctx.completedTripsTotal,
       label: `${ctx.completedTripsTotal} moved · city baseline ${baseline}`,
       detailLines: [
         `Vehicles moved: ${ctx.completedTripsTotal} (the unchanged city moves ${baseline})`,
@@ -554,6 +561,7 @@ function createPeopleEvaluator(baseline: number, durationS: number): () => Scena
     return {
       won: ctx.elapsedS >= durationS - 0.5,
       stars,
+      score: people,
       label: `${people} people moved · street baseline ${baseline}`,
       detailLines: [
         `People moved: ${people} (the unchanged street carries ${baseline})`,
@@ -1573,7 +1581,57 @@ export const SCENARIOS: ScenarioDef[] = [
   ...REAL_SCENARIOS,
 ];
 
+// ---------------------------------------------------------------------------
+// Custom challenges: a city someone built (and a score to beat) that arrives in a link, or that the player has just
+// turned their own layout into. They are registered here under their own id so the rest of the game can find them.
+// ---------------------------------------------------------------------------
+
+export const CHALLENGE_PREFIX = "challenge-";
+const customScenarios = new Map<string, ScenarioDef>();
+
+/** Scores a run against a target: 3 stars for matching it, 2 for getting within 10%. With no target it just records the score to beat. */
+function createBeatEvaluator(target: number, durationS: number): () => ScenarioEvaluator {
+  return () => (ctx) => {
+    const moved = ctx.completedTripsTotal;
+    const stars: 1 | 2 | 3 = target <= 0 ? 3 : moved >= target ? 3 : moved >= target * 0.9 ? 2 : 1;
+    return {
+      won: ctx.elapsedS >= durationS - 0.5,
+      stars,
+      score: moved,
+      label: target > 0 ? `${moved} moved · to beat ${target}` : `${moved} moved · set the bar`,
+      detailLines: [
+        `Vehicles moved: ${moved}`,
+        target > 0 ? `Score to beat: ${target}` : "This is the score your friends will try to beat",
+        `Gridlock penalties: ${ctx.gridlockPenaltyTotal}`,
+      ],
+    };
+  };
+}
+
+/** Builds (and registers) a challenge level from a city and a target score. A target of 0 means "play it once to set the bar". */
+export function buildChallengeScenario(opts: { key: string; name: string; network: NetworkSnapshot; target: number; from?: string }): ScenarioDef {
+  const id = `${CHALLENGE_PREFIX}${opts.key}`;
+  const def: ScenarioDef = {
+    id,
+    kind: "manage",
+    name: opts.name,
+    tagline: opts.target > 0 ? `${opts.from ? `${opts.from} moved` : "Moved"} ${opts.target} here. Can you beat it?` : "Your city, as a challenge.",
+    briefing:
+      opts.target > 0
+        ? `A city ${opts.from ? `shared by ${opts.from}` : "shared with you"}. The roads are fixed: fix how traffic flows with lane arrows, speed limits, signals, bus lanes and crossings. Move more than ${opts.target} vehicles in five minutes to beat the score.`
+        : "Play your city once, from the roads you built, to set a score. Then send it to a friend to beat. The roads are locked while you play.",
+    startingNetwork: opts.network,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    createEvaluator: createBeatEvaluator(opts.target, 300),
+  };
+  customScenarios.set(id, def);
+  return def;
+}
+
 export function getScenarioById(id: string): ScenarioDef | undefined {
+  if (id.startsWith(CHALLENGE_PREFIX)) return customScenarios.get(id);
   if (id.startsWith(DAILY_PREFIX)) return buildDailyScenario(id.slice(DAILY_PREFIX.length));
   return SCENARIOS.find((s) => s.id === id);
 }

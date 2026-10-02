@@ -197,3 +197,22 @@ export async function decodeShareHash(hash: string): Promise<PersistedPayload | 
     return null;
   }
 }
+
+/** Generic version of the share-link encoding: any JSON value, gzip-compressed and base64url-encoded for a URL hash. */
+export async function encodeJsonToHash(value: unknown): Promise<string> {
+  return bytesToBase64Url(await gzipCompress(new TextEncoder().encode(JSON.stringify(value))));
+}
+
+export async function decodeJsonFromHash(hash: string): Promise<unknown | null> {
+  try {
+    const bytes = await gzipDecompress(base64UrlToBytes(hash));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+}
+
+/** True if a value is a well-formed road network (used to vet networks that arrive in challenge links). */
+export function isValidNetwork(value: unknown): value is NetworkSnapshot {
+  return networkSnapshotSchema.safeParse(value).success;
+}

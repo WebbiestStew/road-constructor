@@ -109,7 +109,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
         } else if (result.won && recordStars(scenario.id, result.stars)) {
           pushToast(`⭐ ${"★".repeat(result.stars)} saved for ${scenario.name}`, "good");
         }
-        setResults(result);
+        setResults({ ...result, score: evalProgress.score ?? null });
         sim.setRunning(false);
       });
       return () => cancelAnimationFrame(raf);

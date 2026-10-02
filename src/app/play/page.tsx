@@ -12,6 +12,7 @@ import VehicleRenderer from "@/components/VehicleRenderer";
 import Pedestrians from "@/components/Pedestrians";
 import RoadsideProps from "@/components/RoadsideProps";
 import Scenery from "@/components/Scenery";
+import ChallengeLoader from "@/components/ChallengeLoader";
 import TransitLines from "@/components/TransitLines";
 import EmergencyPins from "@/components/EmergencyPins";
 import SimControls from "@/components/SimControls";
@@ -217,6 +218,7 @@ export default function Play() {
     <div id="sim-root">
       <AutosaveHydrator />
       <ShareLinkLoader />
+      <ChallengeLoader runner={scenarioRunner} />
       <Canvas
         // gl options are fixed at creation, so switching quality remounts the canvas.
         key={glEpoch}

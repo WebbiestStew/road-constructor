@@ -10,6 +10,7 @@ import { requestOpenTutorial } from "@/lib/tutorial";
 import { setChaos, useChaos } from "@/lib/chaos";
 import { useQuality } from "@/lib/quality";
 import { setSettingsOpen } from "@/lib/settingsMenu";
+import { requestMakeChallenge } from "@/lib/challenge";
 import { toggleTour, togglePhotoMode } from "@/lib/photoMode";
 import { useCompact } from "@/lib/compact";
 import {
@@ -307,6 +308,14 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
                 e.target.value = "";
               }}
             />
+            <button
+              type="button"
+              onClick={requestMakeChallenge}
+              title="Turn this city into a challenge: play it once, then send a friend the score to beat"
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-bold text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+            >
+              ⚔️ Challenge
+            </button>
             <button
               type="button"
               onClick={() => void handleShare()}

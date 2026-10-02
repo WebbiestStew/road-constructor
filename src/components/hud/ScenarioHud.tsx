@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DAILY_PREFIX, SCENARIOS, buildDailyScenario, getScenarioById, type ScenarioDef } from "@/sim/scenarios";
+import { CHALLENGE_PREFIX, DAILY_PREFIX, SCENARIOS, buildDailyScenario, getScenarioById, type ScenarioDef } from "@/sim/scenarios";
 import { dateKey, useDaily } from "@/lib/daily";
 import { isSandboxBudget, useEditorStore } from "@/state/editorStore";
 import { totalStars, useProgress } from "@/lib/progress";
@@ -12,6 +12,7 @@ import { IconClock, IconFlag, IconStar } from "./icons";
 import PlaceSearch from "./PlaceSearch";
 import DailyBoard from "./DailyBoard";
 import { makeShareCard, shareOrDownload } from "@/lib/shareCard";
+import { challengerName, encodeChallenge, setActiveChallenge, useActiveChallenge } from "@/lib/challenge";
 import type { NetworkSnapshot } from "@/sim/types";
 import type { SceneryData } from "@/sim/osm/scenery";
 
@@ -176,6 +177,7 @@ function StarRow({ stars }: { stars: 0 | 1 | 2 | 3 }) {
 function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
   const { scenario, results } = runner;
   const { bestToday } = useDaily();
+  const challenge = useActiveChallenge();
 
   useEffect(() => {
     if (!results) return;
@@ -218,6 +220,19 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
           )}
         </div>
 
+        {challenge && challenge.scenarioId === scenario.id && results.score !== null && (
+          <div
+            className={`w-full rounded-xl px-3 py-2.5 text-left text-xs font-bold ${
+              results.score > challenge.target ? "bg-emerald-500/15 text-emerald-800" : "bg-orange-500/15 text-orange-800"
+            }`}
+          >
+            {results.score > challenge.target
+              ? `⚔️ You beat ${challenge.from}'s ${challenge.target} with ${results.score}!`
+              : results.score === challenge.target
+                ? `⚔️ A tie with ${challenge.from}: ${results.score} each.`
+                : `⚔️ ${challenge.from} scored ${challenge.target}. You scored ${results.score}, ${challenge.target - results.score} short.`}
+          </div>
+        )}
         {isDaily && results.won && <DailyBoard day={scenario.id.slice(DAILY_PREFIX.length) || dateKey()} score={bestToday} />}
 
         <div className="mt-2 flex w-full gap-2">
@@ -269,6 +284,29 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
         >
           🖼️ Save a picture to share
         </button>
+        {results.won && results.score !== null && results.score > 0 && (
+          <button
+            type="button"
+            onClick={async () => {
+              const from = challengerName();
+              const isCustom = scenario.id.startsWith(CHALLENGE_PREFIX);
+              const url = await encodeChallenge(
+                isCustom
+                  ? { kind: "custom", name: scenario.name.slice(0, 40), network: scenario.startingNetwork, from, target: results.score ?? 0 }
+                  : { kind: "level", id: scenario.id, from, target: results.score ?? 0 }
+              );
+              try {
+                await navigator.clipboard.writeText(url);
+                pushToast(`⚔️ Challenge link copied. Send it to a friend: beat ${results.score}`, "good");
+              } catch {
+                window.prompt("Copy this challenge link:", url);
+              }
+            }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-rose-400 to-orange-500 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
+          >
+            ⚔️ Challenge a friend to beat {results.score}
+          </button>
+        )}
         {results.won && (
           <button
             type="button"
@@ -403,6 +441,7 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
           hasActiveScenario={!!scenario}
           onStart={(id) => {
             const def = getScenarioById(id);
+            setActiveChallenge(null);
             if (def) runner.startScenario(def);
             setPickerOpen(false);
           }}
