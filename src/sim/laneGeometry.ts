@@ -24,6 +24,24 @@ export function laneOffsetFt(
   return (laneIndex - (lanes - 1) / 2) * laneWidthFt;
 }
 
+/** Stretch (ft) over which vehicles move between their carriageway and the junction centre. */
+const SHIFT_TAPER_FT = 55;
+
+function smooth01(x: number): number {
+  const c = x < 0 ? 0 : x > 1 ? 1 : x;
+  return c * c * (3 - 2 * c);
+}
+
+/** Where a vehicle at `distanceFt` along the edge really sits laterally: the carriageway shift, eased to zero into junctions. */
+export function lateralShiftAt(edge: Edge3D, distanceFt: number): number {
+  if (edge.lateralShiftFt === 0) return 0;
+  const taper = Math.min(SHIFT_TAPER_FT, edge.length / 2);
+  let k = 1;
+  if (edge.shiftTaperStart) k = Math.min(k, smooth01(distanceFt / taper));
+  if (edge.shiftTaperEnd) k = Math.min(k, smooth01((edge.length - distanceFt) / taper));
+  return edge.lateralShiftFt * k;
+}
+
 /** Writes the normalized "right" direction (perpendicular to travel, in the horizontal plane) into `out`. */
 export function edgeRightVectorAt(
   edge: Edge3D,
@@ -77,7 +95,7 @@ export function laneCenterPointAt(
   const ct = clampT(t);
   edgePointAt(edge, ct, out);
   edgeRightVectorAt(edge, ct, tangentScratch, rightScratch);
-  const offset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt);
+  const offset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) + lateralShiftAt(edge, ct * edge.length);
   out.addScaledVector(rightScratch, offset);
   return out;
 }

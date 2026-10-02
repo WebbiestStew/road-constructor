@@ -50,7 +50,8 @@ function computeLampFixtures(network: RoadNetwork): LampFixture[] {
     seenPairs.add(key);
     if (edge.length < LAMP_SPACING_FT * 0.6) continue;
 
-    const pavedHalfWidth = (edge.lanes * edge.laneWidthFt) / 2;
+    // A two-way road's carriageways sit side by side, so the poles stand clear of the whole pair.
+    const pavedHalfWidth = (edge.lanes * edge.laneWidthFt) / 2 + edge.lateralShiftFt;
     const poleOffsetFt = pavedHalfWidth + SHOULDER_FT + POLE_CLEARANCE_FT;
 
     const count = Math.max(1, Math.floor(edge.length / LAMP_SPACING_FT));

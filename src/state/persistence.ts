@@ -60,6 +60,9 @@ const edgeSchema = z.object({
   isTexasTurnaround: z.boolean().optional(),
   /** Player-set lane arrows: per lane, the moves it may make at the end of the road. */
   laneMoves: z.array(z.array(z.enum(["left", "straight", "right"]))).optional(),
+  reservedLane: z.enum(["bus", "bike"]).optional(),
+  crosswalk: z.boolean().optional(),
+  jaywalkers: z.boolean().optional(),
 });
 
 const networkSnapshotSchema = z.object({

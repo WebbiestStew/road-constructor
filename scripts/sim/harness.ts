@@ -7,6 +7,7 @@ export interface Tick {
   activeCount: number;
   avgMph: number;
   trips: number;
+  people: number;
   problems: string[];
 }
 
@@ -21,6 +22,7 @@ export async function createSim() {
       activeCount: number;
       avgSpeedFtS: number;
       completedTripsTotal: number;
+      peopleMovedTotal?: number;
       stats?: { problemEdgeIds: string[] };
     };
     last = {
@@ -28,12 +30,14 @@ export async function createSim() {
       activeCount: t.activeCount,
       avgMph: t.avgSpeedFtS * 0.681818,
       trips: t.completedTripsTotal,
+      people: t.peopleMovedTotal ?? 0,
       problems: t.stats?.problemEdgeIds ?? last?.problems ?? [],
     };
   };
   await import("../../src/sim/worker");
   const send = (m: WorkerInMessage) => g.onmessage({ data: m });
   return {
+    send,
     load(network: NetworkSnapshot, seed = 1337, speed = 20) {
       send({ type: "setSpeedMultiplier", value: speed });
       send({ type: "updateNetwork", network, seed });

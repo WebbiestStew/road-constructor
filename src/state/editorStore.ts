@@ -2,7 +2,8 @@
 
 import * as THREE from "three";
 import { create } from "zustand";
-import { assembleNetwork, assembleNetworkCached, computeSignalPhaseGroups, planTexasTurnaround } from "@/sim/network";
+import { assembleNetwork, assembleNetworkCached, computeSignalPhaseGroups, planTexasTurnaround, trafficStaysConnected } from "@/sim/network";
+import { pushToast } from "@/lib/toast";
 import { assembleCached } from "@/sim/assembleCache";
 import { findClearanceViolations } from "@/sim/clearance";
 import {
@@ -26,6 +27,7 @@ import type {
   LaneMove,
   NetworkSnapshot,
   NodeSpec,
+  ReservedLane,
   ZoneSpec,
 } from "@/sim/types";
 import {
@@ -37,10 +39,20 @@ import { playDemolish, playPlaceRoad } from "@/lib/sound";
 import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
-export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction";
+export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street";
 
 /** Tools that change how traffic is managed rather than what is built — these work while traffic is running. */
-export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction"];
+export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction", "street"];
+
+/** A crossing needs room for the approach and stopping distance on both sides. */
+export const MIN_CROSSWALK_ROAD_FT = 110;
+
+export interface TrafficMix {
+  bus: number;
+  bike: number;
+}
+export const CLASSIC_MIX: TrafficMix = { bus: 0, bike: 0 };
+export const MIXED_MIX: TrafficMix = { bus: 0.06, bike: 0.05 };
 
 export const SPEED_LIMIT_CHOICES_MPH = [15, 20, 25, 30, 35, 40, 45, 55, 65, 75];
 
@@ -176,6 +188,12 @@ interface EditorState {
   resetLaneMoves: (edgeId: string) => void;
   /** Sets the speed limit on this segment, its opposite direction, and optionally the rest of the road it belongs to. */
   setSpeedLimit: (edgeId: string, mph: number, wholeRoad: boolean) => void;
+  /** Sets aside the rightmost lane of a road (and its opposite carriageway) for buses or bikes; null gives it back to everyone. */
+  setReservedLane: (edgeId: string, kind: ReservedLane | null, wholeRoad: boolean) => void;
+  /** Makes a road one-way (in the selected direction) or restores its opposite carriageway. Refuses edits that would strand traffic. */
+  setRoadOneWay: (edgeId: string, oneWay: boolean, wholeRoad: boolean) => void;
+  /** Adds or removes a mid-block pedestrian crossing on this segment and its opposite direction. */
+  setCrosswalk: (edgeId: string, on: boolean) => void;
 
   /** Replaces a junction node with an auto-generated roundabout ring, re-pointing its existing approach roads to the ring. */
   convertNodeToRoundabout: (nodeId: string, radiusFt?: number) => void;
@@ -202,6 +220,10 @@ interface EditorState {
    */
   hydrateAutosave: () => void;
 
+  /** Share of traffic that is buses and bikes (0 = the classic cars-and-trucks mix). Levels set it; the sandbox turns it on. */
+  trafficMix: TrafficMix;
+  setTrafficMix: (mix: TrafficMix) => void;
+
   activeScenarioId: string | null;
   /** True in a manage-only city: roads can't be built or changed, only traffic management tools work. */
   buildLocked: boolean;
@@ -224,6 +246,57 @@ function findCounterpart(
   return edges.find(
     (e) => e.fromNodeId === edge.toNodeId && e.toNodeId === edge.fromNodeId,
   );
+}
+
+/**
+ * The edges a road-wide edit applies to: just `edgeId`, or — when `wholeRoad` — everything reached by following
+ * the road straight through junctions in both directions of travel while it stays the same class, plus the
+ * opposite carriageway of every one of those.
+ */
+/** Re-derives every traffic light's phase groups after roads were added or removed, keeping its timing. */
+function refreshSignals(nodes: NodeSpec[], edges: EdgeSpec[]): NodeSpec[] {
+  const nodesById = new Map(nodes.map((n) => [n.id, n]));
+  return nodes.map((n) => {
+    if (n.control?.type !== "signal") return n;
+    const { groupA, groupB } = computeSignalPhaseGroups(n.id, edges, nodesById);
+    return { ...n, control: { ...n.control, groupA, groupB } };
+  });
+}
+
+function collectRoadTargets(state: Pick<EditorState, "nodes" | "edges" | "edgesById">, edgeId: string, wholeRoad: boolean, includeCounterparts = true): Set<string> {
+  const targets = new Set<string>();
+  if (!state.edgesById.has(edgeId)) return targets;
+  targets.add(edgeId);
+  if (wholeRoad) {
+    const network = assembleCached(state.nodes, state.edges);
+    const queue = [edgeId];
+    while (queue.length > 0) {
+      const cur = network.edgesById.get(queue.pop()!);
+      if (!cur || cur.isRoundaboutRing) continue;
+      for (const [nextId, move] of cur.nextMoves) {
+        const next = network.edgesById.get(nextId);
+        if (move === "straight" && next && next.roadClassId === cur.roadClassId && !next.isRoundaboutRing && !targets.has(nextId)) {
+          targets.add(nextId);
+          queue.push(nextId);
+        }
+      }
+      for (const other of network.edges) {
+        if (targets.has(other.id) || other.isRoundaboutRing || other.roadClassId !== cur.roadClassId) continue;
+        if (other.nextMoves.get(cur.id) === "straight") {
+          targets.add(other.id);
+          queue.push(other.id);
+        }
+      }
+    }
+  }
+  // A two-way road's two carriageways are edited together.
+  if (!includeCounterparts) return targets;
+  for (const id of Array.from(targets)) {
+    const e = state.edgesById.get(id);
+    const back = e ? findCounterpart(state.edges, e) : undefined;
+    if (back) targets.add(back.id);
+  }
+  return targets;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -874,45 +947,141 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setSpeedLimit: (edgeId, mph, wholeRoad) => {
     const state = get();
-    const start = state.edgesById.get(edgeId);
-    if (!start) return;
-    const targets = new Set<string>([edgeId]);
-
-    if (wholeRoad) {
-      // Follow the road straight through junctions, in both directions of travel, while it stays the same class.
-      const network = assembleCached(state.nodes, state.edges);
-      const queue = [edgeId];
-      while (queue.length > 0) {
-        const cur = network.edgesById.get(queue.pop()!);
-        if (!cur || cur.isRoundaboutRing) continue;
-        for (const [nextId, move] of cur.nextMoves) {
-          const next = network.edgesById.get(nextId);
-          if (move === "straight" && next && next.roadClassId === cur.roadClassId && !next.isRoundaboutRing && !targets.has(nextId)) {
-            targets.add(nextId);
-            queue.push(nextId);
-          }
-        }
-        for (const other of network.edges) {
-          if (targets.has(other.id) || other.isRoundaboutRing || other.roadClassId !== cur.roadClassId) continue;
-          if (other.nextMoves.get(cur.id) === "straight") {
-            targets.add(other.id);
-            queue.push(other.id);
-          }
-        }
-      }
-    }
-    // Two-way roads share one limit across both directions.
-    for (const id of Array.from(targets)) {
-      const e = state.edgesById.get(id);
-      const back = e ? findCounterpart(state.edges, e) : undefined;
-      if (back) targets.add(back.id);
-    }
-
+    const targets = collectRoadTargets(state, edgeId, wholeRoad);
+    if (targets.size === 0) return;
     const changed = state.edges.filter((e) => targets.has(e.id) && e.speedLimitMph !== mph);
     if (changed.length === 0) return;
     get().pushHistoryEntry();
     set((s) => {
       const edges = s.edges.map((e) => (targets.has(e.id) ? { ...e, speedLimitMph: mph } : e));
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
+  setRoadOneWay: (edgeId, oneWay, wholeRoad) => {
+    const state = get();
+    const chain = collectRoadTargets(state, edgeId, wholeRoad, false);
+    if (chain.size === 0) return;
+
+    if (oneWay) {
+      const remove = new Set<string>();
+      for (const id of chain) {
+        const counter = findCounterpart(state.edges, state.edgesById.get(id)!);
+        if (counter && !chain.has(counter.id)) remove.add(counter.id);
+      }
+      if (remove.size === 0) {
+        pushToast("That road only goes one way already", "info");
+        return;
+      }
+      if ([...remove].some((id) => state.edgesById.get(id)?.zone)) {
+        pushToast("An entry or exit is on the other side, so that direction has to stay open", "alert");
+        return;
+      }
+      const edges = state.edges.filter((e) => !remove.has(e.id));
+      const nodes = refreshSignals(state.nodes, edges);
+      if (!trafficStaysConnected({ nodes, edges })) {
+        pushToast("One-way would cut some traffic off from where it's headed", "alert");
+        return;
+      }
+      get().pushHistoryEntry();
+      set({ nodes, edges, nodesById: new Map(nodes.map((n) => [n.id, n])), edgesById: new Map(edges.map((e) => [e.id, e])), selection: null });
+      return;
+    }
+
+    // Back to two-way: add the missing opposite carriageway of each segment.
+    const added: EdgeSpec[] = [];
+    let seq = state.nextEdgeSeq;
+    let cost = 0;
+    for (const id of chain) {
+      const e = state.edgesById.get(id)!;
+      if (findCounterpart(state.edges, e)) continue;
+      const from = state.nodesById.get(e.fromNodeId);
+      const to = state.nodesById.get(e.toNodeId);
+      if (from && to && !state.buildLocked) {
+        cost += estimateEdgeCost(e.roadClassId, e.elevationLevelId, edgeLengthFt(from.position, to.position, e.interiorPoints), e.lanes);
+      }
+      const back: EdgeSpec = {
+        id: `e${seq++}`,
+        fromNodeId: e.toNodeId,
+        toNodeId: e.fromNodeId,
+        interiorPoints: reversePoints(e.interiorPoints),
+        roadClassId: e.roadClassId,
+        elevationLevelId: e.elevationLevelId,
+        lanes: e.lanes,
+        laneWidthFt: e.laneWidthFt,
+        speedLimitMph: e.speedLimitMph,
+      };
+      if (e.reservedLane) back.reservedLane = e.reservedLane;
+      added.push(back);
+    }
+    if (added.length === 0) {
+      pushToast("That road already goes both ways", "info");
+      return;
+    }
+    if (!isSandboxBudget(state.budget) && cost > state.budget) {
+      pushToast("Not enough budget to add the opposite lanes", "alert");
+      return;
+    }
+    get().pushHistoryEntry();
+    const edges = [...state.edges, ...added];
+    const nodes = refreshSignals(state.nodes, edges);
+    set((s) => ({
+      nodes,
+      edges,
+      nodesById: new Map(nodes.map((n) => [n.id, n])),
+      edgesById: new Map(edges.map((e) => [e.id, e])),
+      nextEdgeSeq: seq,
+      budget: isSandboxBudget(s.budget) ? s.budget : s.budget - cost,
+      selection: null,
+    }));
+  },
+
+  setCrosswalk: (edgeId, on) => {
+    const state = get();
+    const edge = state.edgesById.get(edgeId);
+    if (!edge || edge.isRoundaboutRing) return;
+    const from = state.nodesById.get(edge.fromNodeId);
+    const to = state.nodesById.get(edge.toNodeId);
+    if (!from || !to) return;
+    if (on && edgeLengthFt(from.position, to.position, edge.interiorPoints) < MIN_CROSSWALK_ROAD_FT) {
+      pushToast("That stretch is too short for a crossing, so try a longer block", "alert");
+      return;
+    }
+    const ids = new Set([edgeId]);
+    const back = findCounterpart(state.edges, edge);
+    if (back) ids.add(back.id);
+    if (state.edges.every((e) => !ids.has(e.id) || !!e.crosswalk === on)) return;
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (!ids.has(e.id)) return e;
+        const next = { ...e };
+        if (on) next.crosswalk = true;
+        else delete next.crosswalk;
+        return next;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
+  setReservedLane: (edgeId, kind, wholeRoad) => {
+    const state = get();
+    const targets = collectRoadTargets(state, edgeId, wholeRoad);
+    // Only roads with a lane to spare can give one up; a single-lane road keeps serving everyone.
+    const changed = state.edges.filter(
+      (e) => targets.has(e.id) && e.lanes >= 2 && !e.isRoundaboutRing && (e.reservedLane ?? null) !== kind,
+    );
+    if (changed.length === 0) return;
+    get().pushHistoryEntry();
+    const ids = new Set(changed.map((e) => e.id));
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (!ids.has(e.id)) return e;
+        const next = { ...e };
+        if (kind) next.reservedLane = kind;
+        else delete next.reservedLane;
+        return next;
+      });
       return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
     });
   },
@@ -1159,6 +1328,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeScenarioId: null,
   buildLocked: false,
   realCityActive: false,
+  trafficMix: CLASSIC_MIX,
+  setTrafficMix: (mix) => set({ trafficMix: mix }),
   simEpoch: 0,
 
   loadScenario: (scenario) => {
@@ -1177,6 +1348,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tool: scenario.kind === "manage" ? "inspect" : get().tool,
       buildLocked: scenario.kind === "manage",
       realCityActive: scenario.real === true,
+      trafficMix: scenario.trafficMix ?? CLASSIC_MIX,
       simEpoch: get().simEpoch + 1,
       // Frame the whole city: zoom out to the farthest node.
       pendingCameraFit: {
@@ -1192,7 +1364,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
-  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false }),
+  exitScenario: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, trafficMix: CLASSIC_MIX }),
   enterSandboxMode: () => set({ activeScenarioId: null, buildLocked: false, realCityActive: false, budget: SANDBOX_BUDGET }),
   startSandbox: () => {
     get().clearNetwork();
@@ -1200,6 +1372,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       activeScenarioId: null,
       buildLocked: false,
       realCityActive: false,
+      trafficMix: MIXED_MIX,
       budget: SANDBOX_BUDGET,
       mode: "build",
       tool: "draw",

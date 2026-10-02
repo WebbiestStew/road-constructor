@@ -9,6 +9,7 @@ const HINTS: Record<EditorTool, string> = {
   zone: "🚩 Click a road to cycle it: none → Entry → Destination → none.",
   lanes: "↔️ Click a road that splits at a junction, then tap arrows to choose where each lane can go.",
   speed: "⚡ Click a road and pick a speed limit. Slow stretches back traffic up.",
+  street: "🛣️ Click a road to reserve a lane for buses or bikes, make it one-way, or add a pedestrian crossing.",
   junction: "🚦 Click a junction to set priority or a traffic light, and tune its timing.",
   turnaround: "🔁 Click a frontage road — we'll loop a one-way Texas turnaround to the nearest opposing road within 220 ft.",
 };

@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ContractStatus,
+  EdgePatch,
   EdgeSpec,
   EdgeSpeedRatio,
   JunctionControl,
-  LaneMove,
   NodeSpec,
   WorkerInMessage,
   WorkerOutMessage,
@@ -32,6 +32,7 @@ export interface SimMetricsState {
   simTime: number;
   spawnedTotal: number;
   completedTripsTotal: number;
+  peopleMovedTotal: number;
   contracts: ContractStatus[];
   edgeSpeedRatios: EdgeSpeedRatio[];
   problemEdgeIds: string[];
@@ -48,6 +49,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   simTime: 0,
   spawnedTotal: 0,
   completedTripsTotal: 0,
+  peopleMovedTotal: 0,
   contracts: [],
   edgeSpeedRatios: [],
   problemEdgeIds: [],
@@ -154,6 +156,7 @@ export function useTrafficSimulation() {
             simTime: msg.simTime,
             spawnedTotal: msg.spawnedTotal,
             completedTripsTotal: msg.completedTripsTotal,
+            peopleMovedTotal: msg.peopleMovedTotal,
             contracts: stats.contracts,
             edgeSpeedRatios: stats.edgeSpeedRatios,
             problemEdgeIds: stats.problemEdgeIds,
@@ -184,6 +187,11 @@ export function useTrafficSimulation() {
     workerRef.current?.postMessage({ type: "setMaxVehicles", value: VEHICLE_CAP[quality] } satisfies WorkerInMessage);
   }, [quality]);
 
+  const trafficMix = useEditorStore((s) => s.trafficMix);
+  useEffect(() => {
+    workerRef.current?.postMessage({ type: "setTrafficMix", bus: trafficMix.bus, bike: trafficMix.bike } satisfies WorkerInMessage);
+  }, [trafficMix]);
+
   // Cross Build -> Simulate: push a full network resync so the worker
   // always simulates exactly what's on screen. While simulating, keep it in
   // sync with live traffic-management edits (speed limits, lane arrows,
@@ -199,7 +207,7 @@ export function useTrafficSimulation() {
     worker.postMessage({ type: "updateNetwork", network: snapshot, seed: DEFAULT_SEED } satisfies WorkerInMessage);
     postScenarioEvents(worker);
 
-    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}`;
+    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${e.crosswalk ? 1 : 0}`;
     const nodeSig = (n: NodeSpec) => JSON.stringify(n.control ?? null);
     let sentEdges = new Map(snapshot.edges.map((e) => [e.id, edgeSig(e)]));
     let sentNodes = new Map(snapshot.nodes.map((n) => [n.id, nodeSig(n)]));
@@ -221,12 +229,18 @@ export function useTrafficSimulation() {
         return;
       }
 
-      const edgePatches: { id: string; speedLimitMph: number; laneMoves: LaneMove[][] | null }[] = [];
+      const edgePatches: EdgePatch[] = [];
       for (const e of state.edges) {
         const sig = edgeSig(e);
         if (sentEdges.get(e.id) === sig) continue;
         sentEdges.set(e.id, sig);
-        edgePatches.push({ id: e.id, speedLimitMph: e.speedLimitMph, laneMoves: e.laneMoves ?? null });
+        edgePatches.push({
+          id: e.id,
+          speedLimitMph: e.speedLimitMph,
+          laneMoves: e.laneMoves ?? null,
+          reservedLane: e.reservedLane ?? null,
+          crosswalk: e.crosswalk ?? false,
+        });
       }
       if (edgePatches.length > 0) {
         worker.postMessage({ type: "patchEdges", edges: edgePatches } satisfies WorkerInMessage);

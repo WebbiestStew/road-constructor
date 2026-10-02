@@ -27,6 +27,7 @@ import {
   type EdgeSpeedRatio,
   type RoadNetwork,
   type TickStats,
+  type VehicleKind,
   type VehicleState,
   type WorkerInMessage,
   type WorkerOutMessage,
@@ -100,6 +101,10 @@ let spawnedTotal = 0;
 /** Soft cap on concurrent vehicles (<= MAX_VEHICLES, which sizes the buffers); lowered by the main thread in low-quality mode. */
 let maxVehicles = MAX_VEHICLES;
 let completedTripsTotal = 0;
+let peopleMovedTotal = 0;
+/** Share of new vehicles that are buses / bikes. Zero keeps the classic mix (and its exact random sequence). */
+let busShare = 0;
+let bikeShare = 0;
 let accumulator = 0;
 let lastWallTimeMs = 0;
 
@@ -149,6 +154,8 @@ const COLOR_STOP = new THREE.Color(0xef4444);
 
 /** Body paint palettes, sampled once per vehicle at spawn — a wide mix for sedans, a duller fleet-like set for semis. */
 const SEDAN_PALETTE = [0xf4f4f5, 0x1c1c22, 0x8a8f98, 0xb0281c, 0x2452a6, 0x2f6b3a, 0xc9a13b, 0x5b5f66];
+const BUS_PALETTE = [0xf2c230, 0x2563eb, 0xdc2626];
+const BIKE_PALETTE = [0xff7a00, 0x00b8a0, 0xe0457b, 0x6d5bd0];
 const TRUCK_PALETTE = [0xf4f4f5, 0xc23b2e, 0x2452a6, 0x8a8f98, 0x1c1c22];
 const _spawnColor = new THREE.Color();
 
@@ -209,6 +216,9 @@ function acquireVehicle(): VehicleState {
     stuckTimeS: 0,
     frozenUntil: 0,
     isTruck: false,
+    kind: "car",
+    passengers: 1,
+    maxSpeedFtps: Infinity,
     weightToPowerLbPerHp: 25,
     bodyColorR: 1,
     bodyColorG: 1,
@@ -294,6 +304,7 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   lastSnapshotSimTime = simTime;
   gridlockPenaltyTotal = 0;
   completedTripsTotal = 0;
+  peopleMovedTotal = 0;
 
   for (const [id, v] of vehicles) {
     if (!network.edgesById.has(v.edgeId)) {
@@ -311,6 +322,7 @@ function resetRun() {
   accumulator = 0;
   spawnedTotal = 0;
   completedTripsTotal = 0;
+  peopleMovedTotal = 0;
   gridlockPenaltyTotal = 0;
   demandScale = 1;
   eventQueue = [];
@@ -359,18 +371,26 @@ function trySpawn(entryEdgeId: string) {
   const occupancy = laneOccupancy.get(edge.id);
   if (!occupancy) return;
 
+  // Only roll for a bus or bike when the mix asks for them, so classic levels keep their exact random sequence.
+  let kind: VehicleKind | null = null;
+  if (busShare > 0 || bikeShare > 0) {
+    const roll = rng();
+    kind = roll < busShare ? "bus" : roll < busShare + bikeShare ? "bike" : null;
+  }
+
   const laneOrder = Array.from({ length: edge.lanes }, (_, i) => i).sort(() => rng() - 0.5);
   for (const laneIndex of laneOrder) {
+    if (isReservedAgainst(edge, laneIndex, kind ?? "car")) continue;
     const laneArr = occupancy[laneIndex];
     const closest = laneArr.length > 0 ? vehicles.get(laneArr[0])?.distanceAlongEdge ?? Infinity : Infinity;
     if (closest >= MIN_SPAWN_CLEARANCE_FT) {
-      spawnVehicle(edge, laneIndex, route, destination.id);
+      spawnVehicle(edge, laneIndex, route, destination.id, kind);
       return;
     }
   }
 }
 
-function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinationEdgeId: string) {
+function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinationEdgeId: string, forcedKind: VehicleKind | null = null) {
   const v = acquireVehicle();
   v.id = nextVehicleId++;
   v.edgeId = edge.id;
@@ -382,23 +402,29 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
 
   // 15% semi-trucks, 85% passenger sedans, each with distinct accel/braking
   // physics and a distinct weight-to-power ratio driving how badly road
-  // grade hits them (see idmAccelForVehicle / gradeAccelFtps2).
-  const isTruck = rng() < 0.15;
+  // grade hits them (see idmAccelForVehicle / gradeAccelFtps2). When the mix
+  // includes them, buses and bicycles replace some of the cars.
+  const isBus = forcedKind === "bus";
+  const isBike = forcedKind === "bike";
+  const isTruck = !isBus && !isBike && rng() < 0.15;
   v.isTruck = isTruck;
-  const palette = isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
+  v.kind = isBus ? "bus" : isBike ? "bike" : isTruck ? "truck" : "car";
+  const palette = isBus ? BUS_PALETTE : isBike ? BIKE_PALETTE : isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
   _spawnColor.set(palette[Math.floor(rng() * palette.length)]);
   v.bodyColorR = _spawnColor.r;
   v.bodyColorG = _spawnColor.g;
   v.bodyColorB = _spawnColor.b;
-  v.weightToPowerLbPerHp = isTruck ? randRange(260, 340) : randRange(18, 32);
-  v.length = isTruck ? randRange(32, 42) : randRange(13, 19);
-  v.maxAccel = isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
-  v.comfortBrake = isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
-  v.jamDistance = randRange(5.5, 7.5);
-  v.desiredHeadway = isTruck ? randRange(1.6, 2.0) : randRange(1.1, 1.7);
+  v.weightToPowerLbPerHp = isBus ? randRange(190, 240) : isBike ? 8 : isTruck ? randRange(260, 340) : randRange(18, 32);
+  v.length = isBus ? randRange(38, 42) : isBike ? 6 : isTruck ? randRange(32, 42) : randRange(13, 19);
+  v.maxAccel = isBus ? randRange(2.2, 2.9) : isBike ? randRange(1.2, 1.8) : isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
+  v.comfortBrake = isBus ? randRange(4.5, 5.5) : isBike ? 3.5 : isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
+  v.passengers = isBus ? Math.round(randRange(22, 42)) : isBike || isTruck ? 1 : 1.4;
+  v.maxSpeedFtps = isBike ? mphToFtps(randRange(10, 13)) : Infinity;
+  v.jamDistance = isBike ? randRange(2.5, 3.5) : randRange(5.5, 7.5);
+  v.desiredHeadway = isBus || isTruck ? randRange(1.6, 2.0) : isBike ? randRange(0.8, 1.1) : randRange(1.1, 1.7);
   v.minGap = v.jamDistance;
-  v.speedFactor = randNormalish(1.0, 0.12);
-  v.speed = Math.min(v.speedFactor, 1.0) * mphToFtps(edge.speedLimitMph) * 0.85;
+  v.speedFactor = isBus ? randNormalish(0.92, 0.05) : randNormalish(1.0, 0.12);
+  v.speed = Math.min(Math.min(v.speedFactor, 1.0) * mphToFtps(edge.speedLimitMph) * 0.85, v.maxSpeedFtps);
   v.accel = 0;
   v.laneChangeCooldown = randRange(0, 60);
   v.spawnTime = simTime;
@@ -591,6 +617,26 @@ function allowedLanesForNext(v: VehicleState, edge: Edge3D): boolean[] | null {
   return nextRouteEdgeId ? (edge.laneAllowed.get(nextRouteEdgeId) ?? null) : null;
 }
 
+/** How close to the end of a road a car may slip into a reserved lane if that is the only lane that can make its turn. */
+const RESERVED_LANE_EXIT_FT = 150;
+
+/** True when `kind` may never use `lane` of this edge (the reserved lane belongs to someone else). Ignores the turn exception. */
+function isReservedAgainst(edge: Edge3D, lane: number, kind: VehicleKind): boolean {
+  if (!edge.reservedLane || lane !== edge.lanes - 1) return false;
+  if (kind === "ambulance") return false;
+  return edge.reservedLane === "bus" ? kind !== "bus" : kind !== "bike";
+}
+
+/** As above, plus the real-world exception: right before a junction, anyone may use the lane if it is the only one that makes their turn. */
+function laneForbidden(v: VehicleState, edge: Edge3D, lane: number): boolean {
+  if (!isReservedAgainst(edge, lane, v.kind)) return false;
+  if (edge.length - v.distanceAlongEdge < RESERVED_LANE_EXIT_FT) {
+    const allowed = allowedLanesForNext(v, edge);
+    if (allowed && !allowed.slice(0, edge.lanes - 1).some(Boolean)) return false;
+  }
+  return true;
+}
+
 const WRONG_LANE_STOP_FT = 70;
 const WRONG_LANE_PATIENCE_S = 10;
 
@@ -694,7 +740,8 @@ function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
   const v0 = Math.min(
     mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05),
-    curvatureSpeedCapFtps(edge, v.distanceAlongEdge)
+    curvatureSpeedCapFtps(edge, v.distanceAlongEdge),
+    v.maxSpeedFtps
   );
   const deltaV = v.speed - gapInfo.leaderSpeed;
   const params = {
@@ -717,7 +764,7 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
 // ---------------------------------------------------------------------------
 
 function pairAccel(followerV: VehicleState, followerDist: number, leader: VehicleState | null, edge: Edge3D): number {
-  const v0 = mphToFtps(edge.speedLimitMph) * Math.min(followerV.speedFactor, 1.05);
+  const v0 = Math.min(mphToFtps(edge.speedLimitMph) * Math.min(followerV.speedFactor, 1.05), followerV.maxSpeedFtps);
   let gap = NO_LEADER_GAP;
   let leaderSpeed = followerV.speed;
   if (leader) {
@@ -771,18 +818,35 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
     }
   }
 
+  // A driver sitting in a lane reserved for someone else gets out of it as soon as it is safe.
+  if (requiredDirection === 0 && edge.reservedLane && laneForbidden(v, edge, v.laneIndex) && v.laneIndex > 0) {
+    requiredDirection = -1;
+    mergeUrgency = 1;
+  }
+  // Buses and bikes head for the lane that was reserved for them, unless a left turn is coming up.
+  if (requiredDirection === 0 && edge.reservedLane && v.laneIndex < edge.lanes - 1 && !isReservedAgainst(edge, edge.lanes - 1, v.kind)) {
+    const nextId = v.routeEdgeIds[v.routeIndex + 1];
+    const turnsLeft = nextId ? edge.nextMoves.get(nextId) === "left" : false;
+    if (!turnsLeft || distanceToNode > 400) {
+      requiredDirection = 1;
+      mergeUrgency = 0.7;
+    }
+  }
+
   // A sedan stuck behind a truck that's crawling well under the sedan's own
   // desired speed (typically a heavy semi losing the fight against a steep
-  // grade) gets an extra shove toward overtaking, on top of whatever
+  // grade, or a cyclist) gets an extra shove toward overtaking, on top of whatever
   // incentive MOBIL's own acceleration-gain math already produces.
   const followerV0 = mphToFtps(edge.speedLimitMph) * Math.min(v.speedFactor, 1.05);
-  const truckOvertakeBias = !v.isTruck && oldLeader?.isTruck && oldLeader.speed < followerV0 * 0.6 ? 6 : 0;
+  const truckOvertakeBias =
+    !v.isTruck && v.kind !== "bike" && oldLeader && (oldLeader.isTruck || oldLeader.kind === "bike") && oldLeader.speed < followerV0 * 0.6 ? 6 : 0;
 
   let bestLane = -1;
   let bestIncentive = -Infinity;
 
   for (const candidateLane of [v.laneIndex - 1, v.laneIndex + 1]) {
     if (candidateLane < 0 || candidateLane >= edge.lanes) continue;
+    if (laneForbidden(v, edge, candidateLane)) continue;
     const candArr = lanes[candidateLane];
 
     let insertIdx = 0;
@@ -993,6 +1057,7 @@ function step(dt: number) {
       v.edgeId = nextEdgeId;
       v.laneIndex = clamp(v.laneIndex, 0, nextEdge.lanes - 1);
       v.distanceAlongEdge = overflow;
+      if (nextEdge.reservedLane && isReservedAgainst(nextEdge, v.laneIndex, v.kind) && v.laneIndex > 0) v.laneIndex -= 1;
       currentEdge = nextEdge;
     }
   }
@@ -1005,6 +1070,7 @@ function step(dt: number) {
       if (!gridlockRemoved.has(id)) {
         despawnTimestamps.push(simTime);
         completedTripsTotal++;
+        peopleMovedTotal += v.passengers;
       }
       releaseVehicle(v);
     }
@@ -1060,8 +1126,8 @@ function writeSnapshot(
     // Trucks get a taller, slightly wider box on top of their already-longer
     // length, so an 18-wheeler reads as a distinct bulkier silhouette next
     // to a sedan using nothing but the one shared box geometry.
-    const widthScale = v.isTruck ? 1.15 : 1;
-    const heightScale = v.isTruck ? 1.55 : 1;
+    const widthScale = v.kind === "bus" ? 1.25 : v.kind === "bike" ? 0.32 : v.isTruck ? 1.15 : 1;
+    const heightScale = v.kind === "bus" ? 1.85 : v.kind === "bike" ? 0.75 : v.isTruck ? 1.55 : 1;
 
     const t = distanceToT(edge, v.distanceAlongEdge);
     laneCenterPointAt(edge, t, v.laneIndex, _tangent, _right, _pos);
@@ -1218,6 +1284,7 @@ function postSnapshot(forceStats: boolean) {
     throughputLastMinute: despawnTimestamps.length,
     spawnedTotal,
     completedTripsTotal,
+    peopleMovedTotal,
     stats,
   };
   ctx.postMessage(message, [matricesBuffer, colorsBuffer, taillightColorsBuffer]);
@@ -1284,6 +1351,10 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
           if (edge) patchEdge(edge, network.edgesById, p);
         }
       }
+      break;
+    case "setTrafficMix":
+      busShare = Math.max(0, Math.min(0.5, msg.bus));
+      bikeShare = Math.max(0, Math.min(0.5, msg.bike));
       break;
     case "patchNodes":
       if (network) {

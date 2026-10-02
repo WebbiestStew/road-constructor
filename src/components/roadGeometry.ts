@@ -43,7 +43,7 @@ export function sweepProfileAlongCurve(
     const t = tStart + (tEnd - tStart) * (i / segments);
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
-    const railOrigin = pointScratch.clone().addScaledVector(rightScratch, centerlineOffsetFt);
+    const railOrigin = pointScratch.clone().addScaledVector(rightScratch, centerlineOffsetFt + edge.lateralShiftFt);
     const ring: THREE.Vector3[] = profile.map((p) =>
       railOrigin.clone().addScaledVector(rightScratch, p.x).addScaledVector(up, p.y)
     );
@@ -180,7 +180,7 @@ export function buildDashedStripe(
     const t = clamp01(distFt / totalLen);
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
-    out.copy(pointScratch).addScaledVector(rightScratch, lateral).addScaledVector(up, verticalOffsetFt);
+    out.copy(pointScratch).addScaledVector(rightScratch, lateral + edge.lateralShiftFt).addScaledVector(up, verticalOffsetFt);
   };
 
   const positions: number[] = [];
@@ -234,7 +234,7 @@ export function buildLaneArrows(
   const rightScratch = new THREE.Vector3();
   const pointScratch = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
-  const laneOffset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt);
+  const laneOffset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) + edge.lateralShiftFt;
   // A turn lane's arrowhead kinks sideways toward its exit direction instead
   // of pointing straight ahead, so drivers read it the way real lane-use
   // signage reads: straight arrow for through lanes, angled for turn lanes.
@@ -324,6 +324,7 @@ export function buildGroundShadowRibbon(edge: Edge3D, extraWidthFt = 4): THREE.B
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
     const ground = new THREE.Vector3(pointScratch.x, 0.05, pointScratch.z);
+    ground.addScaledVector(rightScratch, edge.lateralShiftFt);
     rings.push([
       ground.clone().addScaledVector(rightScratch, -halfWidth),
       ground.clone().addScaledVector(rightScratch, halfWidth),
@@ -408,6 +409,7 @@ export function computePierDescriptors(edge: Edge3D, intervalFt = 90): PierDescr
     if (pointScratch.y <= 2) continue;
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
     const rotationY = Math.atan2(rightScratch.x, rightScratch.z);
+    pointScratch.addScaledVector(rightScratch, edge.lateralShiftFt);
     descriptors.push({
       distanceFt: dist,
       capPosition: [pointScratch.x, pointScratch.y - 1.2, pointScratch.z],

@@ -3,8 +3,8 @@
 import { useMemo, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { assembleCached } from "@/sim/assembleCache";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
-import { LANE_MOVES, type LaneMove } from "@/sim/types";
-import { SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
+import { LANE_MOVES, type LaneMove, type ReservedLane } from "@/sim/types";
+import { CLASSIC_MIX, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
 import {
   IconTurnLeft,
   IconTurnRight,
@@ -12,6 +12,7 @@ import {
   IconClose,
   IconJunction,
   IconLanes,
+  IconRoad,
   IconRoundabout,
   IconSignal,
   IconSpeedSign,
@@ -320,6 +321,120 @@ export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
           Make roundabout 🔄
         </button>
       ) : null}
+    </Shell>
+  );
+}
+
+const LANE_USE_CHOICES: { id: ReservedLane | null; emoji: string; label: string; blurb: string }[] = [
+  { id: null, emoji: "🚗", label: "Open", blurb: "Every lane is for everyone." },
+  { id: "bus", emoji: "🚌", label: "Bus lane", blurb: "The right lane is for buses only. Cars use it just to turn right at the corner." },
+  { id: "bike", emoji: "🚲", label: "Bike lane", blurb: "The right lane is for bicycles only, so cars stop getting stuck behind them." },
+];
+
+/** Bus and bike lanes, one-way streets and pedestrian crossings: the road-level traffic tools. */
+export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; setWholeRoad: (v: boolean) => void }) {
+  const { spec } = useSelectedEdge();
+  const edges = useEditorStore((s) => s.edges);
+  const setSelection = useEditorStore((s) => s.setSelection);
+  const setReservedLane = useEditorStore((s) => s.setReservedLane);
+  const setRoadOneWay = useEditorStore((s) => s.setRoadOneWay);
+  const setCrosswalk = useEditorStore((s) => s.setCrosswalk);
+  const nodesById = useEditorStore((s) => s.nodesById);
+  const inScenario = useEditorStore((s) => s.activeScenarioId !== null);
+  const mixed = useEditorStore((s) => s.trafficMix.bus + s.trafficMix.bike > 0);
+  const setTrafficMix = useEditorStore((s) => s.setTrafficMix);
+  if (!spec) return null;
+
+  const cls = ROAD_CLASSES[spec.roadClassId];
+  const twoWay = edges.some((e) => e.fromNodeId === spec.toNodeId && e.toNodeId === spec.fromNodeId);
+  const current = spec.reservedLane ?? null;
+  const canReserve = spec.lanes >= 2 && !spec.isRoundaboutRing;
+  const a = nodesById.get(spec.fromNodeId);
+  const b = nodesById.get(spec.toNodeId);
+  const lengthFt = a && b ? Math.hypot(b.position[0] - a.position[0], b.position[2] - a.position[2]) : 0;
+  const canCross = !spec.isRoundaboutRing && lengthFt >= MIN_CROSSWALK_ROAD_FT;
+
+  return (
+    <Shell icon={IconRoad} title="Streets" subtitle={`${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""} · ${twoWay ? "two-way" : "one-way"}`} onClose={() => setSelection(null)}>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Right-hand lane</span>
+        <div className="grid grid-cols-3 gap-1.5">
+          {LANE_USE_CHOICES.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              disabled={c.id !== null && !canReserve}
+              aria-pressed={current === c.id}
+              onClick={() => setReservedLane(spec.id, c.id, wholeRoad)}
+              className={`flex flex-col items-center gap-0.5 rounded-xl py-2 text-[11px] font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+                current === c.id ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+              }`}
+            >
+              <span className="text-base leading-none">{c.emoji}</span>
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] leading-snug text-zinc-500">
+          {canReserve ? LANE_USE_CHOICES.find((c) => c.id === current)?.blurb : "A road needs at least two lanes in a direction to set one aside."}
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Direction</span>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            aria-pressed={twoWay}
+            onClick={() => setRoadOneWay(spec.id, false, wholeRoad)}
+            className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 ${twoWay ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+          >
+            ⇅ Two-way
+          </button>
+          <button
+            type="button"
+            aria-pressed={!twoWay}
+            onClick={() => setRoadOneWay(spec.id, true, wholeRoad)}
+            className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 ${!twoWay ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+          >
+            ↑ One-way
+          </button>
+        </div>
+        <p className="text-[11px] leading-snug text-zinc-500">
+          One-way keeps the direction you clicked and removes the other side. Pairs of one-way streets move more cars through a grid.
+        </p>
+      </div>
+
+      <label className="flex items-center justify-between text-xs font-semibold text-zinc-600">
+        <span>Apply to the whole road</span>
+        <input type="checkbox" className="accent-fuchsia-600" checked={wholeRoad} onChange={(e) => setWholeRoad(e.target.checked)} />
+      </label>
+
+      {!inScenario && (
+        <label className="flex items-center justify-between text-xs font-semibold text-zinc-600">
+          <span>Buses and bikes in traffic</span>
+          <input type="checkbox" className="accent-fuchsia-600" checked={mixed} onChange={(e) => setTrafficMix(e.target.checked ? MIXED_MIX : CLASSIC_MIX)} />
+        </label>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Pedestrians</span>
+        <button
+          type="button"
+          disabled={!canCross && !spec.crosswalk}
+          onClick={() => setCrosswalk(spec.id, !spec.crosswalk)}
+          className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+            spec.crosswalk ? "bg-gradient-to-br from-amber-300 to-orange-400 text-[#2b1c40] shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+          }`}
+        >
+          🚶 {spec.crosswalk ? "Remove crossing" : "Add a crossing here"}
+        </button>
+        <p className="text-[11px] leading-snug text-zinc-500">
+          {spec.jaywalkers && !spec.crosswalk
+            ? "People keep crossing here without a crossing and stepping into traffic. Give them one."
+            : "Cars stop while people cross. Great where people really do cross, a drag where they don't."}
+        </p>
+      </div>
     </Shell>
   );
 }

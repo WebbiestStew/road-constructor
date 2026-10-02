@@ -99,7 +99,18 @@ export interface EdgeSpec {
   laneMoves?: LaneMove[][];
   /** True for an auto-generated Texas turnaround slip lane — always yields at its merge, below any real road class's priority. */
   isTexasTurnaround?: boolean;
+  /** The rightmost lane is set aside for buses or bikes. Needs 2+ lanes; ignored otherwise. */
+  reservedLane?: ReservedLane;
+  /** A mid-block pedestrian crossing: traffic stops for people who press the button. */
+  crosswalk?: boolean;
+  /** People want to cross here whether or not there is a crossing; without one they step out into traffic. Set by levels. */
+  jaywalkers?: boolean;
 }
+
+export type ReservedLane = "bus" | "bike";
+
+/** What a simulated road user is. Most are cars; the rest only appear when the level or sandbox asks for mixed traffic. */
+export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance";
 
 /** The editable network as plain, structured-cloneable data. */
 export interface NetworkSnapshot {
@@ -133,6 +144,19 @@ export interface Edge3D {
   zone?: ZoneSpec;
   isRoundaboutRing: boolean;
   isTexasTurnaround: boolean;
+  /**
+   * How far (ft) this carriageway sits to the right of the road's centerline spline. The two directions of a
+   * two-way road are drawn side by side, each shifted to its own right (half the median further on divided
+   * roads); one-way roads and rings have none.
+   */
+  lateralShiftFt: number;
+  /** Vehicles drift toward the centerline over the last/first stretch of an end that meets a junction or dead end, instead of snapping sideways. */
+  shiftTaperStart: boolean;
+  shiftTaperEnd: boolean;
+  /** Which kind of road user the rightmost lane is reserved for, or null. */
+  reservedLane: ReservedLane | null;
+  crosswalk: boolean;
+  jaywalkers: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
   /** Player-set lane arrows copied from the spec (null = automatic). */
@@ -197,6 +221,11 @@ export interface VehicleState {
   stuckTimeS: number;
   /** True for the 15% of vehicles simulated as 18-wheeler semis rather than passenger sedans. */
   isTruck: boolean;
+  kind: VehicleKind;
+  /** People on board, for the "people moved" score: a bus carries far more than a car. */
+  passengers: number;
+  /** Hard ceiling on this vehicle's speed regardless of the limit (a bicycle, say). Infinity = none. */
+  maxSpeedFtps: number;
   /** Weight-to-power ratio, lb/hp — drives how hard road grade hits this vehicle's climbing speed. */
   weightToPowerLbPerHp: number;
   /** Fixed body paint color (0-1 components), assigned once at spawn from a truck- or sedan-specific palette. */
@@ -221,11 +250,22 @@ export type WorkerInMessage =
   /** Breaks down one random moving car on an open stretch of road for `durationS` sim-seconds, so traffic has to cope with a blockage. */
   | { type: "breakdown"; durationS: number }
   /** Live tweaks while traffic is running: speed limits and lane arrows per edge, signal/priority control per node. */
-  | { type: "patchEdges"; edges: { id: string; speedLimitMph: number; laneMoves: LaneMove[][] | null }[] }
+  | { type: "patchEdges"; edges: EdgePatch[] }
+  /** How much of the traffic is buses and bikes (0-1 each). Zero keeps the classic cars-and-trucks mix. */
+  | { type: "setTrafficMix"; bus: number; bike: number }
   | { type: "patchNodes"; nodes: { id: string; control: JunctionControl | null }[] }
   | { type: "setDemand"; edgeId: string; vehiclesPerHour: number }
   | { type: "setColorMode"; heatmap: boolean }
   | { type: "returnBuffers"; matrices: ArrayBuffer; colors: ArrayBuffer; taillightColors: ArrayBuffer };
+
+/** A live edit to one road while traffic runs. */
+export interface EdgePatch {
+  id: string;
+  speedLimitMph: number;
+  laneMoves: LaneMove[][] | null;
+  reservedLane?: ReservedLane | null;
+  crosswalk?: boolean;
+}
 
 export interface ContractStatus {
   edgeId: string;
@@ -266,6 +306,8 @@ export type WorkerOutMessage =
       avgSpeedFtS: number;
       throughputLastMinute: number;
       spawnedTotal: number;
+      /** People carried by the vehicles that completed their routes (a bus counts for all its riders). */
+      peopleMovedTotal: number;
       /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */
       completedTripsTotal: number;
       /** The heavy per-edge statistics. Only present on ticks where they were recomputed (about 5 per second); the main thread keeps the last set. */

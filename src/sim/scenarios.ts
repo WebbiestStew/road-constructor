@@ -72,6 +72,8 @@ export interface ScenarioDef {
   kind?: "manage";
   /** True for levels built from real OpenStreetMap roads (shown with their own section and credit). */
   real?: boolean;
+  /** Share of traffic that is buses and bikes in this level. Omitted = cars and trucks only. */
+  trafficMix?: { bus: number; bike: number };
   /** Trouble that arrives at fixed moments of the run (a surge, a breakdown), so every attempt faces the same thing. */
   scriptedEvents?: ScriptedEvent[];
   createEvaluator: () => ScenarioEvaluator;

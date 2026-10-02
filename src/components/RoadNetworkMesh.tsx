@@ -38,6 +38,8 @@ const TEXAS_TURNAROUND_COLOR = "#8a4a2f";
 const TEXAS_TURNAROUND_SELECTED_COLOR = "#a85a3a";
 const WHITE_COLOR = "#f4f4f5";
 const YELLOW_COLOR = "#eab308";
+const BUS_LANE_COLOR = "#b4432f";
+const BIKE_LANE_COLOR = "#2f9e5b";
 const BARRIER_COLOR = "#9a9aa0";
 const PIER_COLOR = "#75757c";
 const DECK_UNDERSIDE_COLOR = "#5a5a62";
@@ -99,10 +101,6 @@ const PIER_COLUMN_BASE_HALF_WIDTH_FT = 1.7;
 
 /** Lateral half-gap (ft) between the two painted lines of a centerline, undivided two-way roads. */
 const CENTERLINE_GAP_FT = 0.3;
-/** Wider painted buffer (ft) for divided-class centerlines, reading as a neutral median rather than a plain double-yellow. */
-const DIVIDED_CENTERLINE_GAP_FT = 1.6;
-/** A lane-boundary offset this close to 0 is treated as landing on the centerline itself, so it's painted yellow (below) instead of getting a redundant white dash. */
-const CENTERLINE_EPSILON_FT = 0.05;
 
 /**
  * The terrain is a solid plane, so a cutting or tunnel would simply vanish beneath it (leaving only a few
@@ -134,23 +132,29 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const isCenterlineEdge = isTwoWay && !edge.isRoundaboutRing && !edge.isTexasTurnaround;
 
   const stripes: StripeSpec[] = [];
-  stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5), color: WHITE_COLOR });
+  // On an undivided two-way road this carriageway's left edge is the road's centerline: a double yellow line
+  // (the opposite carriageway draws the same one from its side). Everywhere else it is a plain white edge line.
+  const leftIsCenterline = isCenterlineEdge && !roadClass.divided;
+  if (leftIsCenterline) {
+    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth - CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
+    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth + CENTERLINE_GAP_FT, 0.35), color: YELLOW_COLOR });
+  } else {
+    stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5), color: WHITE_COLOR });
+  }
   stripes.push({ geometry: buildSolidStripe(edge, pavedHalfWidth, 0.5), color: WHITE_COLOR });
 
   for (let k = 1; k < edge.lanes; k++) {
     const offset = (k - edge.lanes / 2) * edge.laneWidthFt;
-    // The boundary between a direction's own lanes can land exactly on the
-    // shared two-way centerline (offset 0) purely as an artifact of the
-    // symmetric lane-offset formula — paint that one yellow below instead of
-    // stacking a redundant white dash on top of it.
-    if (isCenterlineEdge && Math.abs(offset) < CENTERLINE_EPSILON_FT) continue;
     stripes.push({ geometry: buildDashedStripe(edge, offset), color: WHITE_COLOR });
   }
 
-  if (isCenterlineEdge) {
-    const gap = roadClass.divided ? DIVIDED_CENTERLINE_GAP_FT : CENTERLINE_GAP_FT;
-    stripes.push({ geometry: buildSolidStripe(edge, -gap, 0.35), color: YELLOW_COLOR });
-    stripes.push({ geometry: buildSolidStripe(edge, gap, 0.35), color: YELLOW_COLOR });
+  // A lane set aside for buses or bikes is painted its own colour, so the player can read it at a glance.
+  if (edge.reservedLane && edge.length > 20) {
+    const center = (edge.lanes - 0.5 - edge.lanes / 2) * edge.laneWidthFt;
+    stripes.push({
+      geometry: buildSolidStripe(edge, center, edge.laneWidthFt - 1.4, 0.022),
+      color: edge.reservedLane === "bus" ? BUS_LANE_COLOR : BIKE_LANE_COLOR,
+    });
   }
 
   if (edge.isFreeway) {
@@ -188,6 +192,8 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const canMarkJunction = !edge.isRoundaboutRing && edge.length > 25;
   if (canMarkJunction && hasStopBar) markingMeshes.push(buildStopBar(edge));
   if (canMarkJunction && hasCrosswalk) markingMeshes.push(...buildCrosswalkBars(edge));
+  // A mid-block crossing sits halfway along the segment.
+  if (edge.crosswalk && edge.length > 60) markingMeshes.push(...buildCrosswalkBars(edge, edge.length / 2 - 6, 12, 2.4, 2));
 
   const piers = computePierDescriptors(edge);
   const pierColumnGeometries = piers.map((pier) =>
@@ -206,6 +212,12 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const abutments: AbutmentDescriptor[] = [];
   if (edge.isElevated && !edge.isRoundaboutRing) {
     const abutmentHalfWidth = pavedHalfWidth + SHOULDER_FT;
+    // The deck sits to this carriageway's side of the centerline, and so must its abutment walls.
+    const shiftAt = (t: number, p: THREE.Vector3): [number, number] => {
+      const tan = edge.spline.getTangentAt(t);
+      const len = Math.hypot(tan.x, tan.z) || 1;
+      return [p.x + (-tan.z / len) * edge.lateralShiftFt, p.z + (tan.x / len) * edge.lateralShiftFt];
+    };
     if (startPoint.y > 2) {
       // no abutment: this end continues from an already-elevated point
       // (an interior joint of a longer elevated corridor — a pier belongs
@@ -213,8 +225,9 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     } else {
       const tangent = edge.spline.getTangentAt(0);
       const heightFt = Math.max(DECK_THICKNESS_FT + 1, edge.spline.getPointAt(0.02).y);
+      const [sx, sz] = shiftAt(0, startPoint);
       abutments.push({
-        position: [startPoint.x, heightFt / 2, startPoint.z],
+        position: [sx, heightFt / 2, sz],
         rotationY: Math.atan2(tangent.x, tangent.z),
         halfWidth: abutmentHalfWidth,
         heightFt,
@@ -223,8 +236,9 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     if (endPoint.y <= 2) {
       const tangent = edge.spline.getTangentAt(1);
       const heightFt = Math.max(DECK_THICKNESS_FT + 1, edge.spline.getPointAt(0.98).y);
+      const [ex, ez] = shiftAt(1, endPoint);
       abutments.push({
-        position: [endPoint.x, heightFt / 2, endPoint.z],
+        position: [ex, heightFt / 2, ez],
         rotationY: Math.atan2(tangent.x, tangent.z),
         halfWidth: abutmentHalfWidth,
         heightFt,
@@ -549,7 +563,7 @@ const EdgeGroup = memo(function EdgeGroup({
     const point: [number, number, number] = [event.point.x, event.point.y, event.point.z];
 
     // Traffic Manager tools just select a road, in either mode.
-    if (store.tool === "lanes" || store.tool === "speed") {
+    if (store.tool === "lanes" || store.tool === "speed" || store.tool === "street") {
       store.setSelection({ kind: "edge", id: edge.id });
       return;
     }

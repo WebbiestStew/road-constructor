@@ -12,7 +12,7 @@ import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
 import { assembleNetworkCached, computeRoute } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
-import { JunctionCard, LaneManagerCard, SpeedLimitCard, ToolHintCard } from "./ManagerPanels";
+import { JunctionCard, LaneManagerCard, SpeedLimitCard, StreetCard, ToolHintCard } from "./ManagerPanels";
 import { useEditLog } from "@/lib/editLog";
 import CityMood from "./CityMood";
 import {
@@ -23,6 +23,7 @@ import {
   IconGauge,
   IconJunction,
   IconLanes,
+  IconRoad,
   IconRoundabout,
   IconSignal,
   IconSpeedSign,
@@ -611,6 +612,7 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
   const activeScenarioId = useEditorStore((s) => s.activeScenarioId);
   const demandLocked = activeScenarioId !== null;
   const setSelection = useEditorStore((s) => s.setSelection);
+  const mixed = useEditorStore((s) => s.trafficMix.bus + s.trafficMix.bike > 0);
 
   const entries = edges.filter((e) => e.zone?.type === "entry");
   const destinations = edges.filter((e) => e.zone?.type === "destination");
@@ -670,13 +672,22 @@ function SimulateInfo({ sim }: { sim: UseTrafficSimulationReturn }) {
             unit="veh/h"
             gradient="from-orange-400 to-amber-500"
           />
-          <StatCard
-            icon={IconFlag}
-            label="Throughput"
-            value={metrics.throughputPerMinute.toString()}
-            unit="/min"
-            gradient="from-orange-400 to-amber-500"
-          />
+          {mixed ? (
+            <StatCard
+              icon={IconCar}
+              label="People moved"
+              value={Math.round(metrics.peopleMovedTotal).toLocaleString()}
+              gradient="from-pink-400 to-rose-500"
+            />
+          ) : (
+            <StatCard
+              icon={IconFlag}
+              label="Throughput"
+              value={metrics.throughputPerMinute.toString()}
+              unit="/min"
+              gradient="from-orange-400 to-amber-500"
+            />
+          )}
           <StatCard
             icon={IconClock}
             label="Sim time"
@@ -912,6 +923,17 @@ function ManagerToolCard() {
       />
     );
   }
+  if (tool === "street") {
+    return selection?.kind === "edge" ? (
+      <StreetCard wholeRoad={wholeRoad} setWholeRoad={setWholeRoad} />
+    ) : (
+      <ToolHintCard
+        icon={IconRoad}
+        title="Streets"
+        body="Click a road to reserve its right lane for buses or bikes, make it one-way, or add a pedestrian crossing."
+      />
+    );
+  }
   if (tool === "junction") {
     return selection?.kind === "node" ? (
       <JunctionCard allowRebuild />
@@ -933,7 +955,7 @@ export default function InfoPanel({
 }) {
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
-  const managing = tool === "lanes" || tool === "speed" || tool === "junction";
+  const managing = tool === "lanes" || tool === "speed" || tool === "junction" || tool === "street";
 
   return (
     <div className="pointer-events-auto absolute right-4 top-60 z-20 flex max-h-[calc(100vh-19rem)] w-80 flex-col gap-3 overflow-y-auto hud-scrollbar lg:top-20 lg:max-h-[calc(100vh-16rem)] max-md:inset-x-2 max-md:bottom-[4.5rem] max-md:top-auto max-md:max-h-[38vh] max-md:w-auto">

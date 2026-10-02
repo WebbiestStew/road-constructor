@@ -12,8 +12,8 @@ export default function BudgetBar() {
   const budget = useEditorStore((s) => s.budget);
   // Campaign levels start from their own budget, not the free-build default.
   const cap = useEditorStore((s) => (s.activeScenarioId ? getScenarioById(s.activeScenarioId)?.startingBudget : undefined)) ?? STARTING_BUDGET;
-  const spent = cap - budget;
-  const fraction = Math.min(1, Math.max(0, spent / cap));
+  const top = Math.max(cap, budget);
+  const fraction = Math.min(1, Math.max(0, (top - budget) / top));
 
   if (isSandboxBudget(budget)) {
     return (
@@ -38,7 +38,7 @@ export default function BudgetBar() {
           >
             {formatMoney(budget)}
           </span>
-          <span className="text-xs font-semibold text-zinc-500">/ {formatMoney(cap)}</span>
+          <span className="text-xs font-semibold text-zinc-500">/ {formatMoney(top)}</span>
         </div>
         <div className="h-1.5 w-40 max-md:w-28 overflow-hidden rounded-full bg-black/10">
           <div

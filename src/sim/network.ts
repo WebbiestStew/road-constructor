@@ -9,6 +9,7 @@ import {
 import { mphToFtps } from "./types";
 import type {
   Edge3D,
+  EdgePatch,
   EdgeSpec,
   LaneMove,
   NetworkSnapshot,
@@ -200,6 +201,12 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       zone: spec.zone,
       isRoundaboutRing: spec.isRoundaboutRing ?? false,
       isTexasTurnaround: spec.isTexasTurnaround ?? false,
+      lateralShiftFt: 0,
+      shiftTaperStart: false,
+      shiftTaperEnd: false,
+      reservedLane: spec.lanes >= 2 ? (spec.reservedLane ?? null) : null,
+      crosswalk: spec.crosswalk ?? false,
+      jaywalkers: spec.jaywalkers ?? false,
       nextEdgeIds: [],
       manualLaneMoves: spec.laneMoves ?? null,
       nextMoves: new Map(),
@@ -210,6 +217,21 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   });
 
   const edgesById = new Map(edges.map((e) => [e.id, e]));
+
+  // The two directions of a two-way road sit side by side: each carriageway is shifted to its own right of the
+  // shared centerline (and half a median further on divided classes), so opposing traffic never shares pavement.
+  const directed = new Set(edges.map((e) => `${e.fromNodeId}>${e.toNodeId}`));
+  for (const edge of edges) {
+    if (edge.isRoundaboutRing || edge.isTexasTurnaround) continue;
+    if (!directed.has(`${edge.toNodeId}>${edge.fromNodeId}`)) continue;
+    const cls = ROAD_CLASSES[edge.roadClassId];
+    edge.lateralShiftFt = (edge.lanes * edge.laneWidthFt) / 2 + (cls.divided ? cls.medianGapFt / 2 : 0);
+    // Where the road merely continues through a node (two neighbours) both sides keep the full shift;
+    // junctions and dead ends pull cars in toward the centre instead.
+    edge.shiftTaperStart = (neighborsByNode.get(edge.fromNodeId)?.size ?? 0) !== 2;
+    edge.shiftTaperEnd = (neighborsByNode.get(edge.toNodeId)?.size ?? 0) !== 2;
+  }
+
   for (const edge of edges) {
     edge.nextEdgeIds = edges
       .filter((e2) => e2.fromNodeId === edge.toNodeId)
@@ -349,10 +371,12 @@ function orderMoves(set: Set<LaneMove>): LaneMove[] {
 export function patchEdge(
   edge: Edge3D,
   edgesById: Map<string, Edge3D>,
-  patch: { speedLimitMph: number; laneMoves: LaneMove[][] | null }
+  patch: EdgePatch
 ): void {
   edge.speedLimitMph = patch.speedLimitMph;
   edge.manualLaneMoves = patch.laneMoves;
+  if (patch.reservedLane !== undefined) edge.reservedLane = edge.lanes >= 2 ? patch.reservedLane : null;
+  if (patch.crosswalk !== undefined) edge.crosswalk = patch.crosswalk;
   computeLaneUse(edge, edgesById);
 }
 
@@ -606,4 +630,18 @@ export function computeSignalPhaseGroups(
     }
   }
   return { groupA, groupB };
+}
+
+/**
+ * True while every entry can still reach some destination and every destination can still be reached from some
+ * entry. One-way conversions use this to refuse an edit that would strand traffic. A network with no entries or
+ * no destinations has nothing to protect, so it passes.
+ */
+export function trafficStaysConnected(snapshot: NetworkSnapshot): boolean {
+  const network = assembleNetwork(snapshot);
+  const entries = network.edges.filter((e) => e.zone?.type === "entry");
+  const dests = network.edges.filter((e) => e.zone?.type === "destination");
+  if (entries.length === 0 || dests.length === 0) return true;
+  const reaches = (from: Edge3D, targets: Edge3D[]) => targets.some((t) => t.id !== from.id && computeRoute(network, from.id, t.id));
+  return entries.every((en) => reaches(en, dests)) && dests.every((d) => entries.some((en) => en.id !== d.id && computeRoute(network, en.id, d.id)));
 }

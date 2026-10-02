@@ -2,13 +2,14 @@
 
 import { useEffect, type ComponentType, type SVGProps } from "react";
 import { useEditorStore, type EditorTool } from "@/state/editorStore";
-import { IconInspect, IconJunction, IconLanes, IconSpeedSign } from "./icons";
+import { IconInspect, IconJunction, IconLanes, IconRoad, IconSpeedSign } from "./icons";
 
 const TOOLS: { id: EditorTool; icon: ComponentType<SVGProps<SVGSVGElement>>; label: string; hint: string; key: string }[] = [
   { id: "inspect", icon: IconInspect, label: "Select", hint: "Look at a road or junction", key: "V" },
   { id: "lanes", icon: IconLanes, label: "Lane arrows", hint: "Choose where each lane can go", key: "L" },
   { id: "speed", icon: IconSpeedSign, label: "Speed limits", hint: "Set the limit on a road", key: "P" },
   { id: "junction", icon: IconJunction, label: "Junctions", hint: "Signals, priority, timing", key: "J" },
+  { id: "street", icon: IconRoad, label: "Streets", hint: "Bus and bike lanes, one-way, crossings", key: "K" },
 ];
 
 /** The always-on Traffic Manager: a vertical tool rail that works while traffic is running. */
