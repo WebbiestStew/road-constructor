@@ -13,7 +13,7 @@ speed limits and signal timing, while every car drives for real. Play it on desk
   MOBIL for lane changes, running in a Web Worker at 30 Hz so the UI never stalls.
 - **Traffic Manager tools** (in the spirit of TM:PE): per-lane turn arrows, speed limits, signal groups, priority
   junctions, signal *offsets* so you can build a green wave, bus and bike lanes, one-way streets and pedestrian
-  crossings.
+  crossings, bus stops and street parking. Roads cost upkeep while traffic runs; parking brings some back.
 - **A living city.** Buses and bicycles share the road, ambulances race through it, people cross at crossings (or step
   out where there isn't one), and a 24-hour cycle with rain and fog changes how everyone drives.
 - **Real cities.** Nine levels built from actual OpenStreetMap data — the Los Angeles Four Level, Times Square,
@@ -24,7 +24,10 @@ speed limits and signal timing, while every car drives for real. Play it on desk
   car, a stadium letting out), a seeded daily scenario, and a no-money-limit sandbox.
 - **A full road builder.** Draw roads at seven elevations from tunnel to a tier-3 flyover, with grade limits and
   clearance checks.
-- **Photo mode, share links, night/dusk lighting, ride-along camera, heatmap.**
+- **Photo mode, share links, night/dusk lighting, ride-along camera, heatmap.** Save a shareable result card from any
+  finished level, or record an 8-second clip of your city from photo mode.
+- **A guided first level.** *First Shift* walks a new player through the three core tools and ticks each step off by
+  what they actually changed.
 - **Runs cool on weak machines.** Three quality tiers, an adaptive frame limiter that idles when nothing moves,
   and an auto-downgrade if the frame rate drops.
 - **Works on phones.** One finger pans, two fingers pinch and rotate, tap to build.
