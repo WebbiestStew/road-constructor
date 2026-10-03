@@ -7,7 +7,7 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork, assembleNetworkCached, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
-import { widthScaleAt } from "@/sim/laneGeometry";
+import { carriagewayOffsetAt, widthScaleAt } from "@/sim/laneGeometry";
 import { useEditorStore } from "@/state/editorStore";
 import { getPrefs } from "@/lib/prefs";
 import { usePhotoMode } from "@/lib/photoMode";
@@ -29,6 +29,7 @@ import {
   buildTaperedPierColumn,
   computePierDescriptors,
   indexPierConflicts,
+  buildJunctionFills,
   visibleRanges,
   type PierDescriptor,
 } from "./roadGeometry";
@@ -52,6 +53,8 @@ const DECK_UNDERSIDE_COLOR = "#5a5a62";
 const JOINT_COLOR = "#232326";
 const ABUTMENT_COLOR = "#7d7d84";
 const SHOULDER_FT = 4;
+/** A deck lower than this at its end just meets the ground; only taller ones get a retaining wall. */
+const ABUTMENT_MIN_HEIGHT_FT = 4;
 /** How far the paved slab is extruded downward for an elevated edge, so bridges read as a real structure instead of a floating plane. */
 const DECK_THICKNESS_FT = 2.5;
 
@@ -88,6 +91,7 @@ interface EdgeGeometries {
   /** A flat strip laid on the ground over the stretch of this edge that runs underground, so cuttings and tunnels stay visible from above. Null for at-grade and raised edges. */
   belowGradeOverlay: THREE.BufferGeometry | null;
   stripes: StripeSpec[];
+  gorePaves: THREE.BufferGeometry[];
   barriers: THREE.BufferGeometry[];
   parapets: THREE.BufferGeometry[];
   piers: PierDescriptor[];
@@ -183,6 +187,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   };
 
   const stripes: StripeSpec[] = [];
+  const gorePaves: THREE.BufferGeometry[] = [];
   // The ramp's edge line on the side facing the through road is left out where the two run hard together (an added
   // lane): the through road's own edge line is the boundary there.
   const innerSide = edge.padStart?.awaySign ?? edge.padEnd?.awaySign;
@@ -190,7 +195,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const adjEnd = edge.padEnd ? 1 - edge.padEnd.adjacentUntil / edge.length : 1;
   // Gore wedges where this road splits from, or merges into, a bigger one.
   for (const gore of buildGores(edge)) {
-    stripes.push({ geometry: gore.pave, color: ASPHALT_COLOR });
+    gorePaves.push(gore.pave);
     stripes.push({ geometry: gore.hatching, color: WHITE_COLOR });
   }
   // On an undivided two-way road this carriageway's left edge is the road's centerline: a double yellow line
@@ -294,38 +299,35 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
 
   const abutments: AbutmentDescriptor[] = [];
   if (edge.isElevated && !edge.isRoundaboutRing) {
-    const abutmentHalfWidth = pavedHalfWidth + SHOULDER_FT;
-    // The deck sits to this carriageway's side of the centerline, and so must its abutment walls.
-    const shiftAt = (t: number, p: THREE.Vector3): [number, number] => {
+    // The deck sits where this carriageway really lies (its side of the centreline, any ramp pull), and so must its
+    // abutment walls. A ramp that has come down to within a few feet of the ground needs no wall: it simply meets grade.
+    const abutmentAt = (atEnd: boolean): AbutmentDescriptor | null => {
+      const t = atEnd ? 1 : 0;
+      const deckY = edge.spline.getPointAt(atEnd ? 0.98 : 0.02).y;
+      if (deckY < ABUTMENT_MIN_HEIGHT_FT) return null;
+      const heightFt = Math.max(DECK_THICKNESS_FT + 1, deckY);
+      const dist = atEnd ? edge.length : 0;
+      const k = widthScaleAt(edge, dist);
       const tan = edge.spline.getTangentAt(t);
       const len = Math.hypot(tan.x, tan.z) || 1;
-      return [p.x + (-tan.z / len) * edge.lateralShiftFt, p.z + (tan.x / len) * edge.lateralShiftFt];
-    };
-    if (startPoint.y > 2) {
-      // no abutment: this end continues from an already-elevated point
-      // (an interior joint of a longer elevated corridor — a pier belongs
-      // there, not a ground transition wall)
-    } else {
-      const tangent = edge.spline.getTangentAt(0);
-      const heightFt = Math.max(DECK_THICKNESS_FT + 1, edge.spline.getPointAt(0.02).y);
-      const [sx, sz] = shiftAt(0, startPoint);
-      abutments.push({
-        position: [sx, heightFt / 2, sz],
-        rotationY: Math.atan2(tangent.x, tangent.z),
-        halfWidth: abutmentHalfWidth,
+      const off = carriagewayOffsetAt(edge, dist, k);
+      const p = edge.spline.getPointAt(t);
+      return {
+        position: [p.x + (-tan.z / len) * off, heightFt / 2, p.z + (tan.x / len) * off],
+        rotationY: Math.atan2(tan.x, tan.z),
+        halfWidth: (pavedHalfWidth + SHOULDER_FT) * k,
         heightFt,
-      });
+      };
+    };
+    // An end that continues from an already-elevated point is an interior joint of a longer corridor: a pier belongs
+    // there, not a ground transition wall.
+    if (startPoint.y <= 2) {
+      const a = abutmentAt(false);
+      if (a) abutments.push(a);
     }
     if (endPoint.y <= 2) {
-      const tangent = edge.spline.getTangentAt(1);
-      const heightFt = Math.max(DECK_THICKNESS_FT + 1, edge.spline.getPointAt(0.98).y);
-      const [ex, ez] = shiftAt(1, endPoint);
-      abutments.push({
-        position: [ex, heightFt / 2, ez],
-        rotationY: Math.atan2(tangent.x, tangent.z),
-        halfWidth: abutmentHalfWidth,
-        heightFt,
-      });
+      const a = abutmentAt(true);
+      if (a) abutments.push(a);
     }
   }
 
@@ -333,6 +335,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     ribbon,
     belowGradeOverlay,
     stripes,
+    gorePaves,
     barriers,
     parapets,
     piers,
@@ -735,6 +738,12 @@ const EdgeGroup = memo(function EdgeGroup({
         </mesh>
       )}
 
+      {geometries.gorePaves.map((geo, i) => (
+        <mesh key={i} geometry={geo} receiveShadow>
+          <meshStandardMaterial color={ASPHALT_COLOR} roughness={0.95} metalness={0.05} />
+        </mesh>
+      ))}
+
       {geometries.stripes.map((stripe, i) => (
         <mesh key={i} geometry={stripe.geometry} receiveShadow={false}>
           <meshStandardMaterial
@@ -853,6 +862,9 @@ export default function RoadNetworkMesh({
     indexPierConflicts(assembled.edges);
     return assembled;
   }, [nodes, edges, decorative]);
+
+  // Bare-ground triangles at the nose of every merge and exit, filled with asphalt.
+  const junctionFills = useMemo(() => buildJunctionFills(network.edges), [network]);
 
   const [turnaroundHover, setTurnaroundHover] = useState<{ edgeId: string; point: THREE.Vector3 } | null>(null);
   const lastHoverPointRef = useRef<THREE.Vector3 | null>(null);
@@ -1012,6 +1024,12 @@ export default function RoadNetworkMesh({
           animateIn={armed && !decorative}
         />
       ))}
+
+      {junctionFills && (
+        <mesh geometry={junctionFills} receiveShadow>
+          <meshStandardMaterial color={ASPHALT_COLOR} roughness={0.95} metalness={0.05} />
+        </mesh>
+      )}
 
       {turnaroundPlan && <TurnaroundPreview plan={turnaroundPlan} />}
 

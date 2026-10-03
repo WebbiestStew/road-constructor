@@ -414,6 +414,9 @@ export interface PierDescriptor {
  * regular intervals along the centerline wherever the deck is raised more
  * than 2 ft above grade.
  */
+/** Decks lower than this get no piers. */
+const PIER_MIN_DECK_HEIGHT_FT = 7;
+
 export function computePierDescriptors(edge: Edge3D, intervalFt = 90, ignoreSkips = false): PierDescriptor[] {
   if (!edge.isElevated) return [];
 
@@ -427,17 +430,21 @@ export function computePierDescriptors(edge: Edge3D, intervalFt = 90, ignoreSkip
     const t = clamp01(dist / edge.length);
     if (!ignoreSkips && edge.pierSkips?.has(Math.round(dist))) continue;
     edgePointAt(edge, t, pointScratch);
-    if (pointScratch.y <= 2) continue;
+    // A deck only a few feet off the ground rests on fill, not on columns: a cap beam there would show as a slab
+    // lying across the lanes.
+    if (pointScratch.y <= PIER_MIN_DECK_HEIGHT_FT) continue;
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
     const rotationY = Math.atan2(rightScratch.x, rightScratch.z);
-    pointScratch.addScaledVector(rightScratch, edge.lateralShiftFt);
+    const k = widthScaleAt(edge, dist);
+    pointScratch.addScaledVector(rightScratch, carriagewayOffsetAt(edge, dist, k));
+    const half = pavedHalfWidth * k;
     descriptors.push({
       distanceFt: dist,
       capPosition: [pointScratch.x, pointScratch.y - 1.2, pointScratch.z],
       rotationY,
-      capLength: pavedHalfWidth * 2,
+      capLength: half * 2,
       columnHeight: Math.max(pointScratch.y - 2.2, 1),
-      columnOffsets: [-pavedHalfWidth + 3, pavedHalfWidth - 3],
+      columnOffsets: [-half + 3, half - 3],
     });
   }
   return descriptors;
@@ -654,7 +661,7 @@ function goreFor(edge: Edge3D, pad: JoinPad, atEnd: boolean): GoreGeometry | nul
   if (pave.length === 0) return null;
   const make = (pos: number[]) => {
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("position", new THREE.Float32BufferAttribute(faceUp(pos), 3));
     g.computeVertexNormals();
     g.computeBoundingSphere();
     return g;
@@ -674,4 +681,129 @@ export function buildGores(edge: Edge3D): GoreGeometry[] {
     if (g) out.push(g);
   }
   return out;
+}
+
+/** Reorders each triangle so it faces up, whichever way round its corners were given (one-sided materials cull the rest). */
+function faceUp(pos: number[]): number[] {
+  const out = pos.slice();
+  for (let i = 0; i + 8 < out.length; i += 9) {
+    const ux = out[i + 3] - out[i], uz = out[i + 5] - out[i + 2];
+    const vx = out[i + 6] - out[i], vz = out[i + 8] - out[i + 2];
+    // y component of (u x v): negative means the triangle faces down
+    if (uz * vx - ux * vz < 0) {
+      for (let k = 0; k < 3; k++) {
+        const t = out[i + 3 + k];
+        out[i + 3 + k] = out[i + 6 + k];
+        out[i + 6 + k] = t;
+      }
+    }
+  }
+  return out;
+}
+
+/** The two outer corners of a road's pavement where it begins (or ends), exactly where its asphalt ribbon is cut. */
+function endCorners(edge: Edge3D, atEnd: boolean): [THREE.Vector3, THREE.Vector3] {
+  const tangent = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  const t = atEnd ? 1 : 0;
+  const dist = atEnd ? edge.length : 0;
+  edgePointAt(edge, t, p);
+  edgeRightVectorAt(edge, t, tangent, right);
+  const k = widthScaleAt(edge, dist);
+  const half = ((edge.lanes * edge.laneWidthFt) / 2 + 4) * k;
+  const centre = carriagewayOffsetAt(edge, dist, k);
+  const lift = !edge.sunken && p.y < 0 ? -p.y : 0;
+  const at = (lateral: number) => p.clone().addScaledVector(right, lateral).add(new THREE.Vector3(0, lift, 0));
+  return [at(centre - half), at(centre + half)];
+}
+
+/** Roads whose headings differ by no more than this at a node are one road splitting or joining, not a crossing. */
+const FILL_MAX_ANGLE_RAD = (50 * Math.PI) / 180;
+
+/**
+ * Where a road splits in two (an exit) or two roads join (a merge), the pavements of the roads involved are cut square
+ * and leave a triangle of bare ground at the nose. This returns asphalt that fills that triangle: the convex outline of
+ * the pavement corners of every road in the group at the node.
+ */
+export function buildJunctionFills(edges: Edge3D[]): THREE.BufferGeometry | null {
+  const inBy = new Map<string, Edge3D[]>();
+  const outBy = new Map<string, Edge3D[]>();
+  for (const e of edges) {
+    if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
+    (inBy.get(e.toNodeId) ?? inBy.set(e.toNodeId, []).get(e.toNodeId)!).push(e);
+    (outBy.get(e.fromNodeId) ?? outBy.set(e.fromNodeId, []).get(e.fromNodeId)!).push(e);
+  }
+  const tIn = new THREE.Vector3();
+  const tOut = new THREE.Vector3();
+  const positions: number[] = [];
+  for (const [nodeId, ins] of inBy) {
+    const outs = outBy.get(nodeId);
+    if (!outs) continue;
+    // Pair up roads that carry on along one line of travel, then group the pairs that share a road.
+    const parent = new Map<Edge3D, Edge3D>();
+    const find = (e: Edge3D): Edge3D => {
+      let r = e;
+      while (parent.get(r) && parent.get(r) !== r) r = parent.get(r)!;
+      return r;
+    };
+    const used = new Set<Edge3D>();
+    for (const i of ins) {
+      i.spline.getTangentAt(1, tIn);
+      for (const o of outs) {
+        if (o.toNodeId === i.fromNodeId) continue;
+        o.spline.getTangentAt(0, tOut);
+        const la = Math.hypot(tIn.x, tIn.z) || 1;
+        const lb = Math.hypot(tOut.x, tOut.z) || 1;
+        const ang = Math.acos(Math.max(-1, Math.min(1, (tIn.x * tOut.x + tIn.z * tOut.z) / (la * lb))));
+        if (ang > FILL_MAX_ANGLE_RAD) continue;
+        if (Math.abs(i.spline.getPointAt(1).y - o.spline.getPointAt(0).y) > 3) continue;
+        for (const e of [i, o]) if (!parent.has(e)) parent.set(e, e);
+        parent.set(find(i), find(o));
+        used.add(i);
+        used.add(o);
+      }
+    }
+    const groups = new Map<Edge3D, Edge3D[]>();
+    for (const e of used) {
+      const root = find(e);
+      (groups.get(root) ?? groups.set(root, []).get(root)!).push(e);
+    }
+    for (const members of groups.values()) {
+      if (members.length < 3) continue; // a plain one-to-one continuation has no nose
+      const pts: THREE.Vector3[] = [];
+      for (const e of members) {
+        const [l, r] = endCorners(e, e.toNodeId === nodeId);
+        pts.push(l, r);
+      }
+      const hull = convexHullXZ(pts);
+      if (hull.length < 3) continue;
+      for (let k = 1; k + 1 < hull.length; k++) {
+        for (const v of [hull[0], hull[k], hull[k + 1]]) positions.push(v.x, v.y + 0.01, v.z);
+      }
+    }
+  }
+  if (positions.length === 0) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(faceUp(positions), 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/** Convex outline of points in the ground plane, in order (Andrew's monotone chain). */
+function convexHullXZ(points: THREE.Vector3[]): THREE.Vector3[] {
+  const pts = [...points].sort((a, b) => a.x - b.x || a.z - b.z);
+  const cross = (o: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3) => (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
+  const lower: THREE.Vector3[] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: THREE.Vector3[] = [];
+  for (const p of [...pts].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return lower.slice(0, -1).concat(upper.slice(0, -1));
 }

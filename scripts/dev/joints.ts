@@ -24,5 +24,5 @@ for (const e of net.edges) {
   for (const n of nexts) { n.spline.getTangentAt(0, tb); const ang = Math.acos(Math.max(-1, Math.min(1, ta.clone().setY(0).normalize().dot(tb.clone().setY(0).normalize())))); if (ang < bang) { bang = ang; best = n; } }
   const A = side(e, true), B = side(best, false);
   const dx = Math.hypot(A.x - B.x, A.z - B.z), dw = Math.abs(A.half - B.half);
-  if (dx > 3 || dw > 4) console.log(e.id.slice(0, 20), "->", best.id.slice(0, 20), "centre jump", dx.toFixed(1), "half-width jump", dw.toFixed(1), "(", A.half.toFixed(0), "->", B.half.toFixed(0), ") lanes", e.lanes, best.lanes, "at", A.x.toFixed(0), A.z.toFixed(0));
+  if (dx > 3 || dw > 4) if (A.half > 1 && B.half > 1) console.log("taperE", e.taperEndFt.toFixed(0), "endScale", e.endScale, "o.taperStart", best.taperStartFt.toFixed(0), "o.startScale", best.startScale, "nexts", nexts.length, "ang", (bang*180/Math.PI).toFixed(0), "|", e.id.slice(0, 20), "->", best.id.slice(0, 20), "centre jump", dx.toFixed(1), "half-width jump", dw.toFixed(1), "(", A.half.toFixed(0), "->", B.half.toFixed(0), ") lanes", e.lanes, best.lanes, "at", A.x.toFixed(0), A.z.toFixed(0));
 }

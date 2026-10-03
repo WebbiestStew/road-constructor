@@ -250,6 +250,8 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
       const cont = outs.filter((o) => {
         if (o.toNodeId === e.fromNodeId) return false;
         o.spline.getTangentAt(0, tOut);
+        // A road that begins as a tapering ramp tip is the exit, not the road carrying on.
+        if (o.taperStartFt > 0 && o.startScale < 0.5) return false;
         return angleBetween(tIn, tOut) <= MERGE_MAX_ANGLE_RAD * 0.7;
       });
       if (cont.length !== 1) continue;
