@@ -48,6 +48,11 @@ export function widthScaleAt(edge: Edge3D, distanceFt: number): number {
 }
 
 /** Smooth "keep at least this far out": zero when not needed, then ramps in without a corner. */
+/** The strip left between a ramp and the road it rides alongside, once the ramp has been drawn in. */
+const JOIN_PULL_GAP_FT = 6;
+/** Fraction of the measured stretch (from the junction) over which the ramp is held fully against the road. */
+const JOIN_PULL_HOLD = 0.55;
+
 function softPush(x: number): number {
   if (x <= 0) return 0;
   return x < 2 ? (x * x) / 4 : x - 1;
@@ -60,7 +65,13 @@ function padPush(pad: JoinPad, d: number, k: number, hr: number): number {
   const g = pad.gap[i] + (pad.gap[Math.min(i + 1, pad.gap.length - 1)] - pad.gap[i]) * (f - i);
   // Push the ramp outward just far enough that its inner edge sits against the through road's outer edge,
   // instead of lying across the through road's lanes.
-  return pad.awaySign * softPush(pad.mainHalf + k * hr + 0.5 - g);
+  const clear = g - pad.mainHalf - k * hr;
+  // Where the ramp has drifted off from the through road, draw it in toward the road so the strip between them is a
+  // narrow gore rather than a long wedge of grass. The pull fades out at the end of the measured stretch, where the
+  // ramp is back on its own line.
+  const fade = 1 - smooth01((d / pad.reach - JOIN_PULL_HOLD) / (1 - JOIN_PULL_HOLD));
+  const pull = Math.max(0, clear - JOIN_PULL_GAP_FT) * fade;
+  return pad.awaySign * (softPush(0.5 - clear) - pull);
 }
 
 /**

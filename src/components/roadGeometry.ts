@@ -582,7 +582,9 @@ export function indexPierConflicts(edges: Edge3D[]): void {
 // parted), as on every real merge and exit: a paved strip with diagonal white hatching.
 // ---------------------------------------------------------------------------
 
-const GORE_MAX_WIDTH_FT = 24;
+const GORE_MAX_WIDTH_FT = 70;
+/** Hatching only where the wedge is narrow enough to read as a painted gore; wider is plain paved shoulder. */
+const GORE_HATCH_MAX_WIDTH_FT = 26;
 const GORE_MIN_WIDTH_FT = 1.2;
 const GORE_HATCH_EVERY_FT = 10;
 
@@ -637,7 +639,7 @@ function goreFor(edge: Edge3D, pad: JoinPad, atEnd: boolean): GoreGeometry | nul
     const i = Math.floor(d / JOIN_STEP_FT);
     const a = inner[i];
     const b = inner[Math.min(i + 2, n - 1)];
-    if (!a || !b || width[i] < 2) continue;
+    if (!a || !b || width[i] < 2 || width[i] > GORE_HATCH_MAX_WIDTH_FT) continue;
     const m = outer[Math.min(i + 2, n - 1)];
     // from the ramp's edge here to the through road's edge a little further along the road
     const dx = m[0] - a[0];
