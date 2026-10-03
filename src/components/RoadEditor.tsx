@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, memo } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
-import { Html, Line } from "@react-three/drei";
+import { Line } from "@react-three/drei";
+import { WorldLabel } from "./WorldLabels";
 import * as THREE from "three";
 import { useEditorStore } from "@/state/editorStore";
 import { ELEVATION_BY_ID, ROAD_CLASSES, ROAD_CLASS_LIST, estimateEdgeCost } from "@/sim/roadClasses";
@@ -322,7 +323,7 @@ function RoadEditor() {
       )}
 
       {dragInfo && (
-        <Html position={dragInfo.midpoint} style={{ pointerEvents: "none" }} zIndexRange={[10, 0]}>
+        <WorldLabel position={dragInfo.midpoint} zIndex={10}>
           <div
             className="animate-pop"
             style={{
@@ -361,7 +362,7 @@ function RoadEditor() {
               </>
             )}
           </div>
-        </Html>
+        </WorldLabel>
       )}
     </group>
   );

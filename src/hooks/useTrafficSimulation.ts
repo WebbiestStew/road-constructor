@@ -122,6 +122,14 @@ export function useTrafficSimulation() {
   const mode = useEditorStore((s) => s.mode);
   const simEpoch = useEditorStore((s) => s.simEpoch);
   const running = mode === "simulate" && !userPaused;
+
+  // Opening traffic always starts it moving: a pause left over from the last run (a finished level pauses itself) must
+  // not carry into the next one.
+  useEffect(() => {
+    if (mode !== "simulate") return;
+    const raf = requestAnimationFrame(() => setUserPaused(false));
+    return () => cancelAnimationFrame(raf);
+  }, [mode, simEpoch]);
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
 
   useEffect(() => {

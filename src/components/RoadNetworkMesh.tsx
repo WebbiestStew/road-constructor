@@ -2,7 +2,8 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Html, Line } from "@react-three/drei";
+import { Line } from "@react-three/drei";
+import { WorldLabel } from "./WorldLabels";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork, assembleNetworkCached, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
@@ -392,7 +393,7 @@ const ZoneBadge = memo(function ZoneBadge({
   }
 
   return (
-    <Html position={[p.x, p.y, p.z]} style={{ pointerEvents: "none", display: hidden ? "none" : undefined }} zIndexRange={[10, 0]} occlude={false}>
+    <WorldLabel position={[p.x, p.y, p.z]} hidden={hidden} zIndex={10}>
       <div style={{ position: "relative", transform: "translate(-50%, -100%)", display: "flex", flexDirection: "column", alignItems: "center" }}>
         <div
           style={{
@@ -428,7 +429,7 @@ const ZoneBadge = memo(function ZoneBadge({
           />
         )}
       </div>
-    </Html>
+    </WorldLabel>
   );
 });
 
@@ -436,7 +437,7 @@ const ZoneBadge = memo(function ZoneBadge({
 const ProblemMarker = memo(function ProblemMarker({ edge }: { edge: Edge3D }) {
   const p = edge.spline.getPointAt(0.5);
   return (
-    <Html position={[p.x, p.y, p.z]} style={{ pointerEvents: "none" }} zIndexRange={[15, 0]} occlude={false}>
+    <WorldLabel position={[p.x, p.y, p.z]} zIndex={15}>
       <div
         className="animate-warn-pulse"
         style={{
@@ -454,19 +455,14 @@ const ProblemMarker = memo(function ProblemMarker({ edge }: { edge: Edge3D }) {
       >
         <IconWarning style={{ width: 15, height: 15 }} />
       </div>
-    </Html>
+    </WorldLabel>
   );
 });
 
 /** A pulsing red exclamation over a vehicle that's been near-stationary long enough to be flagged as gridlocked — it despawns for a throughput penalty shortly after this appears. */
 const GridlockMarker = memo(function GridlockMarker({ position }: { position: [number, number, number] }) {
   return (
-    <Html
-      position={[position[0], position[1] + 8, position[2]]}
-      style={{ pointerEvents: "none" }}
-      zIndexRange={[15, 0]}
-      occlude={false}
-    >
+    <WorldLabel position={[position[0], position[1] + 8, position[2]]} zIndex={15}>
       <div
         className="animate-warn-pulse"
         style={{
@@ -484,7 +480,7 @@ const GridlockMarker = memo(function GridlockMarker({ position }: { position: [n
       >
         <IconWarning style={{ width: 13, height: 13 }} />
       </div>
-    </Html>
+    </WorldLabel>
   );
 });
 
@@ -522,12 +518,7 @@ const NodeInspectTarget = memo(function NodeInspectTarget({ node }: { node: Node
 /** Flags a plan-view road crossing that doesn't clear TxDOT's 16.5 ft minimum bridge clearance. */
 function ClearanceWarningMarker({ violation }: { violation: ClearanceViolation }) {
   return (
-    <Html
-      position={violation.position}
-      style={{ pointerEvents: "none" }}
-      zIndexRange={[16, 0]}
-      occlude={false}
-    >
+    <WorldLabel position={violation.position} zIndex={16}>
       <div
         className="animate-warn-pulse"
         style={{
@@ -550,7 +541,7 @@ function ClearanceWarningMarker({ violation }: { violation: ClearanceViolation }
         <IconWarning style={{ width: 12, height: 12 }} />
         {violation.clearanceFt.toFixed(1)} ft clearance
       </div>
-    </Html>
+    </WorldLabel>
   );
 }
 

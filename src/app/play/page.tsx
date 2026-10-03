@@ -30,6 +30,7 @@ import AutosaveHydrator from "@/components/AutosaveHydrator";
 import FallbackScreen from "@/components/FallbackScreen";
 import KeyboardPan from "@/components/KeyboardPan";
 import PhotoRig from "@/components/PhotoRig";
+import { WorldLabelLayer, WorldLabelProjector } from "@/components/WorldLabels";
 import { togglePhotoMode, usePhotoMode } from "@/lib/photoMode";
 import PerfGuard from "@/components/PerfGuard";
 import { useGlEpoch, useGraphics, useHydrated, useQuality } from "@/lib/quality";
@@ -241,6 +242,7 @@ export default function Play() {
       >
         <FrameLimiter maxFps={q.maxFps} active={sim.running || rideAlongActive || photoMode} />
         <PhotoRig />
+        <WorldLabelProjector />
         <PerfGuard active={sim.running} />
         <KeyboardPan />
         <color attach="background" args={[skyColor]} />
@@ -382,6 +384,7 @@ export default function Play() {
         </EffectComposer>
         )}
       </Canvas>
+      <WorldLabelLayer />
 
       <SimControls sim={sim} scenarioRunner={scenarioRunner} />
     </div>

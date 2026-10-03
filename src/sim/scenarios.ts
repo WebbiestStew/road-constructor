@@ -520,8 +520,10 @@ const ROUGH_MORNING: ScriptedEvent[] = [
  * stars and 10% for three. The baselines are vehicles moved in the 300 s run, measured in the headless sim.
  */
 function createRealCityEvaluator(baseline: number, durationS: number): () => ScenarioEvaluator {
-  const two = Math.ceil(baseline * 1.04);
-  const three = Math.ceil(baseline * 1.10);
+  // Baselines are the mean of eight seeds (seed-to-seed spread is 2-5%), so an untouched city only reaches two stars
+  // by luck, while a real fix still clears three.
+  const two = Math.ceil(baseline * 1.07);
+  const three = Math.ceil(baseline * 1.12);
   return () => (ctx) => {
     const stars: 1 | 2 | 3 = ctx.completedTripsTotal >= three ? 3 : ctx.completedTripsTotal >= two ? 2 : 1;
     return {
@@ -662,7 +664,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Downtown LA, where US-101 meets the Harbor Freeway on four stacked levels. These are the real roads, ramps and lane counts. Rush hour is jamming it. Widen the right lanes, retime the lights and tune the limits, but you can't afford to fix everything.",
     budget: 9_000_000,
-    baseline: 767,
+    baseline: 787,
   },
   {
     key: "new-york",
@@ -671,7 +673,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Midtown Manhattan around Times Square: real one-way avenues and streets with a traffic light at nearly every block. There's no room to widen, so it's all about timing: green lengths, offsets for a green wave, and which corners need a light at all.",
     budget: 4_000_000,
-    baseline: 588,
+    baseline: 555,
   },
   {
     key: "toronto",
@@ -680,7 +682,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Toronto's waterfront, where the elevated Gardiner Expressway runs over Lake Shore Boulevard and the downtown ramps. Real elevations, real ramps. Find the bottleneck where the ramps meet the street grid.",
     budget: 7_000_000,
-    baseline: 551,
+    baseline: 545,
   },
   {
     key: "houston",
@@ -689,7 +691,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Where I-45 meets I-10 just north of downtown Houston, a dense tangle of real ramps and flyovers. There are no lights to retime, so widen the ramps and lanes that choke, and spend the budget where it counts.",
     budget: 8_000_000,
-    baseline: 932,
+    baseline: 910,
   },
   {
     key: "san-antonio",
@@ -698,7 +700,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The freeway knot just north of downtown San Antonio, where I-35, I-10 and US-281 all meet. Real geometry, real flyovers. It's slow because a few ramps carry far more than they were built for. Find them and add capacity.",
     budget: 8_000_000,
-    baseline: 315,
+    baseline: 324,
   },
   {
     key: "monterrey",
@@ -707,7 +709,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Downtown Monterrey around the Macroplaza: a big grid of real streets, avenues and signals, with far more cars than the grid wants. Retime the lights, fix the limits and widen the worst streets to keep the center moving.",
     budget: 7_000_000,
-    baseline: 497,
+    baseline: 495,
   },
   {
     key: "dallas",
@@ -716,7 +718,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Where I-635 meets US-75 north of Dallas, on the real stack of flyovers. The ramps and lane counts are the real ones, and the afternoon crowd is on its way home. Add lanes where the weaves choke, retime the limits, and spend the budget where it matters most.",
     budget: 9_000_000,
-    baseline: 772,
+    baseline: 736,
   },
   {
     key: "chicago",
@@ -725,7 +727,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The Jane Byrne Interchange west of the Loop, where the Kennedy, the Dan Ryan and the Eisenhower meet. Notoriously jammed, and the ramps are tight. Find the lane that's starving the rest and fix it with the money you have.",
     budget: 8_000_000,
-    baseline: 474,
+    baseline: 482,
   },
   {
     key: "atlanta",
@@ -734,7 +736,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The Tom Moreland Interchange, better known as Spaghetti Junction, rebuilt from the real roads. Dozens of ramps, with the whole metro trying to get through. Widen, retime and re-limit until the knot loosens.",
     budget: 8_000_000,
-    baseline: 961,
+    baseline: 994,
   },
 ];
 

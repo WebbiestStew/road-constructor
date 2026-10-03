@@ -27,6 +27,10 @@ import type { UseTrafficSimulationReturn } from "./useTrafficSimulation";
  * (no active scenario) is a no-op.
  */
 export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
+  // Depend on the pieces, not on `sim` itself: the object is rebuilt on every render, which made the evaluation effect
+  // re-run (and set state) after every render without end once a second level began.
+  const metrics = sim.metrics;
+  const setSimRunning = sim.setRunning;
   const activeScenarioId = useEditorStore((s) => s.activeScenarioId);
   const mode = useEditorStore((s) => s.mode);
   const loadScenario = useEditorStore((s) => s.loadScenario);
@@ -56,39 +60,39 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
   // Capture the worker's current simTime as this run's baseline the moment traffic opens, and spin up a fresh evaluator.
   useEffect(() => {
     if (!scenario || mode !== "simulate" || results || startSimTime !== null) return;
-    const baseline = sim.metrics.simTime;
+    const baseline = metrics.simTime;
     evaluatorRef.current = scenario.createEvaluator();
     const raf = requestAnimationFrame(() => setStartSimTime(baseline));
     return () => cancelAnimationFrame(raf);
-  }, [scenario, mode, results, startSimTime, sim.metrics.simTime]);
+  }, [scenario, mode, results, startSimTime, metrics.simTime]);
 
   // A fresh run resets the sim clock to 0; if we captured a baseline from the previous run, follow it back down.
   useEffect(() => {
-    if (startSimTime === null || sim.metrics.simTime >= startSimTime) return;
-    const raf = requestAnimationFrame(() => setStartSimTime(sim.metrics.simTime));
+    if (startSimTime === null || metrics.simTime >= startSimTime) return;
+    const raf = requestAnimationFrame(() => setStartSimTime(metrics.simTime));
     return () => cancelAnimationFrame(raf);
-  }, [startSimTime, sim.metrics.simTime]);
+  }, [startSimTime, metrics.simTime]);
 
   // Evaluate the win condition every metrics tick; finalize on an early win or once time runs out.
   useEffect(() => {
     if (!scenario || mode !== "simulate" || results || startSimTime === null || !evaluatorRef.current) return;
-    const elapsedS = sim.metrics.simTime - startSimTime;
+    const elapsedS = metrics.simTime - startSimTime;
     const budgetRemaining = useEditorStore.getState().budget;
     const evalProgress = evaluatorRef.current({
-      simTimeS: sim.metrics.simTime,
+      simTimeS: metrics.simTime,
       elapsedS,
-      avgSpeedMph: sim.metrics.avgSpeedMph,
-      activeCount: sim.metrics.activeCount,
-      spawnedTotal: sim.metrics.spawnedTotal,
-      completedTripsTotal: sim.metrics.completedTripsTotal,
-      peopleMovedTotal: sim.metrics.peopleMovedTotal,
-      pedServedTotal: sim.metrics.pedServedTotal,
-      pedIncidentsTotal: sim.metrics.pedIncidentsTotal,
-      emergency: sim.metrics.emergency,
-      crashes: sim.metrics.crashes,
-      gridlockPenaltyTotal: sim.metrics.gridlockPenaltyTotal,
-      edgeTrafficStats: sim.metrics.edgeTrafficStats,
-      gridlockMarkers: sim.metrics.gridlockMarkers,
+      avgSpeedMph: metrics.avgSpeedMph,
+      activeCount: metrics.activeCount,
+      spawnedTotal: metrics.spawnedTotal,
+      completedTripsTotal: metrics.completedTripsTotal,
+      peopleMovedTotal: metrics.peopleMovedTotal,
+      pedServedTotal: metrics.pedServedTotal,
+      pedIncidentsTotal: metrics.pedIncidentsTotal,
+      emergency: metrics.emergency,
+      crashes: metrics.crashes,
+      gridlockPenaltyTotal: metrics.gridlockPenaltyTotal,
+      edgeTrafficStats: metrics.edgeTrafficStats,
+      gridlockMarkers: metrics.gridlockMarkers,
       budgetRemaining,
       network,
     });
@@ -98,23 +102,23 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
       const result = finalizeScenario(
         scenario,
         evalProgress.won,
-        { avgSpeedMph: sim.metrics.avgSpeedMph, budgetRemaining, starsOverride: evalProgress.stars },
+        { avgSpeedMph: metrics.avgSpeedMph, budgetRemaining, starsOverride: evalProgress.stars },
         evalProgress.detailLines
       );
       const raf = requestAnimationFrame(() => {
         if (scenario.id.startsWith(DAILY_PREFIX)) {
           // Dailies keep a best-of-the-day score and a streak instead of a permanent star rating.
-          const moved = sim.metrics.completedTripsTotal;
+          const moved = metrics.completedTripsTotal;
           if (result.won && recordDaily(dateKey(), moved)) pushToast(`📅 New best for today: ${moved} vehicles moved`, "good");
         } else if (result.won && recordStars(scenario.id, result.stars)) {
           pushToast(`⭐ ${"★".repeat(result.stars)} saved for ${scenario.name}`, "good");
         }
         setResults({ ...result, score: evalProgress.score ?? null });
-        sim.setRunning(false);
+        setSimRunning(false);
       });
       return () => cancelAnimationFrame(raf);
     }
-  }, [scenario, mode, results, startSimTime, sim, sim.metrics, network]);
+  }, [scenario, mode, results, startSimTime, metrics, setSimRunning, network]);
 
   const startScenario = useCallback(
     (def: ScenarioDef) => {
@@ -159,7 +163,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
 
   const remainingS =
     scenario && startSimTime !== null
-      ? Math.max(0, scenario.durationS - (sim.metrics.simTime - startSimTime))
+      ? Math.max(0, scenario.durationS - (metrics.simTime - startSimTime))
       : (scenario?.durationS ?? 0);
 
   return {
