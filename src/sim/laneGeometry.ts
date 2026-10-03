@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Edge3D } from "./types";
+import { JOIN_STEP_FT, type Edge3D, type JoinPad } from "./types";
 
 /**
  * Shared, allocation-free helpers for sampling per-lane world-space points
@@ -32,20 +32,58 @@ function smooth01(x: number): number {
   return c * c * (3 - 2 * c);
 }
 
-/** How narrow a tapering end gets (fraction of full width) right at the node. */
-const TAPER_MIN_SCALE = 0.4;
 
 /** 1 along most of a road; shrinks toward the node over a merge or diverge taper so pavement and lanes close in together. */
 export function widthScaleAt(edge: Edge3D, distanceFt: number): number {
   let k = 1;
+  // A ramp merging into or splitting from a through road tapers to a point; a funnel into a roundabout only narrows.
   if (edge.taperStartFt > 0 && distanceFt < edge.taperStartFt) {
-    k = Math.min(k, TAPER_MIN_SCALE + (1 - TAPER_MIN_SCALE) * smooth01(distanceFt / edge.taperStartFt));
+    k = Math.min(k, edge.startScale + (1 - edge.startScale) * smooth01(distanceFt / edge.taperStartFt));
   }
   const toEnd = edge.length - distanceFt;
   if (edge.taperEndFt > 0 && toEnd < edge.taperEndFt) {
-    k = Math.min(k, TAPER_MIN_SCALE + (1 - TAPER_MIN_SCALE) * smooth01(toEnd / edge.taperEndFt));
+    k = Math.min(k, edge.endScale + (1 - edge.endScale) * smooth01(toEnd / edge.taperEndFt));
   }
   return k;
+}
+
+/** Smooth "keep at least this far out": zero when not needed, then ramps in without a corner. */
+function softPush(x: number): number {
+  if (x <= 0) return 0;
+  return x < 2 ? (x * x) / 4 : x - 1;
+}
+
+function padPush(pad: JoinPad, d: number, k: number, hr: number): number {
+  if (d >= pad.reach) return 0;
+  const f = d / JOIN_STEP_FT;
+  const i = Math.floor(f);
+  const g = pad.gap[i] + (pad.gap[Math.min(i + 1, pad.gap.length - 1)] - pad.gap[i]) * (f - i);
+  // Push the ramp outward just far enough that its inner edge sits against the through road's outer edge,
+  // instead of lying across the through road's lanes.
+  return pad.awaySign * softPush(pad.mainHalf + k * hr + 0.5 - g);
+}
+
+/**
+ * Extra sideways shift of a road that rides alongside a bigger one at a merge or split, in feet along its own right
+ * vector. `k` is the width scale at this point, so the shifted pavement's inner edge still tracks the through road.
+ */
+export function joinShiftAt(edge: Edge3D, distanceFt: number, k: number): number {
+  if (!edge.padStart && !edge.padEnd) return 0;
+  const hr = (edge.lanes * edge.laneWidthFt) / 2;
+  let a = 0;
+  let b = 0;
+  if (edge.padStart) a = padPush(edge.padStart, distanceFt, k, hr);
+  if (edge.padEnd) b = padPush(edge.padEnd, edge.length - distanceFt, k, hr);
+  return Math.abs(a) >= Math.abs(b) ? a : b;
+}
+
+/**
+ * Where the centreline of this carriageway really lies sideways at `distanceFt`: its shift to its own side of a
+ * two-way road, plus any push out along a merge or split. Offsets of lanes and lines are added to this after being
+ * scaled by `widthScaleAt`.
+ */
+export function carriagewayOffsetAt(edge: Edge3D, distanceFt: number, k: number): number {
+  return lateralShiftAt(edge, distanceFt) + joinShiftAt(edge, distanceFt, k);
 }
 
 /** Where a vehicle at `distanceFt` along the edge really sits laterally: the carriageway shift, eased to zero into junctions. */
@@ -112,7 +150,8 @@ export function laneCenterPointAt(
   edgePointAt(edge, ct, out);
   edgeRightVectorAt(edge, ct, tangentScratch, rightScratch);
   const d = ct * edge.length;
-  const offset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) * widthScaleAt(edge, d) + lateralShiftAt(edge, d);
+  const k = widthScaleAt(edge, d);
+  const offset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) * k + carriagewayOffsetAt(edge, d, k);
   out.addScaledVector(rightScratch, offset);
   if (!edge.sunken && out.y < 0) out.y = 0;
   return out;

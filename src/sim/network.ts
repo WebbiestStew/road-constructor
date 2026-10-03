@@ -6,9 +6,10 @@ import {
   TEXAS_TURNAROUND_PRIORITY,
   TEXAS_TURNAROUND_SEARCH_RADIUS_FT,
 } from "./roadClasses";
-import { mphToFtps } from "./types";
+import { JOIN_STEP_FT, mphToFtps } from "./types";
 import type {
   Edge3D,
+  JoinPad,
   EdgePatch,
   EdgeSpec,
   LaneMove,
@@ -64,7 +65,13 @@ function singleOtherNeighbor(
 
 /** Roads closer than this in heading at a node are one road joining or leaving another, not a crossing. */
 const MERGE_MAX_ANGLE_RAD = (50 * Math.PI) / 180;
-const MERGE_TAPER_FT = 220;
+const MERGE_TAPER_FT = 170;
+/** A ramp tapers all the way to a tip where it meets the through road. */
+const RAMP_TIP = 0.03;
+/** Where a road continues into a narrower or wider one, its pavement eases between the two widths over this stretch. */
+const WIDTH_BLEND_FT = 130;
+/** How far from the junction a join pad is measured. */
+const JOIN_REACH_FT = 760;
 
 /**
  * Finds the ends where one road merges into, or splits off, another along the same line of travel (a ramp joining a
@@ -99,10 +106,90 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
     for (const e of edges) {
       if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
       const funnel = Math.min(60, e.length * 0.4);
-      if (ringNodes.has(e.toNodeId)) e.taperEndFt = Math.max(e.taperEndFt, funnel);
-      if (ringNodes.has(e.fromNodeId)) e.taperStartFt = Math.max(e.taperStartFt, funnel);
+      if (ringNodes.has(e.toNodeId)) {
+        e.taperEndFt = Math.max(e.taperEndFt, funnel);
+        e.endScale = 0.35;
+      }
+      if (ringNodes.has(e.fromNodeId)) {
+        e.taperStartFt = Math.max(e.taperStartFt, funnel);
+        e.startScale = 0.35;
+      }
     }
   }
+  /**
+   * Measures how `ramp` sits against `main` at the junction, from the ramp's end (`atEnd`) outward: the lateral
+   * distance between their centrelines, which side of main it is on, and where main's outer edge runs.
+   */
+  const buildPad = (ramp: Edge3D, main: Edge3D, atEnd: boolean): JoinPad | undefined => {
+    if (ramp.length < 60 || main.length < 40) return undefined;
+    const reach = Math.min(JOIN_REACH_FT, ramp.length * 0.6);
+    const mainFromEnd = main.toNodeId === (atEnd ? ramp.toNodeId : ramp.fromNodeId);
+    // Sample the through road near the junction (its end if it arrives there, its start if it leaves).
+    const ms: { x: number; y: number; z: number; rx: number; rz: number }[] = [];
+    const mreach = Math.min(JOIN_REACH_FT * 1.4, main.length);
+    const p = new THREE.Vector3();
+    const t = new THREE.Vector3();
+    for (let d = 0; d <= mreach; d += 8) {
+      const dist = mainFromEnd ? main.length - d : d;
+      main.spline.getPointAt(Math.min(1, Math.max(0, dist / main.length)), p);
+      main.spline.getTangentAt(Math.min(1, Math.max(0, dist / main.length)), t);
+      const len = Math.hypot(t.x, t.z) || 1;
+      const rx = -t.z / len;
+      const rz = t.x / len;
+      ms.push({ x: p.x + rx * main.lateralShiftFt, y: p.y, z: p.z + rz * main.lateralShiftFt, rx, rz });
+    }
+    const mainHalf = (main.lanes * main.laneWidthFt) / 2;
+    const n = Math.floor(reach / JOIN_STEP_FT) + 1;
+    const gap: number[] = [];
+    const mainEdge: number[] = [];
+    let sideSum = 0;
+    let awayDotSum = 0;
+    const raw: { u: number; mi: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const d = i * JOIN_STEP_FT;
+      const dist = atEnd ? ramp.length - d : d;
+      const tt = Math.min(1, Math.max(0, dist / ramp.length));
+      ramp.spline.getPointAt(tt, p);
+      ramp.spline.getTangentAt(tt, t);
+      const len = Math.hypot(t.x, t.z) || 1;
+      const rrx = -t.z / len;
+      const rrz = t.x / len;
+      const cx = p.x + rrx * ramp.lateralShiftFt;
+      const cz = p.z + rrz * ramp.lateralShiftFt;
+      let best = 0;
+      let bd = Infinity;
+      for (let k = 0; k < ms.length; k++) {
+        const dd = (ms[k].x - cx) ** 2 + (ms[k].z - cz) ** 2;
+        if (dd < bd) {
+          bd = dd;
+          best = k;
+        }
+      }
+      const m = ms[best];
+      const u = (cx - m.x) * m.rx + (cz - m.z) * m.rz;
+      raw.push({ u, mi: best });
+      if (d >= 60 && d <= 260) {
+        sideSum += Math.sign(u) * Math.min(Math.abs(u), 80);
+        awayDotSum += (cx - m.x) * rrx + (cz - m.z) * rrz;
+      }
+    }
+    const side: 1 | -1 = sideSum >= 0 ? 1 : -1;
+    const away: 1 | -1 = awayDotSum >= 0 ? 1 : -1;
+    let adjacentUntil = 0;
+    const hr = (ramp.lanes * ramp.laneWidthFt) / 2;
+    for (let i = 0; i < n; i++) {
+      const m = ms[raw[i].mi];
+      const g = Math.max(0, raw[i].u * side);
+      gap.push(g);
+      mainEdge.push(m.x + m.rx * side * mainHalf, m.y, m.z + m.rz * side * mainHalf);
+      if (g < mainHalf + hr + 2) adjacentUntil = i * JOIN_STEP_FT;
+      if (g > mainHalf + hr + 44) break;
+    }
+    // A road that never comes near the through road is not merging with it in any visible way.
+    if (adjacentUntil < 20 && gap[0] > mainHalf + hr) return undefined;
+    return { reach: (gap.length - 1) * JOIN_STEP_FT, gap, mainHalf, awaySign: away, sideOfMain: side, mainEdge, adjacentUntil };
+  };
+
   const rank = (e: Edge3D, ang: number) => e.priority * 1000 + e.lanes * 10 - ang;
   const taperFor = (e: Edge3D) => Math.min(MERGE_TAPER_FT, e.length * 0.55);
 
@@ -120,7 +207,15 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
       }
       if (group.length < 2) continue;
       const main = group.reduce((a, b) => (rank(b.e, b.ang) > rank(a.e, a.ang) ? b : a));
-      for (const g of group) if (g.e !== main.e) g.e.taperEndFt = Math.max(g.e.taperEndFt, taperFor(g.e));
+      // The through road carries straight on past a merging ramp: its barriers and lines are not cut at this node.
+      main.e.endsAtJunction = false;
+      out.startsAtJunction = false;
+      for (const g of group) {
+        if (g.e === main.e) continue;
+        g.e.taperEndFt = Math.max(g.e.taperEndFt, taperFor(g.e));
+        g.e.endScale = RAMP_TIP;
+        g.e.padEnd = buildPad(g.e, main.e, true);
+      }
     }
     // Diverges: one road arriving and several leaving along its line of travel.
     for (const i of ins) {
@@ -134,7 +229,41 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
       }
       if (group.length < 2) continue;
       const main = group.reduce((a, b) => (rank(b.e, b.ang) > rank(a.e, a.ang) ? b : a));
-      for (const g of group) if (g.e !== main.e) g.e.taperStartFt = Math.max(g.e.taperStartFt, taperFor(g.e));
+      i.endsAtJunction = false;
+      main.e.startsAtJunction = false;
+      for (const g of group) {
+        if (g.e === main.e) continue;
+        g.e.taperStartFt = Math.max(g.e.taperStartFt, taperFor(g.e));
+        g.e.startScale = RAMP_TIP;
+        g.e.padStart = buildPad(g.e, main.e, false);
+      }
+    }
+  }
+
+  // Width steps: a road that carries on into a narrower or wider one (a lane added or dropped at the joint) eases its
+  // pavement between the two widths, instead of stepping with a squared-off end.
+  for (const [nodeId, ins] of inByNode) {
+    const outs = outByNode.get(nodeId) ?? [];
+    for (const e of ins) {
+      if (e.taperEndFt > 0 || e.isRoundaboutRing) continue;
+      e.spline.getTangentAt(1, tIn);
+      const cont = outs.filter((o) => {
+        if (o.toNodeId === e.fromNodeId) return false;
+        o.spline.getTangentAt(0, tOut);
+        return angleBetween(tIn, tOut) <= MERGE_MAX_ANGLE_RAD * 0.7;
+      });
+      if (cont.length !== 1) continue;
+      const o = cont[0];
+      const we = e.lanes * e.laneWidthFt;
+      const wo = o.lanes * o.laneWidthFt;
+      if (Math.abs(we - wo) <= 1) continue;
+      if (we > wo) {
+        e.taperEndFt = Math.min(WIDTH_BLEND_FT, e.length * 0.45);
+        e.endScale = Math.max(0.3, wo / we);
+      } else if (o.taperStartFt === 0) {
+        o.taperStartFt = Math.min(WIDTH_BLEND_FT, o.length * 0.45);
+        o.startScale = Math.max(0.3, we / wo);
+      }
     }
   }
 }
@@ -398,6 +527,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       endsAtJunction: (neighborsByNode.get(spec.toNodeId)?.size ?? 0) >= 3,
       taperStartFt: 0,
       taperEndFt: 0,
+      startScale: 1,
+      endScale: 1,
       sunken: isSunken(spline),
       reservedLane: spec.lanes >= 2 ? (spec.reservedLane ?? null) : null,
       crosswalk: spec.crosswalk ?? false,

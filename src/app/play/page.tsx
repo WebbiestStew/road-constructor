@@ -61,7 +61,11 @@ function ShareLinkLoader() {
             minZ = Math.min(minZ, n.position[2]);
             maxZ = Math.max(maxZ, n.position[2]);
           }
-          requestCameraFit({ centerX: (minX + maxX) / 2, centerZ: (minZ + maxZ) / 2 });
+          const cx = (minX + maxX) / 2;
+          const cz = (minZ + maxZ) / 2;
+          // Zoom so the whole shared city is in view, not just centred.
+          const radius = Math.max(maxX - minX, maxZ - minZ) / 2 + Math.hypot(cx, cz);
+          requestCameraFit({ centerX: cx, centerZ: cz, radiusFt: 1.2 * radius });
         }
 
         setMode("simulate");

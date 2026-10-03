@@ -24,6 +24,7 @@ import {
   buildParapet,
   buildSolidStripe,
   buildStopBar,
+  buildGores,
   buildTaperedPierColumn,
   computePierDescriptors,
   indexPierConflicts,
@@ -155,6 +156,16 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
       .filter(([a, b]) => (b - a) * edge.length > 12);
 
   const stripes: StripeSpec[] = [];
+  // The ramp's edge line on the side facing the through road is left out where the two run hard together (an added
+  // lane): the through road's own edge line is the boundary there.
+  const innerSide = edge.padStart?.awaySign ?? edge.padEnd?.awaySign;
+  const adjStart = edge.padStart ? edge.padStart.adjacentUntil / edge.length : 0;
+  const adjEnd = edge.padEnd ? 1 - edge.padEnd.adjacentUntil / edge.length : 1;
+  // Gore wedges where this road splits from, or merges into, a bigger one.
+  for (const gore of buildGores(edge)) {
+    stripes.push({ geometry: gore.pave, color: ASPHALT_COLOR });
+    stripes.push({ geometry: gore.hatching, color: WHITE_COLOR });
+  }
   // On an undivided two-way road this carriageway's left edge is the road's centerline: a double yellow line
   // (the opposite carriageway draws the same one from its side). Everywhere else it is a plain white edge line.
   const leftIsCenterline = isCenterlineEdge && !roadClass.divided;
@@ -165,12 +176,18 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
       stripes.push({ geometry: buildSolidStripe(edge, off, 0.35, 0.03, cT0, cT1), color: YELLOW_COLOR });
     }
   } else {
-    for (const [a, b] of runs(-pavedHalfWidth, lineT0, lineT1)) {
+    const lo = innerSide === -1 ? Math.max(lineT0, adjStart) : lineT0;
+    const hi = innerSide === -1 ? Math.min(lineT1, adjEnd) : lineT1;
+    for (const [a, b] of runs(-pavedHalfWidth, lo, hi)) {
       stripes.push({ geometry: buildSolidStripe(edge, -pavedHalfWidth, 0.5, 0.03, a, b), color: WHITE_COLOR });
     }
   }
-  for (const [a, b] of runs(pavedHalfWidth, lineT0, lineT1)) {
-    stripes.push({ geometry: buildSolidStripe(edge, pavedHalfWidth, 0.5, 0.03, a, b), color: WHITE_COLOR });
+  {
+    const lo = innerSide === 1 ? Math.max(lineT0, adjStart) : lineT0;
+    const hi = innerSide === 1 ? Math.min(lineT1, adjEnd) : lineT1;
+    for (const [a, b] of runs(pavedHalfWidth, lo, hi)) {
+      stripes.push({ geometry: buildSolidStripe(edge, pavedHalfWidth, 0.5, 0.03, a, b), color: WHITE_COLOR });
+    }
   }
 
   for (let k = 1; k < edge.lanes; k++) {
@@ -308,7 +325,10 @@ const ZoneBadge = memo(function ZoneBadge({
   typeIndex,
   contract,
   compact,
+  hidden,
 }: {
+  /** Hidden (not unmounted: these overlays don't survive being removed) while photo mode is on. */
+  hidden?: boolean;
   edge: Edge3D;
   badgeIndex: number;
   typeIndex: number;
@@ -328,7 +348,7 @@ const ZoneBadge = memo(function ZoneBadge({
   }
 
   return (
-    <Html position={[p.x, p.y, p.z]} style={{ pointerEvents: "none" }} zIndexRange={[10, 0]} occlude={false}>
+    <Html position={[p.x, p.y, p.z]} style={{ pointerEvents: "none", display: hidden ? "none" : undefined }} zIndexRange={[10, 0]} occlude={false}>
       <div style={{ position: "relative", transform: "translate(-50%, -100%)", display: "flex", flexDirection: "column", alignItems: "center" }}>
         <div
           style={{
@@ -930,7 +950,7 @@ export default function RoadNetworkMesh({
 
   return (
     <group>
-      {!decorative && !photo &&
+      {!decorative &&
         network.edges
           .filter((edge) => edge.zone && badgeIndexByEdgeId.get(edge.id) !== undefined)
           .map((edge) => (
@@ -941,6 +961,7 @@ export default function RoadNetworkMesh({
               typeIndex={typeIndexByEdgeId.get(edge.id)!}
               contract={contractsByEdgeId.get(edge.id)}
               compact={hideClearanceWarnings}
+              hidden={photo}
             />
           ))}
       {network.edges.map((edge) => (

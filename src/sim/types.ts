@@ -22,6 +22,9 @@ export function ftpsToMph(ftps: number): number {
 /** Maximum number of concurrently simulated/rendered vehicles. */
 export const MAX_VEHICLES = 1500;
 
+/** Spacing of the samples in a JoinPad. */
+export const JOIN_STEP_FT = 10;
+
 /** Fixed simulation timestep, in seconds (30 ticks/sec). */
 export const SIM_DT = 1 / 30;
 
@@ -149,6 +152,27 @@ export interface NetworkSnapshot {
 // Assembled/runtime network (built from a NetworkSnapshot by assembleNetwork)
 // ---------------------------------------------------------------------------
 
+/**
+ * How a ramp sits against the through road it merges into or splits from, measured at each of the ramp's ends that
+ * meets one. Samples run outward from the junction in steps of `JOIN_STEP_FT`.
+ */
+export interface JoinPad {
+  /** Distance from the junction covered by the samples, ft. */
+  reach: number;
+  /** This road's centreline, as a distance from the through road's centreline, at each sample (always >= 0). */
+  gap: number[];
+  /** Half the through road's paved width, ft. */
+  mainHalf: number;
+  /** Which way "away from the through road" lies in this road's own right-hand frame: +1 = right, -1 = left. */
+  awaySign: 1 | -1;
+  /** Which side of the through road this one joins from: +1 = its right, -1 = its left. */
+  sideOfMain: 1 | -1;
+  /** The through road's outer edge beside this one at each sample, as flat [x, y, z, ...]. */
+  mainEdge: number[];
+  /** Distance from the junction up to which this road runs hard against the through road (an added lane). */
+  adjacentUntil: number;
+}
+
 /** Runtime edge: an EdgeSpec plus its constructed spline and derived data. */
 export interface Edge3D {
   id: string;
@@ -189,6 +213,12 @@ export interface Edge3D {
    */
   taperStartFt: number;
   taperEndFt: number;
+  /** Pavement scale (fraction of full width) right at the start / end, reached by the taper above. */
+  startScale: number;
+  endScale: number;
+  /** Set where this road merges into / splits from a bigger one: the pavement rides alongside it as an added lane. */
+  padStart?: JoinPad;
+  padEnd?: JoinPad;
   /** A real underpass or cutting (dips well below ground). Everything else is kept at or above the grass. */
   sunken: boolean;
   /** Distances (ft, rounded) along a bridge where a pier would stand on a road below it and is left out. Set by the renderer. */

@@ -196,7 +196,7 @@ const _posEnd = new THREE.Vector3();
 const _posNext = new THREE.Vector3();
 const _tmpTangent = new THREE.Vector3();
 /** Over this last stretch of a road, a car eases toward the exact spot (and heading) where it enters the next one. */
-const JUNCTION_BLEND_FT = 30;
+const JUNCTION_BLEND_FT = 48;
 const _scale = new THREE.Vector3(1, 1, 1);
 const _matrix = new THREE.Matrix4();
 const _color = new THREE.Color();
@@ -1214,6 +1214,23 @@ function allowedLanesForNext(v: VehicleState, edge: Edge3D): boolean[] | null {
   return nextRouteEdgeId ? (edge.laneAllowed.get(nextRouteEdgeId) ?? null) : null;
 }
 
+/**
+ * The lane a vehicle takes on the next road. A ramp joining from the right enters the through road's right-hand
+ * lane (and one joining from the left, its left-hand lane), and a vehicle leaving for a ramp on the right does so
+ * from the right-hand lanes. Everything else keeps its lane number.
+ */
+function mapLaneAcross(from: Edge3D, to: Edge3D, lane: number): number {
+  if (from.padEnd && !to.padStart) {
+    // merging: `from` is the ramp, `to` the through road
+    return clamp(from.padEnd.sideOfMain === 1 ? to.lanes - (from.lanes - lane) : lane, 0, to.lanes - 1);
+  }
+  if (to.padStart && !from.padEnd) {
+    // splitting: `from` is the through road, `to` the ramp
+    return clamp(to.padStart.sideOfMain === 1 ? lane - (from.lanes - to.lanes) : lane, 0, to.lanes - 1);
+  }
+  return clamp(lane, 0, to.lanes - 1);
+}
+
 /** Ambulances and police cars run with their lights on: they ignore signals and crossings, and traffic gives way. */
 function isEmergencyKind(kind: VehicleKind): boolean {
   return kind === "ambulance" || kind === "police";
@@ -1283,7 +1300,7 @@ function findLeaderGapForVehicle(v: VehicleState, edge: Edge3D): GapInfo {
       const nextEdge = nextEdgeId ? network?.edgesById.get(nextEdgeId) : undefined;
       const nextLanes = nextEdgeId ? laneOccupancy.get(nextEdgeId) : undefined;
       if (nextEdge && nextLanes) {
-        const targetLane = clamp(v.laneIndex, 0, nextEdge.lanes - 1);
+        const targetLane = mapLaneAcross(edge, nextEdge, v.laneIndex);
         const nextLaneArr = nextLanes[targetLane];
         if (nextLaneArr.length > 0) {
           const leader = vehicles.get(nextLaneArr[0])!;
@@ -1685,7 +1702,7 @@ function step(dt: number) {
         break;
       }
       v.edgeId = nextEdgeId;
-      v.laneIndex = clamp(v.laneIndex, 0, nextEdge.lanes - 1);
+      v.laneIndex = mapLaneAcross(currentEdge, nextEdge, v.laneIndex);
       v.distanceAlongEdge = overflow;
       if (nextEdge.reservedLane && isReservedAgainst(nextEdge, v.laneIndex, v.kind) && v.laneIndex > 0) v.laneIndex -= 1;
       currentEdge = nextEdge;
@@ -1776,7 +1793,7 @@ function writeSnapshot(
         const k = clamp(1 - remaining / JUNCTION_BLEND_FT, 0, 1);
         const ease = k * k * (3 - 2 * k);
         laneCenterPointAt(edge, 1, v.laneIndex, _tmpTangent, _right, _posEnd);
-        laneCenterPointAt(nextEdge, 0, clamp(v.laneIndex, 0, nextEdge.lanes - 1), _tangentNext, _rightNext, _posNext);
+        laneCenterPointAt(nextEdge, 0, mapLaneAcross(edge, nextEdge, v.laneIndex), _tangentNext, _rightNext, _posNext);
         _pos.addScaledVector(_posNext.sub(_posEnd), ease);
         _tangent.lerp(_tangentNext, ease);
         if (_tangent.lengthSq() > 1e-6) _tangent.normalize();

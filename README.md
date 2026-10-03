@@ -22,6 +22,9 @@ speed limits and signal timing, while every car drives for real. Play it on desk
   Lane counts, speed limits, bridges, tunnels, roundabouts and traffic lights are the real ones.
 - **Campaign, daily challenge and sandbox.** Hand-built levels with par-based stars, scripted trouble (a stalled
   car, a stadium letting out), a seeded daily scenario, and a no-money-limit sandbox.
+- **Real merges and exits.** Where a ramp joins or leaves a bigger road, its pavement rides alongside as an added
+  lane, tapers to a tip at the highway's edge and gets a hatched gore wedge; cars take the same path and enter the
+  right lane. Where a road's lane count changes, its pavement eases between the two widths instead of stepping.
 - **A full road builder.** Draw roads at seven elevations from tunnel to a tier-3 flyover, with grade limits and
   clearance checks.
 - **Photo mode, share links, night/dusk lighting, ride-along camera, heatmap.** Save a shareable result card from any

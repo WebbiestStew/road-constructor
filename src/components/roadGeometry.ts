@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { edgePointAt, edgeRightVectorAt, laneOffsetFt, widthScaleAt } from "@/sim/laneGeometry";
-import type { Edge3D } from "@/sim/types";
+import { carriagewayOffsetAt, edgePointAt, edgeRightVectorAt, laneOffsetFt, widthScaleAt } from "@/sim/laneGeometry";
+import { JOIN_STEP_FT, type Edge3D, type JoinPad } from "@/sim/types";
 
 /** A single point of a 2D cross-section profile: x = lateral (along the road's "right" vector), y = vertical (world up). */
 export interface ProfilePoint {
@@ -61,7 +61,7 @@ export function sweepProfileAlongCurve(
     const ring: THREE.Vector3[] = profile.map((p) =>
       pointScratch
         .clone()
-        .addScaledVector(rightScratch, edge.lateralShiftFt + (centerlineOffsetFt + p.x) * k)
+        .addScaledVector(rightScratch, carriagewayOffsetAt(edge, t * edge.length, k) + (centerlineOffsetFt + p.x) * k)
         .addScaledVector(up, p.y + surfaceLift)
     );
     rings.push(ring);
@@ -199,7 +199,8 @@ export function buildDashedStripe(
     const t = clamp01(distFt / totalLen);
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
-    out.copy(pointScratch).addScaledVector(rightScratch, lateral * widthScaleAt(edge, t * totalLen) + edge.lateralShiftFt).addScaledVector(up, verticalOffsetFt);
+    const kk = widthScaleAt(edge, t * totalLen);
+    out.copy(pointScratch).addScaledVector(rightScratch, lateral * kk + carriagewayOffsetAt(edge, t * totalLen, kk)).addScaledVector(up, verticalOffsetFt);
   };
 
   const positions: number[] = [];
@@ -271,7 +272,7 @@ export function buildLaneArrows(
 
     const center = pointScratch
       .clone()
-      .addScaledVector(rightScratch, laneOffsetBase * widthScaleAt(edge, s + lengthFt / 2) + edge.lateralShiftFt)
+      .addScaledVector(rightScratch, laneOffsetBase * widthScaleAt(edge, s + lengthFt / 2) + carriagewayOffsetAt(edge, s + lengthFt / 2, widthScaleAt(edge, s + lengthFt / 2)))
       .addScaledVector(up, verticalOffsetFt);
 
     const tip = center
@@ -343,7 +344,7 @@ export function buildGroundShadowRibbon(edge: Edge3D, extraWidthFt = 4): THREE.B
     edgePointAt(edge, t, pointScratch);
     edgeRightVectorAt(edge, t, tangentScratch, rightScratch);
     const ground = new THREE.Vector3(pointScratch.x, 0.05, pointScratch.z);
-    ground.addScaledVector(rightScratch, edge.lateralShiftFt);
+    ground.addScaledVector(rightScratch, carriagewayOffsetAt(edge, t * edge.length, widthScaleAt(edge, t * edge.length)));
     rings.push([
       ground.clone().addScaledVector(rightScratch, -halfWidth),
       ground.clone().addScaledVector(rightScratch, halfWidth),
@@ -471,7 +472,8 @@ export function visibleRanges(edge: Edge3D, lateralOffsetFt: number): [number, n
     const t = i / n;
     edgePointAt(edge, t, p);
     edgeRightVectorAt(edge, t, tangent, right);
-    const lateral = edge.lateralShiftFt + lateralOffsetFt * widthScaleAt(edge, t * edge.length);
+    const kv = widthScaleAt(edge, t * edge.length);
+    const lateral = carriagewayOffsetAt(edge, t * edge.length, kv) + lateralOffsetFt * kv;
     const x = p.x + right.x * lateral;
     const z = p.z + right.z * lateral;
     const cx = Math.floor(x / PIER_GRID_CELL_FT);
@@ -526,15 +528,17 @@ export function indexPierConflicts(edges: Edge3D[]): void {
       const t = clamp01(d / e.length);
       edgePointAt(e, t, p);
       edgeRightVectorAt(e, t, tangent, right);
-      const x = p.x + right.x * e.lateralShiftFt;
-      const z = p.z + right.z * e.lateralShiftFt;
+      const ke = widthScaleAt(e, d);
+      const off = carriagewayOffsetAt(e, d, ke);
+      const x = p.x + right.x * off;
+      const z = p.z + right.z * off;
       const key = `${cellOf(x)},${cellOf(z)}`;
       const arr = grid.get(key);
       const sample = { x, z, y: p.y, half, edge: e };
       if (arr) arr.push(sample);
       else grid.set(key, [sample]);
       // The same point, for the line/barrier overlap test: paved half-width only (narrowing along a taper).
-      const paved = ((e.lanes * e.laneWidthFt) / 2) * widthScaleAt(e, d);
+      const paved = ((e.lanes * e.laneWidthFt) / 2) * ke;
       const pave: PavementSample = { x, z, y: p.y, paved, edge: e };
       const parr = pavementGrid.get(key);
       if (parr) parr.push(pave);
@@ -571,4 +575,101 @@ export function indexPierConflicts(edges: Edge3D[]): void {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Gore: the painted wedge between a ramp and the through road where they are close but not yet joined (or have just
+// parted), as on every real merge and exit: a paved strip with diagonal white hatching.
+// ---------------------------------------------------------------------------
+
+const GORE_MAX_WIDTH_FT = 24;
+const GORE_MIN_WIDTH_FT = 0.4;
+const GORE_HATCH_EVERY_FT = 17;
+
+export interface GoreGeometry {
+  pave: THREE.BufferGeometry;
+  hatching: THREE.BufferGeometry;
+}
+
+function goreFor(edge: Edge3D, pad: JoinPad, atEnd: boolean): GoreGeometry | null {
+  const tangent = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  const n = pad.gap.length;
+  const hr = (edge.lanes * edge.laneWidthFt) / 2;
+  // The ramp's inner edge (the side facing the through road) at each sample, and the through road's edge beside it.
+  const inner: ([number, number, number] | null)[] = [];
+  const outer: [number, number, number][] = [];
+  const width: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = i * JOIN_STEP_FT;
+    const dist = atEnd ? edge.length - d : d;
+    const t = Math.min(1, Math.max(0, dist / edge.length));
+    edgePointAt(edge, t, p);
+    edgeRightVectorAt(edge, t, tangent, right);
+    const k = widthScaleAt(edge, dist);
+    const lateral = carriagewayOffsetAt(edge, dist, k) - pad.awaySign * hr * k;
+    const ix = p.x + right.x * lateral;
+    const iz = p.z + right.z * lateral;
+    const mx = pad.mainEdge[i * 3];
+    const my = pad.mainEdge[i * 3 + 1];
+    const mz = pad.mainEdge[i * 3 + 2];
+    const w = Math.hypot(mx - ix, mz - iz);
+    width.push(w);
+    outer.push([mx, my, mz]);
+    inner.push(w >= GORE_MIN_WIDTH_FT && w <= GORE_MAX_WIDTH_FT && Math.abs(my - p.y) < 6 ? [ix, p.y, iz] : null);
+  }
+  const pave: number[] = [];
+  const hatch: number[] = [];
+  const Y_PAVE = 0.022;
+  const Y_HATCH = 0.045;
+  for (let i = 0; i + 1 < n; i++) {
+    const a = inner[i];
+    const b = inner[i + 1];
+    if (!a || !b) continue;
+    const ma = outer[i];
+    const mb = outer[i + 1];
+    pave.push(a[0], a[1] + Y_PAVE, a[2], ma[0], ma[1] + Y_PAVE, ma[2], mb[0], mb[1] + Y_PAVE, mb[2]);
+    pave.push(a[0], a[1] + Y_PAVE, a[2], mb[0], mb[1] + Y_PAVE, mb[2], b[0], b[1] + Y_PAVE, b[2]);
+  }
+  // Diagonal hatching: a short bar across the strip every few feet, slanted along the road.
+  for (let d = 6; d < (n - 1) * JOIN_STEP_FT; d += GORE_HATCH_EVERY_FT) {
+    const i = Math.floor(d / JOIN_STEP_FT);
+    const a = inner[i];
+    const b = inner[Math.min(i + 2, n - 1)];
+    if (!a || !b || width[i] < 3) continue;
+    const m = outer[Math.min(i + 2, n - 1)];
+    // from the ramp's edge here to the through road's edge a little further along the road
+    const dx = m[0] - a[0];
+    const dz = m[2] - a[2];
+    const len = Math.hypot(dx, dz) || 1;
+    const nx = -dz / len;
+    const nz = dx / len;
+    const hw = 0.55;
+    hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, a[0] - nx * hw, a[1] + Y_HATCH, a[2] - nz * hw, m[0] - nx * hw, m[1] + Y_HATCH, m[2] - nz * hw);
+    hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, m[0] - nx * hw, m[1] + Y_HATCH, m[2] - nz * hw, m[0] + nx * hw, m[1] + Y_HATCH, m[2] + nz * hw);
+  }
+  if (pave.length === 0) return null;
+  const make = (pos: number[]) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    return g;
+  };
+  return { pave: make(pave), hatching: make(hatch.length ? hatch : [0, -50, 0, 0, -50, 0, 0, -50, 0]) };
+}
+
+/** Gore strips for the ends of this road that merge into or split from a bigger one. */
+export function buildGores(edge: Edge3D): GoreGeometry[] {
+  const out: GoreGeometry[] = [];
+  if (edge.padStart) {
+    const g = goreFor(edge, edge.padStart, false);
+    if (g) out.push(g);
+  }
+  if (edge.padEnd) {
+    const g = goreFor(edge, edge.padEnd, true);
+    if (g) out.push(g);
+  }
+  return out;
 }

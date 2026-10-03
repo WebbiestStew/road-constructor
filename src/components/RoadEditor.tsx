@@ -14,8 +14,11 @@ import type { Edge3D } from "@/sim/types";
 /** Minimum drag distance, in feet, between successive draw-whoosh sound triggers. */
 const WHOOSH_DISTANCE_FT = 60;
 
-const NODE_RADIUS_FT = 7;
-const NODE_HEIGHT_FT = 2;
+/** Junction markers are click targets, not scenery: small, flat and translucent so they do not clutter the view. */
+const NODE_RADIUS_FT = 5;
+const NODE_HEIGHT_FT = 0.6;
+/** The invisible click area is a bit bigger than the marker, so a junction is easy to hit. */
+const NODE_HIT_RADIUS_FT = 9;
 
 /**
  * The interactive road-building layer: an invisible click-catching ground
@@ -76,6 +79,8 @@ function RoadEditor() {
       endsAtJunction: false,
       taperStartFt: 0,
       taperEndFt: 0,
+      startScale: 1,
+      endScale: 1,
       sunken: false,
       reservedLane: null,
       crosswalk: false,
@@ -278,7 +283,12 @@ function RoadEditor() {
             onClick={handleNodeClick(node.id, node.position)}
           >
             <cylinderGeometry args={[NODE_RADIUS_FT, NODE_RADIUS_FT, NODE_HEIGHT_FT, 20]} />
-            <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
+            <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} transparent opacity={isDrawSource || isSelected ? 0.95 : 0.55} depthWrite={false} />
+            {/* A bigger invisible disc to click, since the visible one is small */}
+            <mesh position={[0, 0, 0]}>
+              <cylinderGeometry args={[NODE_HIT_RADIUS_FT, NODE_HIT_RADIUS_FT, 2, 12]} />
+              <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+            </mesh>
           </mesh>
         );
       })}
