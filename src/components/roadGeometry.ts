@@ -186,7 +186,9 @@ export function buildDashedStripe(
   widthFt = 0.4,
   dashLenFt = 10,
   gapLenFt = 30,
-  verticalOffsetFt = 0.03
+  verticalOffsetFt = 0.03,
+  fromFt = 0,
+  toFt = edge.length
 ): THREE.BufferGeometry {
   const totalLen = edge.length;
   const cycle = dashLenFt + gapLenFt;
@@ -206,9 +208,9 @@ export function buildDashedStripe(
   const positions: number[] = [];
   const subSamples = 3;
 
-  for (let s = 0; s < totalLen; s += cycle) {
+  for (let s = fromFt; s < Math.min(toFt, totalLen); s += cycle) {
     const dashStart = s;
-    const dashEnd = Math.min(s + dashLenFt, totalLen);
+    const dashEnd = Math.min(s + dashLenFt, toFt, totalLen);
     if (dashEnd <= dashStart) continue;
 
     const left: THREE.Vector3[] = [];
@@ -641,22 +643,31 @@ function goreFor(edge: Edge3D, pad: JoinPad, atEnd: boolean): GoreGeometry | nul
     pave.push(a[0], a[1] + Y_PAVE, a[2], ma[0], ma[1] + Y_PAVE, ma[2], mb[0], mb[1] + Y_PAVE, mb[2]);
     pave.push(a[0], a[1] + Y_PAVE, a[2], mb[0], mb[1] + Y_PAVE, mb[2], b[0], b[1] + Y_PAVE, b[2]);
   }
-  // Diagonal hatching: a short bar across the strip every few feet, slanted along the road.
+  // Diagonal hatching: a short bar across the strip every few feet, slanted at 45 degrees along the road, so the
+  // bars read as an even ladder however wide the strip is.
   for (let d = 6; d < (n - 1) * JOIN_STEP_FT; d += GORE_HATCH_EVERY_FT) {
     const i = Math.floor(d / JOIN_STEP_FT);
     const a = inner[i];
-    const b = inner[Math.min(i + 2, n - 1)];
-    if (!a || !b || width[i] < 2 || width[i] > GORE_HATCH_MAX_WIDTH_FT) continue;
-    const m = outer[Math.min(i + 2, n - 1)];
-    // from the ramp's edge here to the through road's edge a little further along the road
-    const dx = m[0] - a[0];
-    const dz = m[2] - a[2];
+    if (!a || i + 1 >= n || width[i] < 2 || width[i] > GORE_HATCH_MAX_WIDTH_FT) continue;
+    const m = outer[i];
+    const ax = m[0] - a[0];
+    const az = m[2] - a[2];
+    const w = Math.hypot(ax, az) || 1;
+    // the road's own direction here, from this sample to the next
+    const mn = outer[i + 1];
+    const rx = mn[0] - m[0];
+    const rz = mn[2] - m[2];
+    const rl = Math.hypot(rx, rz) || 1;
+    const ex = m[0] + (rx / rl) * w * 0.9;
+    const ez = m[2] + (rz / rl) * w * 0.9;
+    const dx = ex - a[0];
+    const dz = ez - a[2];
     const len = Math.hypot(dx, dz) || 1;
     const nx = -dz / len;
     const nz = dx / len;
     const hw = 0.85;
-    hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, a[0] - nx * hw, a[1] + Y_HATCH, a[2] - nz * hw, m[0] - nx * hw, m[1] + Y_HATCH, m[2] - nz * hw);
-    hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, m[0] - nx * hw, m[1] + Y_HATCH, m[2] - nz * hw, m[0] + nx * hw, m[1] + Y_HATCH, m[2] + nz * hw);
+    hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, a[0] - nx * hw, a[1] + Y_HATCH, a[2] - nz * hw, ex - nx * hw, m[1] + Y_HATCH, ez - nz * hw);
+    hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, ex - nx * hw, m[1] + Y_HATCH, ez - nz * hw, ex + nx * hw, m[1] + Y_HATCH, ez + nz * hw);
   }
   if (pave.length === 0) return null;
   const make = (pos: number[]) => {

@@ -190,7 +190,9 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const gorePaves: THREE.BufferGeometry[] = [];
   // The ramp's edge line on the side facing the through road is left out where the two run hard together (an added
   // lane): the through road's own edge line is the boundary there.
-  const innerSide = edge.padStart?.awaySign ?? edge.padEnd?.awaySign;
+  // (awaySign points from the through road toward the ramp, so the edge facing the road is on the opposite side.)
+  const awaySign = edge.padStart?.awaySign ?? edge.padEnd?.awaySign;
+  const innerSide = awaySign === undefined ? undefined : -awaySign;
   const adjStart = edge.padStart ? edge.padStart.adjacentUntil / edge.length : 0;
   const adjEnd = edge.padEnd ? 1 - edge.padEnd.adjacentUntil / edge.length : 1;
   // Gore wedges where this road splits from, or merges into, a bigger one.
@@ -225,6 +227,18 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   for (let k = 1; k < edge.lanes; k++) {
     const offset = (k - edge.lanes / 2) * edge.laneWidthFt;
     stripes.push({ geometry: buildDashedStripe(edge, offset), color: WHITE_COLOR });
+  }
+
+  // Where the ramp runs hard against the through road it is an added lane, divided from the road by a broken line.
+  if (innerSide !== undefined) {
+    const spans: [number, number][] = [];
+    if (edge.padStart) spans.push([16, edge.padStart.adjacentUntil]);
+    if (edge.padEnd) spans.push([edge.length - edge.padEnd.adjacentUntil, edge.length - 16]);
+    for (const [from, to] of spans) {
+      if (to - from > 30) {
+        stripes.push({ geometry: buildDashedStripe(edge, innerSide * pavedHalfWidth, 0.5, 8, 24, 0.03, from, to), color: WHITE_COLOR });
+      }
+    }
   }
 
   // A lane set aside for buses or bikes is painted its own colour, so the player can read it at a glance.
