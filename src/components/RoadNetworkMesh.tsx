@@ -7,6 +7,7 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { assembleNetwork, assembleNetworkCached, planTexasTurnaround, type TexasTurnaroundPlan } from "@/sim/network";
 import { findClearanceViolations, MIN_BRIDGE_CLEARANCE_FT, type ClearanceViolation } from "@/sim/clearance";
 import { ROAD_CLASSES } from "@/sim/roadClasses";
+import { widthScaleAt } from "@/sim/laneGeometry";
 import { useEditorStore } from "@/state/editorStore";
 import { getPrefs } from "@/lib/prefs";
 import { usePhotoMode } from "@/lib/photoMode";
@@ -155,6 +156,32 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
       .map(([a, b]) => [Math.max(a, lo), Math.min(b, hi)] as [number, number])
       .filter(([a, b]) => (b - a) * edge.length > 12);
 
+  /**
+   * Barrier runs: only where the pavement is close to full width (a tapering ramp's rails would converge into a slab
+   * across its own tip), and never short fragments, which read as stray concrete blocks lying in the grass.
+   */
+  const MIN_BARRIER_RUN_FT = 60;
+  const barrierRuns = (offset: number): [number, number][] => {
+    const out: [number, number][] = [];
+    for (const [a, b] of runs(offset, barT0, barT1)) {
+      const n = Math.max(1, Math.ceil(((b - a) * edge.length) / 10));
+      let start = -1;
+      for (let i = 0; i <= n; i++) {
+        const t = a + ((b - a) * i) / n;
+        const full = widthScaleAt(edge, t * edge.length) >= 0.6;
+        if (full && start < 0) start = t;
+        if ((!full || i === n) && start >= 0) {
+          const end = full ? t : a + ((b - a) * (i - 1)) / n;
+          if ((end - start) * edge.length >= MIN_BARRIER_RUN_FT || (start <= barT0 + 1e-6 && end >= barT1 - 1e-6)) {
+            out.push([start, end]);
+          }
+          start = -1;
+        }
+      }
+    }
+    return out;
+  };
+
   const stripes: StripeSpec[] = [];
   // The ramp's edge line on the side facing the through road is left out where the two run hard together (an added
   // lane): the through road's own edge line is the boundary there.
@@ -232,7 +259,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     // Freeways keep the heavier F-shape Jersey barrier at grade or elevated.
     const barrierOffset = pavedHalfWidth + SHOULDER_FT - 0.5;
     for (const off of [-barrierOffset, barrierOffset]) {
-      for (const [a, b] of runs(off, barT0, barT1)) barriers.push(buildJerseyBarrier(edge, off, a, b));
+      for (const [a, b] of barrierRuns(off)) barriers.push(buildJerseyBarrier(edge, off, a, b));
     }
   } else if (edge.isElevated && !edge.isRoundaboutRing) {
     // A raised non-freeway road (a Tier-1+ street/avenue) still has a real
@@ -240,7 +267,7 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
     // parapet rail instead of leaving the drop-off unguarded.
     const parapetOffset = pavedHalfWidth + 0.5;
     for (const off of [-parapetOffset, parapetOffset]) {
-      for (const [a, b] of runs(off, barT0, barT1)) parapets.push(buildParapet(edge, off, a, b));
+      for (const [a, b] of barrierRuns(off)) parapets.push(buildParapet(edge, off, a, b));
     }
   }
 
