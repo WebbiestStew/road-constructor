@@ -10,7 +10,8 @@ for (const e of net.edges) {
     const pos = g.pave.getAttribute("position");
     let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
     for (let i = 0; i < pos.count; i++) { minX = Math.min(minX, pos.getX(i)); maxX = Math.max(maxX, pos.getX(i)); minZ = Math.min(minZ, pos.getZ(i)); maxZ = Math.max(maxZ, pos.getZ(i)); }
-    console.log(e.id, "gore pave x", minX.toFixed(0), maxX.toFixed(0), "z", minZ.toFixed(0), maxZ.toFixed(0), "tris", pos.count / 3);
+    const hp = g.hatching.getAttribute("position");
+    console.log(e.id, "hatch tris", hp.count / 3, "| gore pave x", minX.toFixed(0), maxX.toFixed(0), "z", minZ.toFixed(0), maxZ.toFixed(0), "tris", pos.count / 3);
   }
 }
 import { buildAsphaltRibbon } from "../../src/components/roadGeometry";

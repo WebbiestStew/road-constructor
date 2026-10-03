@@ -583,8 +583,8 @@ export function indexPierConflicts(edges: Edge3D[]): void {
 // ---------------------------------------------------------------------------
 
 const GORE_MAX_WIDTH_FT = 24;
-const GORE_MIN_WIDTH_FT = 0.4;
-const GORE_HATCH_EVERY_FT = 17;
+const GORE_MIN_WIDTH_FT = 1.2;
+const GORE_HATCH_EVERY_FT = 10;
 
 export interface GoreGeometry {
   pave: THREE.BufferGeometry;
@@ -637,7 +637,7 @@ function goreFor(edge: Edge3D, pad: JoinPad, atEnd: boolean): GoreGeometry | nul
     const i = Math.floor(d / JOIN_STEP_FT);
     const a = inner[i];
     const b = inner[Math.min(i + 2, n - 1)];
-    if (!a || !b || width[i] < 3) continue;
+    if (!a || !b || width[i] < 2) continue;
     const m = outer[Math.min(i + 2, n - 1)];
     // from the ramp's edge here to the through road's edge a little further along the road
     const dx = m[0] - a[0];
@@ -645,7 +645,7 @@ function goreFor(edge: Edge3D, pad: JoinPad, atEnd: boolean): GoreGeometry | nul
     const len = Math.hypot(dx, dz) || 1;
     const nx = -dz / len;
     const nz = dx / len;
-    const hw = 0.55;
+    const hw = 0.85;
     hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, a[0] - nx * hw, a[1] + Y_HATCH, a[2] - nz * hw, m[0] - nx * hw, m[1] + Y_HATCH, m[2] - nz * hw);
     hatch.push(a[0] + nx * hw, a[1] + Y_HATCH, a[2] + nz * hw, m[0] - nx * hw, m[1] + Y_HATCH, m[2] - nz * hw, m[0] + nx * hw, m[1] + Y_HATCH, m[2] + nz * hw);
   }
