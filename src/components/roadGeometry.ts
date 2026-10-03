@@ -563,7 +563,7 @@ export function indexPierConflicts(edges: Edge3D[]): void {
         const arr = grid.get(`${cx + dx},${cz + dz}`);
         if (!arr) continue;
         for (const s of arr) {
-          if (s.edge === self || s.y > deckY - 10) continue; // only roads well below the deck count
+          if (s.edge === self || s.y > deckY - 3) continue; // only roads clearly below the deck count
           if (Math.hypot(s.x - x, s.z - z) < s.half + 1.5) return true;
         }
       }
@@ -781,7 +781,19 @@ export function buildJunctionFills(edges: Edge3D[]): THREE.BufferGeometry | null
       (groups.get(root) ?? groups.set(root, []).get(root)!).push(e);
     }
     for (const members of groups.values()) {
-      if (members.length < 3) continue; // a plain one-to-one continuation has no nose
+      if (members.length < 3) {
+        // A plain one-to-one continuation has no nose, but where it bends the square-cut ends leave a wedge of bare
+        // ground on the outside of the bend.
+        const into = members.find((m) => m.toNodeId === nodeId);
+        const out = members.find((m) => m.fromNodeId === nodeId);
+        if (!into || !out) continue;
+        into.spline.getTangentAt(1, tIn);
+        out.spline.getTangentAt(0, tOut);
+        const la = Math.hypot(tIn.x, tIn.z) || 1;
+        const lb = Math.hypot(tOut.x, tOut.z) || 1;
+        const bend = Math.acos(Math.max(-1, Math.min(1, (tIn.x * tOut.x + tIn.z * tOut.z) / (la * lb))));
+        if (bend < (3 * Math.PI) / 180) continue;
+      }
       const pts: THREE.Vector3[] = [];
       for (const e of members) {
         const [l, r] = endCorners(e, e.toNodeId === nodeId);

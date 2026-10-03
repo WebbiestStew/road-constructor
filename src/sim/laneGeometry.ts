@@ -51,14 +51,18 @@ export function widthScaleAt(edge: Edge3D, distanceFt: number): number {
 /** The strip left between a ramp and the road it rides alongside, once the ramp has been drawn in. */
 const JOIN_PULL_GAP_FT = 6;
 /** Fraction of the measured stretch (from the junction) over which the ramp is held fully against the road. */
-const JOIN_PULL_HOLD = 0.55;
+const JOIN_PULL_HOLD = 0.35;
+/** How fast the strip beside the through road may widen, in feet of gap per foot along the road (about 6 degrees). */
+const JOIN_PULL_SPLAY = 0.1;
 
 function softPush(x: number): number {
   if (x <= 0) return 0;
   return x < 2 ? (x * x) / 4 : x - 1;
 }
 
-function padPush(pad: JoinPad, d: number, k: number, hr: number): number {
+function padPush(pad: JoinPad, distance: number, k: number, hr: number): number {
+  // rounding can leave a hair below zero at the very end of a road, which would index before the first sample
+  const d = Math.max(0, distance);
   if (d >= pad.reach) return 0;
   const f = d / JOIN_STEP_FT;
   const i = Math.floor(f);
@@ -67,11 +71,16 @@ function padPush(pad: JoinPad, d: number, k: number, hr: number): number {
   // instead of lying across the through road's lanes.
   const clear = g - pad.mainHalf - k * hr;
   // Where the ramp has drifted off from the through road, draw it in toward the road so the strip between them is a
-  // narrow gore rather than a long wedge of grass. The pull fades out at the end of the measured stretch, where the
-  // ramp is back on its own line.
+  // narrow gore rather than a long wedge of grass. The strip is allowed to widen only gently with distance from the
+  // junction, so the ramp converges along a steady line instead of swinging in and back out. The pull fades out at
+  // the end of the measured stretch, where the ramp is back on its own line.
+  const cap = JOIN_PULL_GAP_FT + JOIN_PULL_SPLAY * d;
   const fade = 1 - smooth01((d / pad.reach - JOIN_PULL_HOLD) / (1 - JOIN_PULL_HOLD));
-  const pull = Math.max(0, clear - JOIN_PULL_GAP_FT) * fade;
-  return pad.awaySign * (softPush(0.5 - clear) - pull);
+  const pull = Math.max(0, clear - cap) * fade;
+  // A ramp still lying on the through road where the measured stretch ends (a short stub) is eased back to its own
+  // line over the last part of that stretch, rather than snapping across it.
+  const release = 1 - smooth01((d / pad.reach - 0.6) / 0.4);
+  return pad.awaySign * (softPush(0.5 - clear) * release - pull);
 }
 
 /**

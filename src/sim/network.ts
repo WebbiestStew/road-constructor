@@ -449,7 +449,9 @@ function buildSpline(
   points.push(new THREE.Vector3(...to));
   // Make the ends leave along the heading shared with the neighbouring road: a helper point a short way in, on that
   // heading, pins the curve's end tangent to it.
+  let helped = false;
   if (joint && points.length >= 3) {
+    helped = !!(joint.start || joint.end);
     if (joint.end) {
       const last = points[points.length - 1];
       const h = Math.min(JOINT_HELPER_FT, last.distanceTo(points[points.length - 2]) * 0.4);
@@ -461,7 +463,10 @@ function buildSpline(
       points.splice(1, 0, first.clone().addScaledVector(joint.start, h));
     }
   }
-  return new THREE.CatmullRomCurve3(points, false, "catmullrom", 0.5);
+  // The helper sits a few feet from the end while the next control point can be hundreds of feet away. A uniform
+  // Catmull-Rom curve overshoots across such uneven spacing and doubles back on itself at the end (a hairpin spur that
+  // folds the pavement); the centripetal form does not.
+  return new THREE.CatmullRomCurve3(points, false, helped ? "centripetal" : "catmullrom", 0.5);
 }
 
 /** How far below ground a road must dip to count as an underpass or cutting rather than a rounding overshoot at the base of a ramp. */

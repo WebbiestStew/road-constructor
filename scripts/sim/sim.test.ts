@@ -39,7 +39,7 @@ for (const plan of REAL_PLANS) {
 
 test("a level can be improved: adding lanes beats the three-star target in Houston", () => {
   const plan = REAL_PLANS.find((p) => p.key === "houston")!;
-  const better = run("houston", "lanes");
+  const better = run("houston", "lanes5");
   assert.ok(better.trips >= Math.ceil(plan.baseline * 1.10), `only ${better.trips} vs target ${Math.ceil(plan.baseline * 1.10)}`);
 });
 

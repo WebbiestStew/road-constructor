@@ -689,7 +689,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Where I-45 meets I-10 just north of downtown Houston, a dense tangle of real ramps and flyovers. There are no lights to retime, so widen the ramps and lanes that choke, and spend the budget where it counts.",
     budget: 8_000_000,
-    baseline: 839,
+    baseline: 932,
   },
   {
     key: "san-antonio",
@@ -716,7 +716,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Where I-635 meets US-75 north of Dallas, on the real stack of flyovers. The ramps and lane counts are the real ones, and the afternoon crowd is on its way home. Add lanes where the weaves choke, retime the limits, and spend the budget where it matters most.",
     budget: 9_000_000,
-    baseline: 676,
+    baseline: 772,
   },
   {
     key: "chicago",
@@ -734,7 +734,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The Tom Moreland Interchange, better known as Spaghetti Junction, rebuilt from the real roads. Dozens of ramps, with the whole metro trying to get through. Widen, retime and re-limit until the knot loosens.",
     budget: 8_000_000,
-    baseline: 878,
+    baseline: 961,
   },
 ];
 

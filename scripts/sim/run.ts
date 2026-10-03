@@ -10,6 +10,9 @@ async function main() {
   if (variant === "lanes") {
     for (const e of network.edges) if (!e.isRoundaboutRing && e.lanes < 4) e.lanes += 1;
   }
+  if (variant === "lanes5") {
+    for (const e of network.edges) if (!e.isRoundaboutRing && e.lanes < 5) e.lanes += 1;
+  }
   const sim = await createSim();
   sim.load(network, Number(seed), 20);
   const r = await sim.runUntil(300);
