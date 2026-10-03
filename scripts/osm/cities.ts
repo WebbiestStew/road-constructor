@@ -3,6 +3,8 @@
  * once by scripts/osm/build.ts and baked into src/sim/real/<key>.json — nothing is fetched while playing.
  * bbox is [south, west, north, east] in degrees.
  */
+import type { ConvertConfig } from "../../src/sim/osm/convert";
+
 export interface CityConfig {
   key: string;
   name: string;
@@ -11,6 +13,12 @@ export interface CityConfig {
   highways: string[];
   /** Scales every entry's demand, tuned per city so the unmodified network is properly stressed. */
   demandScale: number;
+  /** See ConvertConfig.zoneRegions. */
+  zoneRegions?: ConvertConfig["zoneRegions"];
+  /** Also build rivers and bays from the coastline (for a box with a lot of water in it). */
+  coastline?: boolean;
+  /** Only download roads within `corridorMeters` of these [lat, lon] polylines (a long route through a big box). */
+  corridor?: { lines: [number, number][][]; meters: number };
 }
 
 const FREEWAY = ["motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link"];
@@ -38,4 +46,35 @@ export const CITIES: CityConfig[] = [
   { key: "chicago", name: "Chicago", bbox: [41.8705, -87.6525, 41.8805, -87.6385], highways: FREEWAY, demandScale: 1 },
   // Atlanta: the Tom Moreland ("Spaghetti Junction") interchange of I-85 and I-285.
   { key: "atlanta", name: "Atlanta", bbox: [33.8865, -84.2665, 33.8970, -84.2515], highways: FREEWAY, demandScale: 1.4 },
+  // Lincoln Tunnel: from the Weehawken helix in New Jersey, under the Hudson, across Midtown, to Queens and Brooklyn.
+  // Traffic only comes in from the New Jersey edge and only leaves on the Queens (east) and Brooklyn (south) edges.
+  {
+    key: "lincoln-tunnel",
+    name: "Lincoln Tunnel",
+    coastline: true,
+    bbox: [40.695, -74.04, 40.775, -73.935],
+    highways: ARTERIAL,
+    demandScale: 0.3,
+    corridor: {
+      meters: 420,
+      lines: [
+        // New Jersey, the Weehawken helix, the tunnel under the Hudson, out at 39th Street.
+        [[40.7642, -74.04], [40.7667, -74.03], [40.766, -74.02], [40.764, -74.018], [40.7615, -74.01], [40.76, -74.001], [40.759, -73.9985]],
+        // Across Midtown on 42nd and 34th Streets to the Queens-Midtown Tunnel, and on into Queens.
+        [[40.759, -73.9985], [40.756, -73.988], [40.7535, -73.979], [40.7515, -73.973], [40.748, -73.9715], [40.745, -73.965], [40.743, -73.956], [40.742, -73.94]],
+        // The Queensboro Bridge.
+        [[40.7535, -73.979], [40.759, -73.964], [40.758, -73.952], [40.756, -73.942]],
+        // Down the east side to the Williamsburg, Manhattan and Brooklyn bridges (Brooklyn).
+        [[40.7515, -73.973], [40.738, -73.974], [40.725, -73.978], [40.714, -73.98], [40.709, -73.991], [40.704, -73.996], [40.698, -73.995]],
+        [[40.7137, -73.973], [40.712, -73.96], [40.71, -73.945]],
+      ],
+    },
+    zoneRegions: {
+      entry: (_lat, lon) => lon < -74.026,
+      // Queens: the Queens-Midtown Tunnel, Queensboro Bridge and the expressways beyond them. Brooklyn: the roads at the
+      // southern tip that carry on to the Brooklyn, Manhattan and Brooklyn-Battery crossings.
+      dest: (lat, lon) => lon > -73.948 || (lat < 40.716 && lon < -73.975),
+      entryScale: 1,
+    },
+  },
 ];

@@ -2,6 +2,7 @@
 // The worker is a singleton per process, which is why the tests shell out to this instead of running in-process.
 import { REAL_CITY_DATA } from "../../src/sim/real";
 import fs from "node:fs";
+import { REAL_PLANS } from "../../src/sim/scenarios";
 import { cloneNetwork, createSim } from "./harness";
 
 const [key, variant = "none", seed = "1337"] = process.argv.slice(2);
@@ -22,7 +23,7 @@ async function main() {
     if (v === "speedcap") {
       // A player raising every limit as far as the class allows: design speed + 10 mph, never below what is there.
       const cap: Record<string, number> = { lane: 45, street: 40, avenue: 45, highway: 65, motorway: 75 };
-      for (const e of network.edges) e.speedLimitMph = Math.max(e.speedLimitMph, cap[e.roadClassId] ?? e.speedLimitMph);
+      for (const e of network.edges) e.speedLimitMph = Math.max(e.speedLimitMph, e.elevationLevelId === "tunnel" ? Math.min(45, cap[e.roadClassId] ?? 45) : (cap[e.roadClassId] ?? e.speedLimitMph));
     }
     if (v === "speed75") for (const e of network.edges) e.speedLimitMph = 75;
     if (v === "speed") for (const e of network.edges) e.speedLimitMph = Math.min(75, e.speedLimitMph + 10);
@@ -41,7 +42,7 @@ async function main() {
     prevPost(m);
   };
   sim.load(network, Number(seed), 20);
-  const r = await sim.runUntil(300);
+  const r = await sim.runUntil(REAL_PLANS.find((p) => p.key === key)?.durationS ?? 300);
   console.log(JSON.stringify({ trips: r.trips, mph: r.avgMph, jams: r.problems.length, spawned: lastTick?.spawnedTotal, active: lastTick?.activeCount }));
   process.exit(0);
 }

@@ -9,6 +9,7 @@ import { cloneNetwork, createSim } from "./harness";
 
 const [key, frac = "0.95"] = process.argv.slice(2);
 async function main() {
+  const plan0 = REAL_PLANS.find((p) => p.key === key)!;
   const network = cloneNetwork(REAL_CITY_DATA[key].network);
   const sim = await createSim();
   const g = globalThis as unknown as { postMessage: (m: any) => void };
@@ -25,7 +26,7 @@ async function main() {
     prev(m);
   };
   sim.load(network, 1337, 20);
-  await sim.runUntil(300);
+  await sim.runUntil(Math.min(600, plan0.durationS ?? 300));
   const nodes = new Map(network.nodes.map((n) => [n.id, n]));
   const plan = REAL_PLANS.find((p) => p.key === key)!;
   const rows = network.edges

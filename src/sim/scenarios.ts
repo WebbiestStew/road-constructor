@@ -1,4 +1,4 @@
-import { buildHarborDrive, buildInterchangeSite, buildMidtown } from "./cities";
+import { buildCloverleaf, buildHarborDrive, buildInterchangeSite, buildMidtown } from "./cities";
 import { REAL_CITY_DATA } from "./real";
 import type { CrashStats, EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
@@ -656,6 +656,8 @@ export interface RealCityPlan {
   baseline: number;
   /** Three stars at this multiple of the baseline when the default (1.12) is out of reach. */
   threeStarRatio?: number;
+  /** Length of the run in seconds (300 unless the trips are long enough that five minutes would measure nothing). */
+  durationS?: number;
 }
 
 export const REAL_PLANS: RealCityPlan[] = [
@@ -742,6 +744,16 @@ export const REAL_PLANS: RealCityPlan[] = [
     // Trips here are long (a three-mile map), so the 5-minute count is mostly travel time: the best realistic play reaches about +10%.
     threeStarRatio: 1.09,
   },
+  {
+    key: "lincoln-tunnel",
+    name: "Lincoln Tunnel: Jersey to the Boroughs",
+    tagline: "Out of the helix, under the Hudson, across Midtown, and on to Queens and Brooklyn.",
+    briefing:
+      "Everything here comes in from New Jersey: the Route 495 helix, the Lincoln Tunnel under the Hudson, and the Weehawken streets beside it. It comes out at 39th Street in Midtown, crosses Manhattan on the real avenues, and leaves by the Queens-Midtown Tunnel and the Queensboro Bridge for Queens, or down the east side for Brooklyn. It is a long haul, so the clock runs fifteen minutes. Find the avenue that chokes the tunnel mouth and fix it.",
+    budget: 14_000_000,
+    baseline: 224,
+    durationS: 1800,
+  },
 ];
 
 function realScenario(plan: RealCityPlan): ScenarioDef {
@@ -754,9 +766,9 @@ function realScenario(plan: RealCityPlan): ScenarioDef {
     briefing: plan.briefing,
     startingNetwork: REAL_CITY_DATA[plan.key].network,
     startingBudget: plan.budget,
-    durationS: 300,
+    durationS: plan.durationS ?? 300,
     targetAvgSpeedMph: 25,
-    createEvaluator: createRealCityEvaluator(plan.baseline, 300, plan.threeStarRatio),
+    createEvaluator: createRealCityEvaluator(plan.baseline, plan.durationS ?? 300, plan.threeStarRatio),
   };
 }
 
@@ -771,6 +783,9 @@ const FIRST_SHIFT_NETWORK = withJaywalkers(buildHarborDrive({ speed: true, signa
 /** Vehicles moved by a fully fixed First Shift (limits and lights repaired, crossing added). */
 const FIRST_SHIFT_PAR = 236;
 const INTERCHANGE_NETWORK = buildInterchangeSite();
+const CLOVERLEAF_NETWORK = buildCloverleaf();
+/** Vehicles moved in 300 s by the untouched Clover Crossing, the mean of eight seeds in the headless sim. */
+const CLOVER_BASELINE = 270;
 function createFivePointsEvaluator(): ScenarioEvaluator {
   const sustain = createSustainTracker(FP_SUSTAIN_S);
   return (ctx) => {
@@ -1460,6 +1475,18 @@ export const SCENARIOS: ScenarioDef[] = [
     durationS: 260,
     targetAvgSpeedMph: 45,
     createEvaluator: createTripsEvaluator(225),
+  },
+  {
+    id: "clover-crossing",
+    name: "Clover Crossing",
+    tagline: "A cloverleaf with four loops, four weaves and no traffic light to hide behind.",
+    briefing:
+      "A freeway interchange of our own design: the north-south freeway climbs over the east-west one, every left turn is a tight loop and every right turn swings around the outside. Each loop ends where the next one begins, so the cars have only a thousand feet to weave across each other. Add lanes where the weaves choke, lower the loop limits so they merge calmly, or raise the mainlines, and keep the whole thing flowing.",
+    startingNetwork: CLOVERLEAF_NETWORK,
+    startingBudget: 6_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 40,
+    createEvaluator: createRealCityEvaluator(CLOVER_BASELINE, 300),
   },
   {
     id: "midtown",

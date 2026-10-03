@@ -988,7 +988,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const targets = collectRoadTargets(state, edgeId, wholeRoad);
     if (targets.size === 0) return;
     // A limit sign can't make a street a highway: each road takes the limit up to what its class allows.
-    const limitFor = (e: EdgeSpec) => Math.min(mph, maxSpeedLimitFor(e.roadClassId, e.speedLimitMph));
+    const limitFor = (e: EdgeSpec) => Math.min(mph, maxSpeedLimitFor(e.roadClassId, e.speedLimitMph, e.elevationLevelId));
     const changed = state.edges.filter((e) => targets.has(e.id) && e.speedLimitMph !== limitFor(e));
     if (changed.length === 0) {
       if (state.edges.some((e) => targets.has(e.id) && limitFor(e) < mph)) pushToast("That's as fast as this kind of road can be posted", "info");

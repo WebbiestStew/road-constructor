@@ -201,7 +201,7 @@ export function SpeedLimitCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean
       <div className="grid grid-cols-5 gap-2">
         {SPEED_LIMIT_CHOICES_MPH.map((mph) => {
           const active = spec.speedLimitMph === mph;
-          const cap = maxSpeedLimitFor(spec.roadClassId, spec.speedLimitMph);
+          const cap = maxSpeedLimitFor(spec.roadClassId, spec.speedLimitMph, spec.elevationLevelId);
           const tooFast = mph > cap;
           return (
             <button

@@ -94,4 +94,20 @@ test("speed limits are capped by road class, but a road keeps a limit it already
   assert.equal(maxSpeedLimitFor("motorway", 65), 75);
   assert.equal(maxSpeedLimitFor("street", 45), 45, "a real-city street already posted above the cap keeps it");
   assert.ok(maxSpeedLimitFor("avenue", 40) < maxSpeedLimitFor("highway", 55));
+  assert.equal(maxSpeedLimitFor("motorway", 35, "tunnel"), 45, "a tunnel is capped below its class");
+  assert.equal(maxSpeedLimitFor("motorway", 65, "ground"), 75);
+});
+
+test("Clover Crossing: the untouched interchange earns one star, and a second lane on the ramps reaches three", async () => {
+  const { getScenarioById } = await import("../../src/sim/scenarios");
+  const level = getScenarioById("clover-crossing")!;
+  const base = runLevel("clover-crossing", "none").trips;
+  const fixed = runLevel("clover-crossing", "ramps2").trips;
+  // the level's own targets, from the untouched mean
+  const stars = (moved: number) => {
+    const res = level.createEvaluator()({ elapsedS: 300, completedTripsTotal: moved } as never);
+    return res.stars;
+  };
+  assert.equal(stars(base), 1, `untouched moved ${base}`);
+  assert.equal(stars(fixed), 3, `ramps widened moved ${fixed}`);
 });

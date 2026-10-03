@@ -36,6 +36,9 @@ async function main() {
     const ew = Math.abs(b[0] - a[0]) > Math.abs(b[2] - a[2]);
     if (variants.has("busEW") && ew && e.lanes >= 2) e.reservedLane = "bus";
     if (variants.has("busNS") && !ew && e.lanes >= 2) e.reservedLane = "bus";
+    if (variants.has("ramps2") && e.roadClassId === "highway") e.lanes = 2;
+    if (variants.has("main4") && e.roadClassId === "motorway") e.lanes = 4;
+    if (variants.has("rampfast") && e.roadClassId === "highway") e.speedLimitMph = 45;
     if (variants.has("cross") && e.jaywalkers) e.crosswalk = true;
     if (variants.has("stops") && e.lanes >= 2) e.busStop = true;
     if (variants.has("parking") && e.lanes >= 2) e.parking = true;

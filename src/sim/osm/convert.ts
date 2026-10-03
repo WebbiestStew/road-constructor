@@ -16,6 +16,17 @@ export interface ConvertConfig {
   bbox: [number, number, number, number];
   /** Scales every entry's demand. */
   demandScale: number;
+  /**
+   * Where traffic may come from and go to, as tests on the lat/lon of a road that the box cuts off. Without these every
+   * cut road is both an entry and an exit; with them (the Lincoln Tunnel level) traffic only flows between the regions
+   * and the other cut roads are left as plain dead ends.
+   */
+  zoneRegions?: {
+    entry?: (lat: number, lon: number) => boolean;
+    dest?: (lat: number, lon: number) => boolean;
+    /** Demand multiplier for the entries that remain. */
+    entryScale?: number;
+  };
 }
 
 export interface OsmWay {
@@ -445,17 +456,28 @@ function addControlsAndZones(city: ConvertConfig, nodes: NodeSpec[], edges: Edge
   const BASE_VPH: Record<RoadClassId, number> = { lane: 150, street: 220, avenue: 360, highway: 520, motorway: 650 };
   let entries = 0;
   let dests = 0;
+  const [bs, bw, bn, be] = city.bbox;
+  const lat0 = (bs + bn) / 2;
+  const lon0 = (bw + be) / 2;
+  const toLatLon = (x: number, z: number) => ({
+    lat: lat0 - z / (110540 * FT_PER_M),
+    lon: lon0 + x / (Math.cos((lat0 * Math.PI) / 180) * 111320 * FT_PER_M),
+  });
+  const regions = city.zoneRegions;
   for (const n of nodes) {
     const inc = incident.get(n.id) ?? [];
     const neighbours = new Set(inc.map((e) => (e.fromNodeId === n.id ? e.toNodeId : e.fromNodeId)));
     if (neighbours.size !== 1) continue;
+    const where = toLatLon(n.position[0], n.position[2]);
     for (const e of inc) {
       if (e.isRoundaboutRing) continue;
       if (e.fromNodeId === n.id) {
-        const vph = Math.max(120, Math.min(2200, Math.round(BASE_VPH[e.roadClassId] * e.lanes * city.demandScale)));
+        if (regions?.entry && !regions.entry(where.lat, where.lon)) continue;
+        const vph = Math.max(120, Math.min(2200, Math.round(BASE_VPH[e.roadClassId] * e.lanes * city.demandScale * (regions?.entryScale ?? 1))));
         e.zone = { type: "entry", demandVehPerHour: vph };
         entries++;
       } else {
+        if (regions?.dest && !regions.dest(where.lat, where.lon)) continue;
         e.zone = { type: "destination", targetSpeedMph: 25 };
         dests++;
       }

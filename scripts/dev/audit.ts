@@ -6,6 +6,13 @@ import { assembleNetwork } from "../../src/sim/network";
 import { carriagewayOffsetAt, widthScaleAt } from "../../src/sim/laneGeometry";
 import { buildAsphaltRibbon, buildGores, computePierDescriptors, indexPierConflicts } from "../../src/components/roadGeometry";
 import type { Edge3D } from "../../src/sim/types";
+import { getScenarioById } from "../../src/sim/scenarios";
+
+/** A real-city key, or "scenario:<id>" for a hand-built level. */
+function networkFor(key: string) {
+  if (key.startsWith("scenario:")) return getScenarioById(key.slice(9))!.startingNetwork;
+  return REAL_CITY_DATA[key].network;
+}
 
 const keys = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(REAL_CITY_DATA);
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -27,7 +34,7 @@ function sampleEdge(e: Edge3D, step = 10): Sample[] {
 
 let totalProblems = 0;
 for (const key of keys) {
-  const net = assembleNetwork(REAL_CITY_DATA[key].network);
+  const net = assembleNetwork(networkFor(key));
   indexPierConflicts(net.edges);
   const problems: Record<string, string[]> = {};
   const add = (kind: string, msg: string) => ((problems[kind] ??= []).push(msg));

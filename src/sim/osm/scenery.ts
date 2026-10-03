@@ -18,6 +18,7 @@ export const EMPTY_SCENERY: SceneryData = { buildings: [], water: [] };
 
 interface SceneryWay {
   id: number;
+  nodes?: number[];
   geometry?: ({ lat: number; lon: number } | null)[];
   tags?: Record<string, string>;
   type: string;
@@ -180,6 +181,152 @@ export function convertScenery(bbox: [number, number, number, number], elements:
     buildings: buildings.slice(0, MAX_BUILDINGS).map(({ p, h }) => ({ p, h })),
     water: water.slice(0, MAX_WATER).map((x) => x.p),
   };
+}
+
+
+type LL = { lat: number; lon: number };
+
+/**
+ * Sea and big rivers from OpenStreetMap's coastline ways (land is on the left of each way, water on the right). The
+ * ways are joined end to end, trimmed to the box, and each piece that crosses the box is closed up along the box edge
+ * on its water side, which gives one polygon per stretch of water.
+ */
+export function coastlineWater(bbox: [number, number, number, number], ways: SceneryWay[]): number[][] {
+  const project = makeProjector(bbox);
+  const [s, w, n, e] = bbox;
+  const coast = ways.filter((x) => x.type === "way" && x.tags?.natural === "coastline" && x.geometry && x.nodes && x.nodes.length > 1);
+  // Join ways whose end node is another's start node.
+  const byStart = new Map<number, SceneryWay>();
+  for (const way of coast) byStart.set(way.nodes![0], way);
+  const used = new Set<SceneryWay>();
+  const hasPredecessor = new Set<number>();
+  for (const way of coast) hasPredecessor.add(way.nodes![way.nodes!.length - 1]);
+  const chains: LL[][] = [];
+  const build = (first: SceneryWay) => {
+    const pts: LL[] = [];
+    let cur: SceneryWay | undefined = first;
+    while (cur && !used.has(cur)) {
+      used.add(cur);
+      const g = cur.geometry!.filter((q): q is LL => !!q);
+      pts.push(...(pts.length ? g.slice(1) : g));
+      cur = byStart.get(cur.nodes![cur.nodes!.length - 1]);
+    }
+    if (pts.length > 1) chains.push(pts);
+  };
+  for (const way of coast) if (!hasPredecessor.has(way.nodes![0])) build(way);
+  for (const way of coast) build(way); // whatever is left is part of a loop
+
+  // Position along the box edge, clockwise from the south-west corner (north is up the screen).
+  const W = e - w;
+  const H = n - s;
+  const perimeter = (lat: number, lon: number) => {
+    const eps = 1e-9;
+    if (Math.abs(lon - w) < eps) return lat - s; // west edge, going north
+    if (Math.abs(lat - n) < eps) return H + (lon - w); // north edge, going east
+    if (Math.abs(lon - e) < eps) return H + W + (n - lat); // east edge, going south
+    return 2 * H + W + (e - lon); // south edge, going west
+  };
+  const corners: { at: number; lat: number; lon: number }[] = [
+    { at: H, lat: n, lon: w },
+    { at: H + W, lat: n, lon: e },
+    { at: 2 * H + W, lat: s, lon: e },
+    { at: 2 * H + 2 * W, lat: s, lon: w },
+  ];
+  const clipSegment = (a: LL, b: LL): { enter: LL | null; leave: LL | null; ins: boolean } => {
+    const inA = a.lat >= s && a.lat <= n && a.lon >= w && a.lon <= e;
+    const inB = b.lat >= s && b.lat <= n && b.lon >= w && b.lon <= e;
+    if (inA && inB) return { enter: null, leave: null, ins: true };
+    // Liang-Barsky against the box
+    let t0 = 0;
+    let t1 = 1;
+    const dx = b.lon - a.lon;
+    const dy = b.lat - a.lat;
+    const p = [-dx, dx, -dy, dy];
+    const q = [a.lon - w, e - a.lon, a.lat - s, n - a.lat];
+    for (let i = 0; i < 4; i++) {
+      if (p[i] === 0) {
+        if (q[i] < 0) return { enter: null, leave: null, ins: false };
+      } else {
+        const r = q[i] / p[i];
+        if (p[i] < 0) t0 = Math.max(t0, r);
+        else t1 = Math.min(t1, r);
+      }
+    }
+    if (t0 > t1) return { enter: null, leave: null, ins: false };
+    const at = (t: number): LL => ({ lat: Math.min(n, Math.max(s, a.lat + dy * t)), lon: Math.min(e, Math.max(w, a.lon + dx * t)) });
+    return { enter: inA ? null : at(t0), leave: inB ? null : at(t1), ins: true };
+  };
+
+  // Cut every chain into the pieces that lie inside the box and run from one box edge to another.
+  const onEdge = (q: LL) => Math.abs(q.lat - s) < 1e-9 || Math.abs(q.lat - n) < 1e-9 || Math.abs(q.lon - w) < 1e-9 || Math.abs(q.lon - e) < 1e-9;
+  const pieces: { pts: LL[]; start: number; end: number }[] = [];
+  for (const chain of chains) {
+    let piece: LL[] = [];
+    const flush = () => {
+      if (piece.length > 1 && onEdge(piece[0]) && onEdge(piece[piece.length - 1])) {
+        pieces.push({ pts: piece, start: perimeter(piece[0].lat, piece[0].lon), end: perimeter(piece[piece.length - 1].lat, piece[piece.length - 1].lon) });
+      }
+      piece = [];
+    };
+    for (let i = 0; i + 1 < chain.length; i++) {
+      const a = chain[i];
+      const b = chain[i + 1];
+      const c = clipSegment(a, b);
+      if (!c.ins) {
+        flush();
+        continue;
+      }
+      if (c.enter) {
+        flush();
+        piece.push(c.enter);
+      } else if (piece.length === 0) piece.push(a);
+      piece.push(c.leave ?? b);
+      if (c.leave) flush();
+    }
+    flush();
+  }
+
+  // Water lies on the right of each piece. From where a piece leaves the box, walk the box edge clockwise to the next
+  // piece that starts there; chaining pieces that way closes each stretch of water into one ring.
+  const total = 2 * H + 2 * W;
+  const gap = (from: number, to: number) => (to - from + total) % total;
+  const polygons: number[][] = [];
+  const done = new Set<number>();
+  for (let first = 0; first < pieces.length; first++) {
+    if (done.has(first)) continue;
+    const ring: LL[] = [];
+    let cur = first;
+    for (let guard = 0; guard < pieces.length + 1; guard++) {
+      done.add(cur);
+      ring.push(...pieces[cur].pts);
+      let next = -1;
+      let best = Infinity;
+      for (let k = 0; k < pieces.length; k++) {
+        const g = gap(pieces[cur].end, pieces[k].start);
+        if (g < best) {
+          best = g;
+          next = k;
+        }
+      }
+      const toPerim = pieces[next].start;
+      const span = gap(pieces[cur].end, toPerim);
+      const between = corners
+        .map((c) => ({ ...c, rel: gap(pieces[cur].end, c.at) }))
+        .filter((c) => c.rel > 1e-9 && c.rel < span - 1e-9)
+        .sort((x, y) => x.rel - y.rel);
+      for (const c of between) ring.push({ lat: c.lat, lon: c.lon });
+      if (next === first || done.has(next)) break;
+      cur = next;
+    }
+    polygons.push(
+      simplify(
+        ring.map((q) => project(q.lat, q.lon)),
+        10
+      ).flatMap((q) => [Math.round(q.x), Math.round(q.z)])
+    );
+  }
+  // Order the ring corners by sorting out duplicates, and drop slivers.
+  return polygons.filter((p) => p.length >= 6);
 }
 
 /** The Overpass query for a box's buildings and water. */

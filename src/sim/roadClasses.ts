@@ -197,7 +197,11 @@ export const TEXAS_TURNAROUND_COST_MULTIPLIER = 2.4;
 /** How far from the clicked point to search for a same-corridor opposing frontage road to loop back onto, feet. */
 export const TEXAS_TURNAROUND_SEARCH_RADIUS_FT = 220;
 
-/** The highest limit that may be posted on a road: its class's cap, or what it already carries if that is higher (the real-city roads keep their real limits). */
-export function maxSpeedLimitFor(roadClassId: RoadClassId, currentMph: number): number {
-  return Math.max(ROAD_CLASSES[roadClassId].maxSpeedLimitMph, currentMph);
+/** Tunnels are posted slower than the open road of their class: nobody signs a 75 under a river. */
+export const TUNNEL_MAX_SPEED_LIMIT_MPH = 45;
+
+/** The highest limit that may be posted on a road: its class's cap (lower in a tunnel), or what it already carries if that is higher (the real-city roads keep their real limits). */
+export function maxSpeedLimitFor(roadClassId: RoadClassId, currentMph: number, elevationLevelId?: ElevationLevelId): number {
+  const cap = ROAD_CLASSES[roadClassId].maxSpeedLimitMph;
+  return Math.max(elevationLevelId === "tunnel" ? Math.min(cap, TUNNEL_MAX_SPEED_LIMIT_MPH) : cap, currentMph);
 }

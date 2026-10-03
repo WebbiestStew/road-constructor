@@ -170,3 +170,138 @@ export function buildInterchangeSite(): NetworkSnapshot {
   b.road(0, "armS", s, si, "motorway", "ground", { forward: ENTRY(demand), backward: undefined });
   return { nodes: [...b.nodes.values()], edges: b.edges };
 }
+
+/**
+ * Clover Crossing: a cloverleaf interchange of my own design, where an east-west freeway runs at ground level under a
+ * north-south one that climbs over it.
+ *
+ * Every left turn is a 270-degree loop (radius `R`) in its own quadrant, leaving one freeway and joining the other,
+ * and every right turn is a long outer ramp that swings around the outside of the loop. The loops join each freeway
+ * at the same point where the other loop leaves it, so cars entering from one loop and leaving by the next have only
+ * about 2R of road to weave across. That weave is the whole puzzle.
+ *
+ * Each freeway is two separate one-way carriageways (like the real ones), `G` feet either side of its centreline.
+ */
+export function buildCloverleaf(): NetworkSnapshot {
+  const b = new Builder();
+  const R = 520;
+  const G = 35;
+  const ARM = 7 * R;
+  const demand = 2600;
+  const OUT_EXIT = 2.8 * R;
+  const OUT_JOIN = 3.25 * R;
+
+  // One quarter-turn about the middle, in plan (+x east, +z south): east becomes south, south becomes west...
+  const rot = (k: number, x: number, z: number): [number, number] => {
+    let px = x;
+    let pz = z;
+    for (let i = 0; i < k; i++) [px, pz] = [-pz, px];
+    return [px, pz];
+  };
+  const key = (x: number, z: number) => `n${Math.round(x)}_${Math.round(z)}`;
+  const nodeAt = (x: number, z: number) => {
+    const id = key(x, z);
+    if (!b.nodes.has(id)) b.node(id, Math.round(x), Math.round(z));
+    return id;
+  };
+
+  // The freeways' four carriageways: east-bound at z=+G, west-bound at z=-G, north-bound at x=+G, south-bound at x=-G.
+  // Each runs between its two arm ends, through every point a ramp touches it.
+  type Carriage = { id: string; at: (t: number) => [number, number]; along: (x: number, z: number) => number; ascending: boolean; entryEnd: "start" | "end" };
+  const carriages: Carriage[] = [
+    { id: "EB", at: (t) => [t, G], along: (x) => x, ascending: true, entryEnd: "start" },
+    { id: "WB", at: (t) => [t, -G], along: (x) => x, ascending: false, entryEnd: "start" },
+    { id: "NB", at: (t) => [G, t], along: (_x, z) => z, ascending: false, entryEnd: "start" },
+    { id: "SB", at: (t) => [-G, t], along: (_x, z) => z, ascending: true, entryEnd: "start" },
+  ];
+
+  // The loop in the south-east quarter (east-bound onto north-bound), turned to make the other three.
+  const loopPts: [number, number][] = [];
+  for (let deg = 15; deg < 270; deg += 15) {
+    const t = (deg * Math.PI) / 180;
+    loopPts.push([R + G + R * Math.sin(t), G + R - R * Math.cos(t)]);
+  }
+  // The outer right-turn ramp in the south-west quarter (east-bound onto south-bound), in units of R.
+  const outerUnits: [number, number][] = [
+    [-2.55, 0.06], [-2.38, 0.3], [-2.34, 0.8], [-2.32, 1.35], [-2.22, 1.95], [-1.95, 2.38],
+    [-1.45, 2.62], [-0.95, 2.68], [-0.5, 2.78], [-0.22, 2.92], [-0.1, 2.98], [-0.03, 3.12],
+  ];
+  const ramp = (id: string, from: string, to: string, pts: [number, number][], mph: number) => {
+    b.edges.push({
+      id,
+      fromNodeId: from,
+      toNodeId: to,
+      interiorPoints: pts.map(([x, z]) => [Math.round(x), 0, Math.round(z)] as [number, number, number]),
+      roadClassId: "highway",
+      elevationLevelId: "ground",
+      lanes: 1,
+      laneWidthFt: 12,
+      speedLimitMph: mph,
+    });
+    b.stageOfEdge.set(id, 0);
+  };
+  for (let k = 0; k < 4; k++) {
+    const [lx0, lz0] = rot(k, R + G, G);
+    const [lx1, lz1] = rot(k, G, R + G);
+    ramp(`loop${k}`, nodeAt(lx0, lz0), nodeAt(lx1, lz1), loopPts.map(([x, z]) => rot(k, x, z)), 30);
+    const [ox0, oz0] = rot(k, -OUT_EXIT, G);
+    const [ox1, oz1] = rot(k, -G, OUT_JOIN);
+    ramp(
+      `outer${k}`,
+      nodeAt(ox0, oz0),
+      nodeAt(ox1, oz1),
+      outerUnits.map(([ux, uz]) => rot(k, ux * R, uz * R)),
+      45
+    );
+  }
+
+  // Lay each carriageway through its ramp junctions, climbing over the other freeway between the loop junctions.
+  const humpY = 24;
+  for (const c of carriages) {
+    const ends = [c.at(-ARM), c.at(ARM)];
+    const pts = new Map<string, [number, number]>();
+    for (const [x, z] of ends) pts.set(key(x, z), [x, z]);
+    for (const n of b.nodes.values()) {
+      const [x, , z] = n.position;
+      const [cx, cz] = c.at(0);
+      const onLine = c.id === "EB" || c.id === "WB" ? Math.abs(z - cz) < 1 : Math.abs(x - cx) < 1;
+      if (onLine) pts.set(n.id, [x, z]);
+    }
+    const ordered = [...pts.values()].sort((p, q) => (c.ascending ? 1 : -1) * (c.along(p[0], p[1]) - c.along(q[0], q[1])));
+    for (let i = 0; i + 1 < ordered.length; i++) {
+      const [x0, z0] = ordered[i];
+      const [x1, z1] = ordered[i + 1];
+      const from = nodeAt(x0, z0);
+      const to = nodeAt(x1, z1);
+      const isB = c.id === "NB" || c.id === "SB";
+      const span = Math.min(Math.abs(c.along(x0, z0)), Math.abs(c.along(x1, z1)));
+      const over = isB && Math.abs(c.along(x0, z0)) <= R + G + 1 && Math.abs(c.along(x1, z1)) <= R + G + 1 && span <= R + G + 1 && Math.sign(c.along(x0, z0)) !== Math.sign(c.along(x1, z1));
+      const first = i === 0;
+      const last = i === ordered.length - 2;
+      const interior: [number, number, number][] = [];
+      if (over) {
+        // a smooth hump: ground at both loop junctions, 24 ft up where it crosses the other freeway
+        const sgn = c.ascending ? 1 : -1;
+        for (const [frac, h] of [[-0.62, 0.35], [-0.3, 0.8], [-0.1, 1], [0.1, 1], [0.3, 0.8], [0.62, 0.35]] as [number, number][]) {
+          const along = sgn * frac * R;
+          interior.push(isB ? [c.at(0)[0], humpY * h, along] : [along, humpY * h, c.at(0)[1]]);
+        }
+      }
+      const zone = first ? ENTRY(demand) : last ? DEST : undefined;
+      b.edges.push({
+        id: `${c.id}${i}`,
+        fromNodeId: from,
+        toNodeId: to,
+        interiorPoints: interior,
+        roadClassId: "motorway",
+        elevationLevelId: over ? "tier1" : "ground",
+        lanes: 3,
+        laneWidthFt: 12,
+        speedLimitMph: 65,
+        ...(zone ? { zone } : {}),
+      });
+      b.stageOfEdge.set(`${c.id}${i}`, 0);
+    }
+  }
+  return { nodes: [...b.nodes.values()], edges: b.edges };
+}

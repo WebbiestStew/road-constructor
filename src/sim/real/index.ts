@@ -9,6 +9,7 @@ import toronto from "./toronto.json";
 import dallas from "./dallas.json";
 import chicago from "./chicago.json";
 import atlanta from "./atlanta.json";
+import lincolnTunnel from "./lincoln-tunnel.json";
 
 /**
  * Real road networks baked from OpenStreetMap by scripts/osm/build.ts: real geometry, lane counts, speed limits,
@@ -31,6 +32,7 @@ export const REAL_CITY_DATA = {
   dallas,
   chicago,
   atlanta,
+  "lincoln-tunnel": lincolnTunnel,
 } as unknown as Record<string, RealCityData>;
 
 export const OSM_ATTRIBUTION = "Map data © OpenStreetMap contributors (ODbL)";
