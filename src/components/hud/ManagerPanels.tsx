@@ -2,7 +2,7 @@
 
 import { useMemo, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { assembleCached } from "@/sim/assembleCache";
-import { ROAD_CLASSES } from "@/sim/roadClasses";
+import { ROAD_CLASSES, maxSpeedLimitFor } from "@/sim/roadClasses";
 import { LANE_MOVES, type LaneMove, type ReservedLane } from "@/sim/types";
 import { CLASSIC_MIX, MIN_BUS_STOP_ROAD_FT, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
 import {
@@ -201,14 +201,22 @@ export function SpeedLimitCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean
       <div className="grid grid-cols-5 gap-2">
         {SPEED_LIMIT_CHOICES_MPH.map((mph) => {
           const active = spec.speedLimitMph === mph;
+          const cap = maxSpeedLimitFor(spec.roadClassId, spec.speedLimitMph);
+          const tooFast = mph > cap;
           return (
             <button
               key={mph}
               type="button"
               aria-pressed={active}
+              disabled={tooFast}
+              title={tooFast ? `A ${cls.label.toLowerCase()} can't be posted faster than ${cap} mph` : undefined}
               onClick={() => setSpeedLimit(spec.id, mph, wholeRoad)}
               className={`font-display flex aspect-square items-center justify-center rounded-full border-[3.5px] bg-white text-sm font-extrabold tabular-nums text-[#241b3d] transition active:scale-90 ${
-                active ? "scale-110 border-red-600 shadow-[0_0_0_3px_rgba(220,38,38,0.25)]" : "border-red-500/70 hover:scale-105"
+                tooFast
+                  ? "cursor-not-allowed border-zinc-300 opacity-35"
+                  : active
+                    ? "scale-110 border-red-600 shadow-[0_0_0_3px_rgba(220,38,38,0.25)]"
+                    : "border-red-500/70 hover:scale-105"
               }`}
             >
               {mph}
@@ -221,7 +229,7 @@ export function SpeedLimitCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean
         <input type="checkbox" className="accent-fuchsia-600" checked={wholeRoad} onChange={(e) => setWholeRoad(e.target.checked)} />
       </label>
       <p className="text-[11px] leading-snug text-zinc-500">
-        Drivers cruise near the limit, so a slow stretch slows everyone behind it. Changes both directions.
+        Drivers cruise near the limit, so a slow stretch slows everyone behind it. A road can only be posted as fast as its kind allows. Changes both directions.
       </p>
     </Shell>
   );

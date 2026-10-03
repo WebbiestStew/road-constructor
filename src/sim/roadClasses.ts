@@ -13,6 +13,8 @@ export interface RoadClassDef {
   lanesPerDirection: number;
   laneWidthFt: number;
   speedLimitMph: number;
+  /** The highest limit a player may post: a limit sign can't make a street a highway. */
+  maxSpeedLimitMph: number;
   /** Right-of-way ranking at unsignalized junctions; higher yields less. */
   priority: number;
   /** Construction cost, $ per linear foot per lane, at grade. */
@@ -34,6 +36,7 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     lanesPerDirection: 1,
     laneWidthFt: 10,
     speedLimitMph: 35,
+    maxSpeedLimitMph: 45,
     priority: 1,
     costPerFtPerLane: 40,
     divided: false,
@@ -48,6 +51,7 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     lanesPerDirection: 1,
     laneWidthFt: 11,
     speedLimitMph: 30,
+    maxSpeedLimitMph: 40,
     priority: 2,
     costPerFtPerLane: 60,
     divided: false,
@@ -62,6 +66,7 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     lanesPerDirection: 2,
     laneWidthFt: 11,
     speedLimitMph: 40,
+    maxSpeedLimitMph: 45,
     priority: 3,
     costPerFtPerLane: 85,
     divided: false,
@@ -76,6 +81,7 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     lanesPerDirection: 2,
     laneWidthFt: 12,
     speedLimitMph: 55,
+    maxSpeedLimitMph: 65,
     priority: 4,
     costPerFtPerLane: 140,
     divided: true,
@@ -90,6 +96,7 @@ export const ROAD_CLASSES: Record<RoadClassId, RoadClassDef> = {
     lanesPerDirection: 3,
     laneWidthFt: 12,
     speedLimitMph: 65,
+    maxSpeedLimitMph: 75,
     priority: 5,
     costPerFtPerLane: 190,
     divided: true,
@@ -189,3 +196,8 @@ export const TEXAS_TURNAROUND_MIN_RADIUS_FT = 30;
 export const TEXAS_TURNAROUND_COST_MULTIPLIER = 2.4;
 /** How far from the clicked point to search for a same-corridor opposing frontage road to loop back onto, feet. */
 export const TEXAS_TURNAROUND_SEARCH_RADIUS_FT = 220;
+
+/** The highest limit that may be posted on a road: its class's cap, or what it already carries if that is higher (the real-city roads keep their real limits). */
+export function maxSpeedLimitFor(roadClassId: RoadClassId, currentMph: number): number {
+  return Math.max(ROAD_CLASSES[roadClassId].maxSpeedLimitMph, currentMph);
+}

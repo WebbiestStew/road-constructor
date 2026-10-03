@@ -87,3 +87,11 @@ test("Pile-Up: a fixed city clears every crash within the three-star time, an un
   const none = parse(runLevel("pile-up", "none") as { crashes?: string });
   assert.ok(none.cleared < 4 || none.avg > 75, "an untouched city should not earn three stars");
 });
+
+test("speed limits are capped by road class, but a road keeps a limit it already has", async () => {
+  const { maxSpeedLimitFor } = await import("../../src/sim/roadClasses");
+  assert.equal(maxSpeedLimitFor("street", 30), 40);
+  assert.equal(maxSpeedLimitFor("motorway", 65), 75);
+  assert.equal(maxSpeedLimitFor("street", 45), 45, "a real-city street already posted above the cap keeps it");
+  assert.ok(maxSpeedLimitFor("avenue", 40) < maxSpeedLimitFor("highway", 55));
+});

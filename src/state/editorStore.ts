@@ -13,6 +13,7 @@ import {
   DEMOLISH_REFUND_FRACTION,
   HOTKEY_TIER_IDS,
   ROAD_CLASSES,
+  maxSpeedLimitFor,
   ROUNDABOUT_LANE_WIDTH_FT,
   ROUNDABOUT_SPEED_MPH,
   TEXAS_TURNAROUND_COST_MULTIPLIER,
@@ -986,13 +987,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get();
     const targets = collectRoadTargets(state, edgeId, wholeRoad);
     if (targets.size === 0) return;
-    const changed = state.edges.filter((e) => targets.has(e.id) && e.speedLimitMph !== mph);
-    if (changed.length === 0) return;
+    // A limit sign can't make a street a highway: each road takes the limit up to what its class allows.
+    const limitFor = (e: EdgeSpec) => Math.min(mph, maxSpeedLimitFor(e.roadClassId, e.speedLimitMph));
+    const changed = state.edges.filter((e) => targets.has(e.id) && e.speedLimitMph !== limitFor(e));
+    if (changed.length === 0) {
+      if (state.edges.some((e) => targets.has(e.id) && limitFor(e) < mph)) pushToast("That's as fast as this kind of road can be posted", "info");
+      return;
+    }
     get().pushHistoryEntry();
     set((s) => {
-      const edges = s.edges.map((e) => (targets.has(e.id) ? { ...e, speedLimitMph: mph } : e));
+      const edges = s.edges.map((e) => (targets.has(e.id) ? { ...e, speedLimitMph: limitFor(e) } : e));
       return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
     });
+    if (changed.some((e) => limitFor(e) < mph)) pushToast("Posted as fast as this kind of road allows", "info");
   },
 
   setRoadOneWay: (edgeId, oneWay, wholeRoad) => {

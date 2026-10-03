@@ -519,11 +519,11 @@ const ROUGH_MORNING: ScriptedEvent[] = [
  * score is on a real road network, so the yardstick is the player's own improvement. Beat the baseline by 4% for two
  * stars and 10% for three. The baselines are vehicles moved in the 300 s run, measured in the headless sim.
  */
-function createRealCityEvaluator(baseline: number, durationS: number): () => ScenarioEvaluator {
+function createRealCityEvaluator(baseline: number, durationS: number, threeStarRatio = 1.12): () => ScenarioEvaluator {
   // Baselines are the mean of eight seeds (seed-to-seed spread is 2-5%), so an untouched city only reaches two stars
   // by luck, while a real fix still clears three.
   const two = Math.ceil(baseline * 1.07);
-  const three = Math.ceil(baseline * 1.12);
+  const three = Math.ceil(baseline * threeStarRatio);
   return () => (ctx) => {
     const stars: 1 | 2 | 3 = ctx.completedTripsTotal >= three ? 3 : ctx.completedTripsTotal >= two ? 2 : 1;
     return {
@@ -652,8 +652,10 @@ export interface RealCityPlan {
   tagline: string;
   briefing: string;
   budget: number;
-  /** Vehicles moved in 300 s by the unmodified network in the headless sim. */
+  /** Mean vehicles moved in 300 s by the unmodified network over eight seeds in the headless sim. */
   baseline: number;
+  /** Three stars at this multiple of the baseline when the default (1.12) is out of reach. */
+  threeStarRatio?: number;
 }
 
 export const REAL_PLANS: RealCityPlan[] = [
@@ -737,6 +739,8 @@ export const REAL_PLANS: RealCityPlan[] = [
       "The Tom Moreland Interchange, better known as Spaghetti Junction, rebuilt from the real roads. Dozens of ramps, with the whole metro trying to get through. Widen, retime and re-limit until the knot loosens.",
     budget: 8_000_000,
     baseline: 994,
+    // Trips here are long (a three-mile map), so the 5-minute count is mostly travel time: the best realistic play reaches about +10%.
+    threeStarRatio: 1.09,
   },
 ];
 
@@ -752,7 +756,7 @@ function realScenario(plan: RealCityPlan): ScenarioDef {
     startingBudget: plan.budget,
     durationS: 300,
     targetAvgSpeedMph: 25,
-    createEvaluator: createRealCityEvaluator(plan.baseline, 300),
+    createEvaluator: createRealCityEvaluator(plan.baseline, 300, plan.threeStarRatio),
   };
 }
 

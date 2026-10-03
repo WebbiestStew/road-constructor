@@ -19,6 +19,11 @@ async function main() {
       const widen = new Set<string>(JSON.parse(fs.readFileSync(`/tmp/plan-${key}.json`, "utf8")).widen);
       for (const e of network.edges) if (widen.has(e.id)) e.lanes += 1;
     }
+    if (v === "speedcap") {
+      // A player raising every limit as far as the class allows: design speed + 10 mph, never below what is there.
+      const cap: Record<string, number> = { lane: 45, street: 40, avenue: 45, highway: 65, motorway: 75 };
+      for (const e of network.edges) e.speedLimitMph = Math.max(e.speedLimitMph, cap[e.roadClassId] ?? e.speedLimitMph);
+    }
     if (v === "speed75") for (const e of network.edges) e.speedLimitMph = 75;
     if (v === "speed") for (const e of network.edges) e.speedLimitMph = Math.min(75, e.speedLimitMph + 10);
     if (v === "sig") {
