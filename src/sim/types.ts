@@ -48,6 +48,12 @@ export interface SignalControl {
   allRedDurationS: number;
   /** Seconds into the signal cycle this light starts at. Staggering neighbouring lights by their travel time makes a "green wave". Default 0. */
   offsetS?: number;
+  /** How the light is phased: the classic two phases (default), a protected left-turn phase for each direction, or one phase per approach. See sim/signals. */
+  mode?: "two" | "protected" | "split";
+  /** Seconds of green for the protected left-turn phase. Default 8. */
+  leftGreenS?: number;
+  /** Seconds of an all-red pedestrian phase added to the cycle. Default 0 (none). */
+  pedPhaseS?: number;
 }
 
 /** A movement a lane may make at the end of its road. U-turns count as "left". */
@@ -473,6 +479,8 @@ export interface TickStats {
   gridlockPenaltyTotal: number;
   /** World positions of currently-stuck vehicles that have crossed the warning threshold but haven't been despawned yet, for the pulsing exclamation marker. */
   gridlockMarkers: [number, number, number][];
+  /** What each approach's signal shows right now: [edgeId, 0 red | 1 green | 2 left-turn arrow only | 3 amber]. */
+  signalHeads: [string, number][];
 }
 
 export type WorkerOutMessage =

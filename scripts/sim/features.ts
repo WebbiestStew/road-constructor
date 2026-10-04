@@ -94,7 +94,7 @@ async function cfiCase(key: string, mode: "off" | "yield" | "cfi", seed = 1337) 
 }
 
 /** The Continuous Flow level: yielding lefts, with and without displaced lefts on all four approaches. */
-async function crossingCase(mode: "off" | "yield" | "cfi" | "cfi2", seed = 1337) {
+async function crossingCase(mode: "off" | "yield" | "cfi" | "cfi2" | "prot" | "split", seed = 1337) {
   const level = getScenarioById("continuous-flow")!;
   const network = cloneNetwork(level.startingNetwork);
   let displaced = 0;
@@ -107,6 +107,7 @@ async function crossingCase(mode: "off" | "yield" | "cfi" | "cfi2", seed = 1337)
       }
     }
   }
+  for (const n of network.nodes) if (n.control?.type === "signal" && (mode === "prot" || mode === "split")) n.control.mode = mode === "prot" ? "protected" : "split";
   const sim = await createSim();
   sim.send({ type: "setLeftTurnsYield", enabled: mode !== "off" });
   sim.load(network, seed, HARNESS_SPEED);
@@ -119,7 +120,7 @@ async function crossingCase(mode: "off" | "yield" | "cfi" | "cfi2", seed = 1337)
 async function main() {
   if (which.startsWith("cross:")) {
     const [, mode, seed] = which.split(":");
-    return crossingCase(mode as "off" | "yield" | "cfi" | "cfi2", seed ? Number(seed) : 1337);
+    return crossingCase(mode as "off" | "yield" | "cfi" | "cfi2" | "prot" | "split", seed ? Number(seed) : 1337);
   }
   if (which.startsWith("cfi:")) {
     const [, key, mode, seed] = which.split(":");

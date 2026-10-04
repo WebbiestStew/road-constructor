@@ -54,4 +54,4 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Levels, incidents, gantries and lefts
-        run: npm run test:sim -- --test-name-pattern="reach a destination|can be improved|Code Three|School Run|First Shift|Transit Street|Pile-Up|speed limits|Clover Crossing|stalled semi|closing a lane|Continuous Flow"
+        run: npm run test:sim -- --test-name-pattern="reach a destination|can be improved|Code Three|School Run|First Shift|Transit Street|Pile-Up|speed limits|Clover Crossing|stalled semi|closing a lane|Continuous Flow|signal phasing"

@@ -32,6 +32,7 @@ import type {
   NetworkSnapshot,
   NodeSpec,
   ReservedLane,
+  SignalControl,
   TransitLine,
   Weather,
   ZoneSpec,
@@ -42,6 +43,7 @@ import {
   type PersistedPayload,
 } from "./persistence";
 import { playDemolish, playPlaceRoad } from "@/lib/sound";
+import { DEFAULT_LEFT_GREEN_S, MAX_PED_PHASE_S, approxCycleS, type SignalMode } from "@/sim/signals";
 import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
@@ -198,6 +200,12 @@ interface EditorState {
   setSignalTiming: (nodeId: string, greenDurationS: number) => void;
   /** Shifts where in its cycle a light starts, so neighbouring lights can be staggered into a green wave. */
   setSignalOffset: (nodeId: string, offsetS: number) => void;
+  /** Changes a signal's phasing: classic two phases, a protected left-turn phase for each direction, or one phase per approach. */
+  setSignalMode: (nodeId: string, mode: SignalMode) => void;
+  /** Seconds of green for the protected left-turn phase. */
+  setSignalLeftGreen: (nodeId: string, seconds: number) => void;
+  /** Seconds of all-red pedestrian phase in the cycle (0 = none). */
+  setSignalPedPhase: (nodeId: string, seconds: number) => void;
 
   /** Sets one lane's permitted moves (traffic management: free, works live). Seeds the other lanes from the automatic assignment. */
   setLaneMoves: (edgeId: string, laneIndex: number, moves: LaneMove[]) => void;
@@ -972,10 +980,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
+  setSignalMode: (nodeId, mode) => {
+    const node = get().nodesById.get(nodeId);
+    if (!node || node.control?.type !== "signal" || (node.control.mode ?? "two") === mode) return;
+    get().pushHistoryEntry();
+    const next: SignalControl = { ...node.control, mode };
+    if (mode === "two") delete next.mode;
+    const updated: NodeSpec = { ...node, control: next };
+    set((s) => {
+      const nodes = s.nodes.map((n) => (n.id === nodeId ? updated : n));
+      const nodesById = new Map(s.nodesById);
+      nodesById.set(nodeId, updated);
+      return { nodes, nodesById };
+    });
+  },
+
+  setSignalLeftGreen: (nodeId, seconds) => {
+    const node = get().nodesById.get(nodeId);
+    if (!node || node.control?.type !== "signal") return;
+    const v = Math.max(4, Math.min(25, Math.round(seconds)));
+    if (v === (node.control.leftGreenS ?? DEFAULT_LEFT_GREEN_S)) return;
+    get().pushHistoryEntry();
+    const updated: NodeSpec = { ...node, control: { ...node.control, leftGreenS: v } };
+    set((s) => {
+      const nodes = s.nodes.map((n) => (n.id === nodeId ? updated : n));
+      const nodesById = new Map(s.nodesById);
+      nodesById.set(nodeId, updated);
+      return { nodes, nodesById };
+    });
+  },
+
+  setSignalPedPhase: (nodeId, seconds) => {
+    const node = get().nodesById.get(nodeId);
+    if (!node || node.control?.type !== "signal") return;
+    const v = Math.max(0, Math.min(MAX_PED_PHASE_S, Math.round(seconds)));
+    if (v === (node.control.pedPhaseS ?? 0)) return;
+    get().pushHistoryEntry();
+    const next: SignalControl = { ...node.control, pedPhaseS: v };
+    if (v === 0) delete next.pedPhaseS;
+    const updated: NodeSpec = { ...node, control: next };
+    set((s) => {
+      const nodes = s.nodes.map((n) => (n.id === nodeId ? updated : n));
+      const nodesById = new Map(s.nodesById);
+      nodesById.set(nodeId, updated);
+      return { nodes, nodesById };
+    });
+  },
+
   setSignalOffset: (nodeId, offsetS) => {
     const node = get().nodesById.get(nodeId);
     if (!node || node.control?.type !== "signal") return;
-    const cycle = 2 * (node.control.greenDurationS + node.control.allRedDurationS);
+    const cycle = approxCycleS(node.control);
     const offset = Math.max(0, Math.min(cycle - 1, Math.round(offsetS)));
     if (offset === (node.control.offsetS ?? 0)) return;
     get().pushHistoryEntry();

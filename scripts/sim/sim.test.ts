@@ -148,3 +148,29 @@ test("Continuous Flow: yielding left turns cost throughput, and displaced lefts 
   const displaced = mean("cfi");
   assert.ok(displaced > yielding * 1.08, `displaced ${displaced} vs yielding ${yielding}`);
 });
+
+test("signal phasing: protected lefts end the wait for a gap, and split phasing never deadlocks", async () => {
+  const yielding = feature("cross:yield:1337");
+  const protectedLefts = feature("cross:prot:1337");
+  const split = feature("cross:split:1337");
+  assert.ok((yielding.avgWaitS as number) >= 3, `lefts should wait for a gap when they yield (${yielding.avgWaitS}s)`);
+  assert.equal(protectedLefts.avgWaitS, 0, "a protected left-turn phase should leave nothing to wait for");
+  assert.ok((protectedLefts.trips as number) >= (yielding.trips as number) * 0.9, `${protectedLefts.trips} vs ${yielding.trips}`);
+  assert.ok((split.trips as number) >= (yielding.trips as number) * 0.9, `split moved ${split.trips} vs ${yielding.trips}`);
+});
+
+test("signal phasing: a plan lists the phases the mode promises", async () => {
+  const { buildSignalPlan, approxCycleS } = await import("../../src/sim/signals");
+  const info = (id: string) => ({ moves: new Set(["left", "straight"] as const), hx: id.startsWith("e") ? 1 : id.startsWith("w") ? -1 : 0, hz: id.startsWith("n") ? 1 : id.startsWith("s") ? -1 : 0 });
+  const base = { type: "signal" as const, groupA: ["e", "w"], groupB: ["n", "s"], greenDurationS: 20, allRedDurationS: 2 };
+  assert.equal(buildSignalPlan(base, info).phases.length, 2);
+  assert.equal(buildSignalPlan(base, info).cycleS, 44);
+  const prot = buildSignalPlan({ ...base, mode: "protected", leftGreenS: 8 }, info);
+  assert.equal(prot.phases.length, 4);
+  assert.equal(prot.cycleS, 2 * (8 + 20) + 4 * 2);
+  assert.equal(buildSignalPlan({ ...base, mode: "split" }, info).phases.length, 4);
+  const ped = buildSignalPlan({ ...base, pedPhaseS: 10 }, info);
+  assert.equal(ped.phases.length, 3);
+  assert.ok(ped.phases[2].pedestrian && ped.phases[2].allow.size === 0);
+  assert.equal(approxCycleS({ ...base, mode: "protected", leftGreenS: 8 }), prot.cycleS);
+});

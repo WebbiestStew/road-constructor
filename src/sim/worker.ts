@@ -14,6 +14,7 @@ import {
 } from "./idm";
 import { distanceToT, fastTangentAt, laneCenterPointAt } from "./laneGeometry";
 import { computeEdgeTrafficStats, type EdgeTrafficStats } from "./los";
+import { allows, buildSignalPlan, infoFromEdge, startOfCycle, type ApproachInfo, type SignalPlan } from "./signals";
 import { assembleNetwork, computeRoute, effectiveSpeedLimitMph, hasGantry, patchEdge } from "./network";
 import {
   MAX_VEHICLES,
@@ -27,6 +28,7 @@ import {
   type Edge3D,
   type EdgeSpeedRatio,
   type RoadNetwork,
+  type SignalControl,
   type CrashStats,
   type EmergencyStats,
   type IncidentView,
@@ -70,9 +72,13 @@ const laneOccupancy = new Map<string, number[][]>();
 const incomingEdgeCountByNode = new Map<string, number>();
 
 interface SignalPhaseState {
-  phase: "A" | "B" | "ALLRED";
+  /** Which phase of the plan the light is in, whether it is in the all-red after that phase, and seconds into that stretch. */
+  index: number;
+  clearing: boolean;
   timer: number;
-  nextPhase: "A" | "B";
+  plan: SignalPlan;
+  /** The control the plan was built from: a new object means the player changed the light, so the plan is rebuilt. */
+  control: SignalControl;
 }
 const signalPhaseState = new Map<string, SignalPhaseState>();
 
@@ -630,19 +636,10 @@ let occupancyScratch = new Float64Array(256);
 const JUNCTION_APPROACH_FT = 130;
 const JUNCTION_COMMIT_FT = 12;
 
-/** Where in its cycle a light starts: offsetS seconds in (green A, all-red, green B, all-red, repeat). */
-function initialSignalState(ctrl: { greenDurationS: number; allRedDurationS: number; offsetS?: number }): SignalPhaseState {
-  const g = ctrl.greenDurationS;
-  const r = ctrl.allRedDurationS;
-  const cycle = 2 * (g + r);
-  let t = cycle > 0 ? (((ctrl.offsetS ?? 0) % cycle) + cycle) % cycle : 0;
-  if (t < g) return { phase: "A", timer: t, nextPhase: "B" };
-  t -= g;
-  if (t < r) return { phase: "ALLRED", timer: t, nextPhase: "B" };
-  t -= r;
-  if (t < g) return { phase: "B", timer: t, nextPhase: "A" };
-  t -= g;
-  return { phase: "ALLRED", timer: t, nextPhase: "A" };
+/** What the signal plan needs to know about an approach: its moves at the junction and the way it is heading. */
+function approachInfo(edgeId: string): ApproachInfo | null {
+  const edge = network?.edgesById.get(edgeId);
+  return edge ? infoFromEdge(edge) : null;
 }
 
 function updateSignalPhases(dt: number) {
@@ -651,23 +648,56 @@ function updateSignalPhases(dt: number) {
     if (node.control?.type !== "signal") continue;
     const ctrl = node.control;
     let state = signalPhaseState.get(nodeId);
-    if (!state) {
-      state = initialSignalState(ctrl);
-      signalPhaseState.set(nodeId, state);
+    if (!state || state.control !== ctrl) {
+      const plan = buildSignalPlan(ctrl, approachInfo);
+      if (!state) {
+        state = { ...startOfCycle(plan, ctrl.offsetS ?? 0), plan, control: ctrl };
+        signalPhaseState.set(nodeId, state);
+      } else {
+        // The player changed the light: keep where it is in its cycle unless that phase no longer exists.
+        state.plan = plan;
+        state.control = ctrl;
+        if (state.index >= plan.phases.length) {
+          state.index = 0;
+          state.clearing = false;
+          state.timer = 0;
+        }
+      }
     }
+    const { plan } = state;
+    if (plan.phases.length === 0) continue;
     state.timer += dt;
-    const duration = state.phase === "ALLRED" ? ctrl.allRedDurationS : ctrl.greenDurationS;
+    const duration = state.clearing ? plan.clearS : plan.phases[state.index].durationS;
     if (state.timer >= duration) {
       state.timer = 0;
-      if (state.phase === "ALLRED") {
-        state.phase = state.nextPhase;
+      if (state.clearing) {
+        state.clearing = false;
+        state.index = (state.index + 1) % plan.phases.length;
+        // People cross while every approach is red.
+        if (plan.phases[state.index].pedestrian) pedServedTotal += Math.round(plan.phases[state.index].durationS * PEDESTRIANS_PER_PHASE_SECOND);
       } else {
-        state.nextPhase = state.phase === "A" ? "B" : "A";
-        state.phase = "ALLRED";
+        state.clearing = true;
       }
     }
   }
 }
+/** What every controlled approach's light shows: red, green, a left-turn arrow on its own, or amber for the first moments of the all-red after a green. */
+function signalHeadStates(): [string, number][] {
+  const out: [string, number][] = [];
+  for (const state of signalPhaseState.values()) {
+    const { plan } = state;
+    if (plan.phases.length === 0) continue;
+    const phase = plan.phases[state.index];
+    for (const id of plan.controlled) {
+      const bits = phase.allow.get(id) ?? 0;
+      if (state.clearing) out.push([id, bits !== 0 && state.timer < Math.min(2, plan.clearS) ? 3 : 0]);
+      else out.push([id, bits === 0 ? 0 : bits === 1 ? 2 : 1]);
+    }
+  }
+  return out;
+}
+/** How many people use a signal's pedestrian phase for each second it lasts. */
+const PEDESTRIANS_PER_PHASE_SECOND = 0.5;
 
 function rebuildNodeApproaches() {
   for (const arr of nodeApproaches.values()) arr.length = 0;
@@ -1516,17 +1546,13 @@ function junctionStopDistance(v: VehicleState, edge: Edge3D): number | null {
 
   if (control?.type === "signal") {
     const phaseState = signalPhaseState.get(nodeId);
-    if (!phaseState) return null;
-    const myGroup: "A" | "B" | null = control.groupA.includes(edge.id)
-      ? "A"
-      : control.groupB.includes(edge.id)
-        ? "B"
-        : null;
-    if (myGroup === null) return null;
-    if (phaseState.phase === "ALLRED" || phaseState.phase !== myGroup) {
-      return distanceToNode;
-    }
-    if (leftTurnsYield && mustYieldLeft(v, edge, node!.id, control, phaseState, distanceToNode)) return distanceToNode;
+    if (!phaseState || phaseState.plan.phases.length === 0) return null;
+    if (!phaseState.plan.controlled.has(edge.id)) return null;
+    if (phaseState.clearing) return distanceToNode;
+    const nextId = v.routeEdgeIds[v.routeIndex + 1];
+    const move = (nextId && edge.nextMoves.get(nextId)) || "straight";
+    if (!allows(phaseState.plan, phaseState.index, edge.id, move)) return distanceToNode;
+    if (leftTurnsYield && phaseState.plan.phases[phaseState.index].permissive && mustYieldLeft(v, edge, node!.id, control, phaseState, distanceToNode)) return distanceToNode;
     return null;
   }
 
@@ -1546,11 +1572,11 @@ function junctionStopDistance(v: VehicleState, edge: Edge3D): number | null {
  * same junction, unless the road has a continuous-flow (displaced) left, where the turn has already crossed over.
  * The last seconds of the green are free: the car or two waiting in the middle always get through.
  */
-function mustYieldLeft(v: VehicleState, edge: Edge3D, nodeId: string, control: { groupA: string[]; groupB: string[]; greenDurationS: number }, phase: SignalPhaseState, distanceToNode: number): boolean {
+function mustYieldLeft(v: VehicleState, edge: Edge3D, nodeId: string, control: { groupA: string[]; groupB: string[] }, phase: SignalPhaseState, distanceToNode: number): boolean {
   if (edge.displacedLeft) return false;
   const nextId = v.routeEdgeIds[v.routeIndex + 1];
   if (!nextId || edge.nextMoves.get(nextId) !== "left") return false;
-  if (phase.timer > control.greenDurationS - LEFT_SNEAK_S) return false;
+  if (phase.timer > phase.plan.phases[phase.index].durationS - LEFT_SNEAK_S) return false;
   const approaches = nodeApproaches.get(nodeId);
   if (!approaches) return false;
   const myGroup = control.groupA.includes(edge.id) ? control.groupA : control.groupB;
@@ -2414,6 +2440,7 @@ function postSnapshot(forceStats: boolean) {
       gridlockPenaltyTotal,
       gridlockMarkers,
       incidentMarkers,
+      signalHeads: signalHeadStates(),
     };
   }
   const matricesBuffer = buf.matrices.buffer as ArrayBuffer;

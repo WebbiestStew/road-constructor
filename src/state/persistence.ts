@@ -27,6 +27,9 @@ const signalControlSchema = z.object({
   groupA: z.array(z.string()),
   groupB: z.array(z.string()),
   greenDurationS: z.number(),
+  mode: z.enum(["two", "protected", "split"]).optional(),
+  leftGreenS: z.number().optional(),
+  pedPhaseS: z.number().optional(),
   allRedDurationS: z.number(),
   offsetS: z.number().optional(),
 });

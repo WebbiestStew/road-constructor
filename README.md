@@ -38,6 +38,9 @@ speed limits and signal timing, while every car drives for real. Play it on desk
 - **Incidents.** Stalled semis, debris and fender benders block lanes (Events menu, Chaos mode, scripted in levels like
   Clover Crossing). Tap the pin to send a wrecker, which drives the shoulder to the scene; police come to crashes on
   their own.
+- **Signal phasing.** Each traffic light can run the classic two phases, a protected left-turn arrow for each direction,
+  or one phase per approach, with an optional pedestrian phase and a live list of the phases and cycle length. Signal
+  heads at every stop line show red, green, amber or a lone left arrow.
 - **Traffic rage.** Drivers stopped for over five seconds get a red stress icon, and the angriest weave between lanes in
   free play. A chorus of muffled horns follows the fuming drivers near the camera.
 - **Flow combos.** A platoon of ten cars that clears signals back to back without slowing flashes "+500 FLOW COMBO!" with

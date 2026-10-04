@@ -22,6 +22,7 @@ import SoundscapeDriver from "@/components/SoundscapeDriver";
 import IncidentPins from "@/components/IncidentPins";
 import { getScenarioById } from "@/sim/scenarios";
 import Curbs from "@/components/Curbs";
+import SignalHeads from "@/components/SignalHeads";
 import RagePins from "@/components/RagePins";
 import StreetNames from "@/components/StreetNames";
 import FreewaySigns from "@/components/FreewaySigns";
@@ -340,6 +341,7 @@ export default function Play() {
           incidentMarkers={sim.metrics.incidentMarkers}
         />
         <Curbs />
+        <SignalHeads heads={sim.metrics.signalHeads} />
         <Streetlights />
         <RoadsideProps />
         <Scenery />

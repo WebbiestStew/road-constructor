@@ -3,6 +3,7 @@
 import { useMemo, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { assembleCached } from "@/sim/assembleCache";
 import { hasGantry } from "@/sim/network";
+import { DEFAULT_LEFT_GREEN_S, MAX_PED_PHASE_S, approxCycleS, buildSignalPlan, infoFromEdge, modeOf, type SignalMode } from "@/sim/signals";
 import { ROAD_CLASSES, maxSpeedLimitFor } from "@/sim/roadClasses";
 import { LANE_MOVES, type LaneMove, type ReservedLane } from "@/sim/types";
 import { CLASSIC_MIX, DISPLACED_LEFT_COST, MIN_BUS_STOP_ROAD_FT, MIN_DISPLACED_LEFT_ROAD_FT, VSL_CHOICES_MPH, isSandboxBudget, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
@@ -331,6 +332,85 @@ export function GantryCard() {
   );
 }
 
+const MODE_CHOICES: { id: SignalMode; label: string; blurb: string }[] = [
+  { id: "two", label: "Classic", blurb: "Two phases. Left turns go with the through traffic and, where they give way, wait for a gap." },
+  { id: "protected", label: "Protected lefts", blurb: "Each direction gets a left-turn arrow first, so turners cross unopposed, then the through green with the lefts held back." },
+  { id: "split", label: "Split", blurb: "One approach at a time. Nothing ever conflicts, but each road waits through three other greens." },
+];
+
+/** The phasing choices of a traffic light: the plan, its left-turn and pedestrian phases, and the phases it runs through each cycle. */
+function SignalPhasing({
+  nodes,
+  edges,
+  signal,
+  setMode,
+  setLeftGreen,
+  setPedPhase,
+}: {
+  nodes: ReturnType<typeof useEditorStore.getState>["nodes"];
+  edges: ReturnType<typeof useEditorStore.getState>["edges"];
+  signal: Extract<NonNullable<ReturnType<typeof useEditorStore.getState>["nodes"][number]["control"]>, { type: "signal" }>;
+  setMode: (m: SignalMode) => void;
+  setLeftGreen: (v: number) => void;
+  setPedPhase: (v: number) => void;
+}) {
+  const mode = modeOf(signal);
+  const plan = useMemo(() => {
+    const network = assembleCached(nodes, edges);
+    return buildSignalPlan(signal, (id) => {
+      const e = network.edgesById.get(id);
+      return e ? infoFromEdge(e) : null;
+    });
+  }, [nodes, edges, signal]);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Phasing</span>
+      <div className="grid grid-cols-3 gap-1">
+        {MODE_CHOICES.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            aria-pressed={mode === c.id}
+            onClick={() => setMode(c.id)}
+            className={`rounded-lg px-1 py-1.5 text-[10.5px] font-bold leading-tight transition active:scale-95 ${mode === c.id ? "bg-gradient-to-br from-sky-400 to-blue-500 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] leading-snug text-zinc-500">{MODE_CHOICES.find((c) => c.id === mode)?.blurb}</p>
+      {mode === "protected" && (
+        <>
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-zinc-600">Left-turn arrow</span>
+            <span className="font-bold tabular-nums text-zinc-900">{signal.leftGreenS ?? DEFAULT_LEFT_GREEN_S}s</span>
+          </div>
+          <input type="range" min={4} max={25} step={1} value={signal.leftGreenS ?? DEFAULT_LEFT_GREEN_S} onChange={(e) => setLeftGreen(Number(e.target.value))} />
+        </>
+      )}
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-semibold text-zinc-600">Pedestrian phase</span>
+        <span className="font-bold tabular-nums text-zinc-900">{signal.pedPhaseS ? `${signal.pedPhaseS}s` : "off"}</span>
+      </div>
+      <input type="range" min={0} max={MAX_PED_PHASE_S} step={1} value={signal.pedPhaseS ?? 0} onChange={(e) => setPedPhase(Number(e.target.value))} />
+      <div className="flex flex-col gap-0.5 rounded-lg bg-black/[0.04] p-2">
+        {plan.phases.map((p, i) => (
+          <div key={i} className="flex items-center justify-between text-[10.5px] font-semibold text-zinc-600">
+            <span>
+              {i + 1}. {p.label}
+            </span>
+            <span className="tabular-nums">{p.durationS}s</span>
+          </div>
+        ))}
+        <div className="mt-0.5 flex items-center justify-between border-t border-black/10 pt-0.5 text-[10.5px] font-extrabold text-zinc-700">
+          <span>Cycle (with {signal.allRedDurationS}s all-red between)</span>
+          <span className="tabular-nums">{plan.cycleS}s</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ContinuousFlowSection({ nodeId }: { nodeId: string }) {
   const edges = useEditorStore((s) => s.edges);
   const nodesById = useEditorStore((s) => s.nodesById);
@@ -385,6 +465,10 @@ export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
   const setNodeControl = useEditorStore((s) => s.setNodeControl);
   const setSignalTiming = useEditorStore((s) => s.setSignalTiming);
   const setSignalOffset = useEditorStore((s) => s.setSignalOffset);
+  const setSignalMode = useEditorStore((s) => s.setSignalMode);
+  const setSignalLeftGreen = useEditorStore((s) => s.setSignalLeftGreen);
+  const setSignalPedPhase = useEditorStore((s) => s.setSignalPedPhase);
+  const nodes = useEditorStore((s) => s.nodes);
   const convertNodeToRoundabout = useEditorStore((s) => s.convertNodeToRoundabout);
   const setSelection = useEditorStore((s) => s.setSelection);
 
@@ -440,6 +524,14 @@ export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
           <p className="text-[11px] leading-snug text-zinc-500">
             Long greens move more cars per cycle but make side streets wait. Approaches are split into two phases by heading.
           </p>
+          <SignalPhasing
+            nodes={nodes}
+            edges={edges}
+            signal={signal}
+            setMode={(m) => setSignalMode(node.id, m)}
+            setLeftGreen={(v) => setSignalLeftGreen(node.id, v)}
+            setPedPhase={(v) => setSignalPedPhase(node.id, v)}
+          />
           <div className="mt-1 flex items-center justify-between text-xs">
             <span className="font-semibold text-zinc-600">Offset (green wave)</span>
             <span className="font-bold tabular-nums text-zinc-900">{signal.offsetS ?? 0}s</span>
@@ -447,7 +539,7 @@ export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
           <input
             type="range"
             min={0}
-            max={Math.max(1, 2 * (signal.greenDurationS + signal.allRedDurationS) - 1)}
+            max={Math.max(1, approxCycleS(signal) - 1)}
             step={1}
             value={signal.offsetS ?? 0}
             onChange={(e) => setSignalOffset(node.id, Number(e.target.value))}

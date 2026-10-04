@@ -63,6 +63,8 @@ export interface SimMetricsState {
   rageMarkers: [number, number, number][];
   rageCount: number;
   combos: number;
+  /** What each signalled approach's light shows: red, green, a left arrow on its own, or amber. */
+  signalHeads: [string, number][];
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -90,6 +92,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   rageMarkers: [],
   rageCount: 0,
   combos: 0,
+  signalHeads: [],
 };
 
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
@@ -227,6 +230,7 @@ export function useTrafficSimulation() {
             rageMarkers: msg.rageMarkers ?? [],
             rageCount: msg.rageCount ?? 0,
             combos: msg.combos ?? 0,
+            signalHeads: stats.signalHeads ?? [],
           });
         }
       }
