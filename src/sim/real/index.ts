@@ -10,6 +10,13 @@ import dallas from "./dallas.json";
 import chicago from "./chicago.json";
 import atlanta from "./atlanta.json";
 import lincolnTunnel from "./lincoln-tunnel.json";
+import monterreyTec from "./monterrey-tec.json";
+import monterreyValleOriente from "./monterrey-valle-oriente.json";
+import monterreyUanl from "./monterrey-uanl.json";
+import monterreyHospitalUniversitario from "./monterrey-hospital-universitario.json";
+import monterreyFundidora from "./monterrey-fundidora.json";
+import monterreyEstadio from "./monterrey-estadio.json";
+import monterreyJuanPabloIi from "./monterrey-juan-pablo-ii.json";
 
 /**
  * Real road networks baked from OpenStreetMap by scripts/osm/build.ts: real geometry, lane counts, speed limits,
@@ -33,6 +40,13 @@ export const REAL_CITY_DATA = {
   chicago,
   atlanta,
   "lincoln-tunnel": lincolnTunnel,
+  "monterrey-tec": monterreyTec,
+  "monterrey-valle-oriente": monterreyValleOriente,
+  "monterrey-uanl": monterreyUanl,
+  "monterrey-hospital-universitario": monterreyHospitalUniversitario,
+  "monterrey-fundidora": monterreyFundidora,
+  "monterrey-estadio": monterreyEstadio,
+  "monterrey-juan-pablo-ii": monterreyJuanPabloIi,
 } as unknown as Record<string, RealCityData>;
 
 export const OSM_ATTRIBUTION = "Map data © OpenStreetMap contributors (ODbL)";

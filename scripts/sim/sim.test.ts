@@ -24,14 +24,14 @@ for (const plan of REAL_PLANS) {
 }
 
 for (const plan of REAL_PLANS) {
-  test(`${plan.name}: baseline holds within 8% (it is a multi-seed mean; this checks one seed), and is reproducible`, () => {
+  test(`${plan.name}: baseline holds within 12% (it is a multi-seed mean, and the small maps vary 6-11% between seeds; this checks one seed), and is reproducible`, () => {
     const a = run(plan.key);
     const b = run(plan.key);
     // The run stops at the first tick at or past 300 s, and that overshoot varies slightly with timer jitter.
     assert.ok(Math.abs(a.trips - b.trips) <= Math.max(3, a.trips * 0.01), `same seed gave ${a.trips} then ${b.trips}`);
     const drift = Math.abs(a.trips - plan.baseline) / plan.baseline;
     assert.ok(
-      drift <= 0.08,
+      drift <= 0.12,
       `${plan.key}: moved ${a.trips}, expected ~${plan.baseline} (drift ${(drift * 100).toFixed(1)}%). If a sim change is intended, re-measure and update REAL_PLANS.`
     );
   });

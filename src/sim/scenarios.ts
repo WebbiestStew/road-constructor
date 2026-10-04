@@ -519,10 +519,10 @@ const ROUGH_MORNING: ScriptedEvent[] = [
  * score is on a real road network, so the yardstick is the player's own improvement. Beat the baseline by 4% for two
  * stars and 10% for three. The baselines are vehicles moved in the 300 s run, measured in the headless sim.
  */
-function createRealCityEvaluator(baseline: number, durationS: number, threeStarRatio = 1.12): () => ScenarioEvaluator {
+function createRealCityEvaluator(baseline: number, durationS: number, threeStarRatio = 1.12, twoStarRatio = 1.07): () => ScenarioEvaluator {
   // Baselines are the mean of eight seeds (seed-to-seed spread is 2-5%), so an untouched city only reaches two stars
   // by luck, while a real fix still clears three.
-  const two = Math.ceil(baseline * 1.07);
+  const two = Math.ceil(baseline * twoStarRatio);
   const three = Math.ceil(baseline * threeStarRatio);
   return () => (ctx) => {
     const stars: 1 | 2 | 3 = ctx.completedTripsTotal >= three ? 3 : ctx.completedTripsTotal >= two ? 2 : 1;
@@ -656,6 +656,8 @@ export interface RealCityPlan {
   baseline: number;
   /** Three stars at this multiple of the baseline when the default (1.12) is out of reach. */
   threeStarRatio?: number;
+  /** Two stars at this multiple of the baseline (default 1.07); raised where the untouched run varies a lot from seed to seed. */
+  twoStarRatio?: number;
   /** Length of the run in seconds (300 unless the trips are long enough that five minutes would measure nothing). */
   durationS?: number;
 }
@@ -754,6 +756,75 @@ export const REAL_PLANS: RealCityPlan[] = [
     baseline: 224,
     durationS: 1800,
   },
+  {
+    key: "monterrey-tec",
+    name: "Monterrey: Tec de Monterrey",
+    tagline: "Garza Sada along the Tec.",
+    briefing:
+      "Avenida Eugenio Garza Sada runs along the Tecnológico de Monterrey campus. The roads, lanes, speed limits and signals here are the real ones from OpenStreetMap, with everyone from the neighbourhood and the campus loaded onto them. Find what holds the avenue up and fix it.",
+    budget: 7_000_000,
+    baseline: 242,
+    twoStarRatio: 1.1,
+    threeStarRatio: 1.18,
+  },
+  {
+    key: "monterrey-valle-oriente",
+    name: "Monterrey: Valle Oriente",
+    tagline: "Lázaro Cárdenas through Valle Oriente.",
+    briefing:
+      "Valle Oriente, in San Pedro Garza García: Lázaro Cárdenas, Fundadores and the ramps between them, drawn from the real roads. Wide roads, long blocks and few places to turn. Open the bottlenecks without spending the budget on roads that don't need it.",
+    budget: 7_000_000,
+    baseline: 175,
+  },
+  {
+    key: "monterrey-uanl",
+    name: "Monterrey: Ciudad Universitaria",
+    tagline: "Avenida Universidad at Ciudad Universitaria.",
+    briefing:
+      "Ciudad Universitaria of the UANL, where Avenida Universidad, Fidel Velázquez and Nogalar meet around a set of ramps, all taken from the real map. Several flows want the same few intersections. Retime, re-limit and widen until it moves.",
+    budget: 7_000_000,
+    baseline: 349,
+  },
+  {
+    key: "monterrey-hospital-universitario",
+    name: "Monterrey: Gonzalitos",
+    tagline: "Gonzalitos by the Hospital Universitario.",
+    briefing:
+      "Avenida Gonzalitos by the Hospital Universitario, crossed by Madero and Paseo de los Leones, taken from the real map. A long avenue that meets every cross street. Find where it backs up and fix it.",
+    budget: 7_000_000,
+    baseline: 202,
+    twoStarRatio: 1.1,
+    threeStarRatio: 1.18,
+  },
+  {
+    key: "monterrey-fundidora",
+    name: "Monterrey: Fundidora",
+    tagline: "The ramps around Parque Fundidora.",
+    briefing:
+      "The roads around Parque Fundidora: Avenida Fundidora, Cristóbal Colón and the Madero ramps, taken from the real map. A small, tightly wound area where every lane counts. Untangle the ramps and keep traffic moving past the park.",
+    budget: 7_000_000,
+    baseline: 270,
+  },
+  {
+    key: "monterrey-estadio",
+    name: "Monterrey: Estadio BBVA",
+    tagline: "Pablo Livas around the Estadio BBVA.",
+    briefing:
+      "The roads around the Estadio BBVA in Guadalupe: Pablo Livas, Las Torres and Exposición, taken from the real map. Wide avenues, long gaps between signals and only a few ways in. Keep them flowing.",
+    budget: 7_000_000,
+    baseline: 148,
+    twoStarRatio: 1.16,
+    threeStarRatio: 1.26,
+  },
+  {
+    key: "monterrey-juan-pablo-ii",
+    name: "Monterrey: Juan Pablo II",
+    tagline: "Universidad at Juan Pablo II.",
+    briefing:
+      "Avenida Universidad at Juan Pablo II and Jorge A. Treviño in the north of the city, taken from the real map: fast avenues and tight ramps. A good place to try a different signal plan and see what the real roads can carry.",
+    budget: 7_000_000,
+    baseline: 295,
+  },
 ];
 
 function realScenario(plan: RealCityPlan): ScenarioDef {
@@ -768,7 +839,7 @@ function realScenario(plan: RealCityPlan): ScenarioDef {
     startingBudget: plan.budget,
     durationS: plan.durationS ?? 300,
     targetAvgSpeedMph: 25,
-    createEvaluator: createRealCityEvaluator(plan.baseline, plan.durationS ?? 300, plan.threeStarRatio),
+    createEvaluator: createRealCityEvaluator(plan.baseline, plan.durationS ?? 300, plan.threeStarRatio, plan.twoStarRatio),
   };
 }
 

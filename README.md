@@ -16,12 +16,13 @@ speed limits and signal timing, while every car drives for real. Play it on desk
   crossings, bus stops and street parking. Roads cost upkeep while traffic runs; parking brings some back.
 - **A living city.** Buses and bicycles share the road, ambulances race through it, people cross at crossings (or step
   out where there isn't one), and a 24-hour cycle with rain and fog changes how everyone drives.
-- **Real cities.** Ten levels built from actual OpenStreetMap data — the Los Angeles Four Level, Times Square,
+- **Real cities.** Seventeen levels built from actual OpenStreetMap data — the Los Angeles Four Level, Times Square,
   the Gardiner Expressway in Toronto, Houston's I-45/I-10 knot, San Antonio's "Y", downtown Monterrey, the Dallas
   High Five, Chicago's Jane Byrne Interchange, Atlanta's Spaghetti Junction, and the whole Lincoln Tunnel run: from the
   Weehawken helix, under the Hudson, across Midtown and out to Queens and Brooklyn (a thirty-minute, six-mile level with
   the real Hudson and East River). Lane counts, speed limits, bridges, tunnels, roundabouts and traffic lights are the
-  real ones.
+  real ones. Monterrey has eight spots in all: downtown, the Tec, Valle Oriente, Ciudad Universitaria, Gonzalitos by
+  the Hospital Universitario, Fundidora, the Estadio BBVA and Juan Pablo II.
 - **Clover Crossing.** A cloverleaf interchange designed for the game, not taken from a map: a freeway climbs over
   another, four loops carry the left turns and four outer ramps the right turns, and the weaves between them are the
   puzzle.

@@ -21,6 +21,8 @@ export interface ConvertConfig {
    * cut road is both an entry and an exit; with them (the Lincoln Tunnel level) traffic only flows between the regions
    * and the other cut roads are left as plain dead ends.
    */
+  /** Only avenues and bigger, or streets with two lanes, get entries and exits; the small streets the box happens to cut stay plain dead ends. */
+  mainRoadZonesOnly?: boolean;
   zoneRegions?: {
     entry?: (lat: number, lon: number) => boolean;
     dest?: (lat: number, lon: number) => boolean;
@@ -471,6 +473,7 @@ function addControlsAndZones(city: ConvertConfig, nodes: NodeSpec[], edges: Edge
     const where = toLatLon(n.position[0], n.position[2]);
     for (const e of inc) {
       if (e.isRoundaboutRing) continue;
+      if (city.mainRoadZonesOnly && (e.roadClassId === "lane" || e.roadClassId === "street") && e.lanes < 2) continue;
       if (e.fromNodeId === n.id) {
         if (regions?.entry && !regions.entry(where.lat, where.lon)) continue;
         const vph = Math.max(120, Math.min(2200, Math.round(BASE_VPH[e.roadClassId] * e.lanes * city.demandScale * (regions?.entryScale ?? 1))));

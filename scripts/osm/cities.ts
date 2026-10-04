@@ -15,6 +15,8 @@ export interface CityConfig {
   demandScale: number;
   /** See ConvertConfig.zoneRegions. */
   zoneRegions?: ConvertConfig["zoneRegions"];
+  /** See ConvertConfig.mainRoadZonesOnly. */
+  mainRoadZonesOnly?: boolean;
   /** Also build rivers and bays from the coastline (for a box with a lot of water in it). */
   coastline?: boolean;
   /** Only download roads within `corridorMeters` of these [lat, lon] polylines (a long route through a big box). */
@@ -77,4 +79,18 @@ export const CITIES: CityConfig[] = [
       entryScale: 1,
     },
   },
+  // Tecnológico de Monterrey: Avenida Eugenio Garza Sada, the campus entrances and the streets behind them.
+  { key: "monterrey-tec", name: "Monterrey Tec", bbox: [25.6464, -100.2975, 25.6564, -100.2815], highways: CITY_STREETS, demandScale: 1.6, mainRoadZonesOnly: true },
+  // Valle Oriente, in San Pedro: Lázaro Cárdenas, Fundadores and the malls' ramps.
+  { key: "monterrey-valle-oriente", name: "Monterrey Valle Oriente", bbox: [25.6329, -100.3207, 25.6429, -100.3047], highways: CITY_STREETS, demandScale: 1.6, mainRoadZonesOnly: true },
+  // Ciudad Universitaria of the UANL, where Avenida Universidad meets Fidel Velázquez and Nogalar.
+  { key: "monterrey-uanl", name: "Monterrey UANL", bbox: [25.7263, -100.3160, 25.7363, -100.3000], highways: CITY_STREETS, demandScale: 0.6, mainRoadZonesOnly: true },
+  // Gonzalitos by the Hospital Universitario, with Madero and Paseo de los Leones.
+  { key: "monterrey-hospital-universitario", name: "Monterrey Hospital Universitario", bbox: [25.6861, -100.3606, 25.6961, -100.3446], highways: CITY_STREETS, demandScale: 2.2, mainRoadZonesOnly: true },
+  // Parque Fundidora: Avenida Fundidora, Cristóbal Colón and the Madero ramps.
+  { key: "monterrey-fundidora", name: "Monterrey Fundidora", bbox: [25.6736, -100.2925, 25.6836, -100.2765], highways: CITY_STREETS, demandScale: 1, mainRoadZonesOnly: true },
+  // Estadio BBVA in Guadalupe: Pablo Livas, Las Torres and Exposición.
+  { key: "monterrey-estadio", name: "Monterrey Estadio", bbox: [25.6644, -100.2524, 25.6744, -100.2364], highways: CITY_STREETS, demandScale: 2.5, mainRoadZonesOnly: true },
+  // Avenida Universidad at Juan Pablo II and Jorge A. Treviño, in the north of the city.
+  { key: "monterrey-juan-pablo-ii", name: "Monterrey Juan Pablo II", bbox: [25.7411, -100.3049, 25.7511, -100.2889], highways: CITY_STREETS, demandScale: 1, mainRoadZonesOnly: true },
 ];
