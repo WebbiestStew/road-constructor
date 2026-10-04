@@ -102,7 +102,9 @@ const CAMERA_POSITION: [number, number, number] = (() => {
 const FOG_OFFSET_FT = CAMERA_DISTANCE_FT - new THREE.Vector3(...CAMERA_DIRECTION).length();
 
 /** Orthographic zoom range from the OrbitControls below the canvas — used to map zoom to the ambient hum/engine crossfade. */
-const MIN_ZOOM = 0.08;
+const MIN_ZOOM = 0.02;
+/** The zoom range the ambient mix was tuned over (the camera can now go out farther, for the biggest maps). */
+const AMBIENCE_MIN_ZOOM = 0.08;
 const MAX_ZOOM = 12;
 
 const _cameraDir = new THREE.Vector3(...CAMERA_POSITION).normalize();
@@ -145,10 +147,10 @@ function CameraFitController() {
 function AmbienceController({ avgSpeedMph }: { avgSpeedMph: number }) {
   const camera = useThree((s) => s.camera);
   useFrame(() => {
-    const zoom = (camera as THREE.OrthographicCamera).zoom ?? MIN_ZOOM;
-    const logMin = Math.log(MIN_ZOOM);
+    const zoom = (camera as THREE.OrthographicCamera).zoom ?? AMBIENCE_MIN_ZOOM;
+    const logMin = Math.log(AMBIENCE_MIN_ZOOM);
     const logMax = Math.log(MAX_ZOOM);
-    const t = (Math.log(Math.max(MIN_ZOOM, zoom)) - logMin) / (logMax - logMin);
+    const t = (Math.log(Math.max(AMBIENCE_MIN_ZOOM, zoom)) - logMin) / (logMax - logMin);
     updateAmbience(t);
     updateEngineDynamics(avgSpeedMph);
   });
@@ -339,7 +341,7 @@ export default function Play() {
             target={[0, 0, 0]}
             enableDamping
             dampingFactor={0.08}
-            minZoom={0.08}
+            minZoom={MIN_ZOOM}
             maxZoom={12}
             maxPolarAngle={Math.PI / 2 - 0.05}
             mouseButtons={{

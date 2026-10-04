@@ -277,6 +277,27 @@ interface EditorState {
   startSandbox: () => void;
 }
 
+/**
+ * Where to point the camera, and how far out, to see a whole network: the middle of its roads and the farthest node
+ * along either axis from there (not the diagonal; the camera adds its own margin for the oblique view). Centring on
+ * the roads rather than the map origin matters for a long, thin map such as the Lincoln Tunnel.
+ */
+function framingFor(nodes: NodeSpec[]): { centerX: number; centerZ: number; radiusFt: number } {
+  if (nodes.length === 0) return { centerX: 0, centerZ: 0, radiusFt: 0 };
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.position[0]);
+    maxX = Math.max(maxX, n.position[0]);
+    minZ = Math.min(minZ, n.position[2]);
+    maxZ = Math.max(maxZ, n.position[2]);
+  }
+  return {
+    centerX: (minX + maxX) / 2,
+    centerZ: (minZ + maxZ) / 2,
+    radiusFt: 1.2 * Math.max((maxX - minX) / 2, (maxZ - minZ) / 2),
+  };
+}
+
 function findCounterpart(
   edges: EdgeSpec[],
   edge: EdgeSpec,
@@ -1535,13 +1556,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       dayCycle: false,
       simEpoch: get().simEpoch + 1,
       // Frame the whole city: zoom out to the farthest node.
-      pendingCameraFit: {
-        centerX: 0,
-        centerZ: 0,
-        // The farthest node along either axis (not the diagonal): the camera adds its own margin for the oblique view.
-        radiusFt:
-          1.2 * scenario.startingNetwork.nodes.reduce((r, n) => Math.max(r, Math.abs(n.position[0]), Math.abs(n.position[2])), 0),
-      },
+      pendingCameraFit: framingFor(scenario.startingNetwork.nodes),
       activeScenarioId: scenario.id,
       past: [],
       future: [],
