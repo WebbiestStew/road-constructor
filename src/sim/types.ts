@@ -136,6 +136,10 @@ export interface EdgeSpec {
    * junction, so they run with the through traffic and never yield to oncoming cars.
    */
   displacedLeft?: boolean;
+  /** The street's name, or for a ramp where it leads (from the map data); shown on exit signs. */
+  name?: string;
+  /** Route reference such as "I 35", for route shields. */
+  ref?: string;
 }
 
 export type ReservedLane = "bus" | "bike";
@@ -254,6 +258,8 @@ export interface Edge3D {
   closedLanes: boolean[];
   /** Left turns from this road run as a continuous-flow (displaced) turn. */
   displacedLeft: boolean;
+  name?: string;
+  ref?: string;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
   /** Player-set lane arrows copied from the spec (null = automatic). */

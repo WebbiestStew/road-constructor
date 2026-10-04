@@ -210,6 +210,8 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
     speed: number;
     ring: boolean;
     link: boolean;
+    name?: string;
+    ref?: string;
   }
   const drafts: Draft[] = [];
 
@@ -250,6 +252,7 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
       speed: ring ? 20 : parseSpeedMph(tags.maxspeed, cls.speedLimitMph),
       ring,
       link,
+      ...labelsFor(tags, link),
     };
     if (reverseOnly) draft.backward = true;
     drafts.push(draft);
@@ -390,12 +393,23 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
       laneWidthFt: d.ring ? 14 : cls.laneWidthFt,
       speedLimitMph: d.speed,
       ...(d.ring ? { isRoundaboutRing: true } : {}),
+      ...(d.name ? { name: d.name } : {}),
+      ...(d.ref ? { ref: d.ref } : {}),
     });
     if (d.forward) edges.push(make(`${base}f`, fromId, toId, interior, d.lanesF));
     if (d.backward) edges.push(make(`${base}b`, toId, fromId, [...interior].reverse(), d.lanesB));
   }
 
   return { nodes, edges, signalNodes, project };
+}
+
+/** The name and route reference a road carries on signs; a ramp is named for where it leads. */
+function labelsFor(tags: Record<string, string>, link: boolean): { name?: string; ref?: string } {
+  const first = (v: string | undefined) => (v ?? "").split(";")[0].trim();
+  const clip = (v: string, n: number) => (v.length > n ? `${v.slice(0, n - 1).trimEnd()}…` : v);
+  const ref = first(tags.ref);
+  const name = link ? first(tags.destination) || first(tags.exit_to) || first(tags.name) : first(tags.name);
+  return { ...(name ? { name: clip(name, 40) } : {}), ...(ref ? { ref: clip(ref, 14) } : {}) };
 }
 
 function round1(v: number) {

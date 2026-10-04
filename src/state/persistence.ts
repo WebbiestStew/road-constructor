@@ -70,6 +70,8 @@ const edgeSchema = z.object({
   vslMph: z.number().optional(),
   closedLanes: z.array(z.number()).optional(),
   displacedLeft: z.boolean().optional(),
+  name: z.string().max(60).optional(),
+  ref: z.string().max(20).optional(),
 });
 
 const networkSnapshotSchema = z.object({

@@ -545,6 +545,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       vslMph: spec.vslMph ?? null,
       closedLanes: Array.from({ length: spec.lanes }, (_, i) => (spec.closedLanes ?? []).includes(i)),
       displacedLeft: spec.displacedLeft ?? false,
+      name: spec.name,
+      ref: spec.ref,
       nextEdgeIds: [],
       manualLaneMoves: spec.laneMoves ?? null,
       nextMoves: new Map(),
