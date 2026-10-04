@@ -13,6 +13,7 @@ import { useEditorStore } from "@/state/editorStore";
 import { getPrefs } from "@/lib/prefs";
 import { usePhotoMode } from "@/lib/photoMode";
 import { getScenarioById } from "@/sim/scenarios";
+import { softShadowTexture } from "@/lib/softShadow";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio, NetworkSnapshot, NodeSpec } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import { IconWarning } from "./hud/icons";
@@ -823,6 +824,11 @@ const EdgeGroup = memo(function EdgeGroup({
         const columnTopY = pier.capPosition[1] - 1;
         return (
           <group key={i} position={pier.capPosition} rotation={[0, pier.rotationY, 0]}>
+            {/* A soft contact shadow where the bent meets the ground. */}
+            <mesh position={[0, -pier.capPosition[1] + 0.07, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}>
+              <planeGeometry args={[pier.capLength + 8, 14]} />
+              <meshBasicMaterial color="#000000" map={softShadowTexture()} transparent opacity={0.7} depthWrite={false} toneMapped={false} />
+            </mesh>
             <mesh castShadow receiveShadow>
               <boxGeometry args={[pier.capLength, 2, 3.5]} />
               <meshStandardMaterial color={concrete ? TX_CONCRETE_COLOR : PIER_COLOR} roughness={0.92} />

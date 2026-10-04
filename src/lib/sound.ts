@@ -544,8 +544,100 @@ export function setJakeBrake(level: number): void {
 
 /** Silences every road layer (leaving the game page). */
 export function stopRoadSounds(): void {
+  honkLevel = 0;
   roarLevel = 0;
   jakeLevel = 0;
   concreteRoad = false;
   if (road) applyRoadLevels();
+}
+
+// ---------------------------------------------------------------------------
+// Alarms and arcade cues: the siren that opens a warning banner, a chime for a flow combo, and the muffled horns of
+// drivers who are stuck (a chorus whose busyness follows how many are fuming near the listener).
+// ---------------------------------------------------------------------------
+
+/** Two rising and falling whoops, for a warning banner. */
+export function playAlertSiren(): void {
+  if (muted) return;
+  const audio = getCtx();
+  if (!audio) return;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  osc.type = "sawtooth";
+  const now = audio.currentTime;
+  for (let i = 0; i < 2; i++) {
+    osc.frequency.setValueAtTime(520, now + i * 0.9);
+    osc.frequency.linearRampToValueAtTime(980, now + i * 0.9 + 0.45);
+    osc.frequency.linearRampToValueAtTime(520, now + i * 0.9 + 0.9);
+  }
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.05, now + 0.05);
+  gain.gain.setValueAtTime(0.05, now + 1.65);
+  gain.gain.linearRampToValueAtTime(0, now + 1.85);
+  const filter = audio.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 2200;
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(audio.destination);
+  osc.start(now);
+  osc.stop(now + 1.9);
+}
+
+/** A bright rising arpeggio that climbs a little higher with each combo in a row. */
+export function playComboChime(combo: number): void {
+  if (muted) return;
+  const lift = Math.min(6, Math.max(0, combo - 1));
+  const base = 660 * 2 ** (lift / 12);
+  tone(base, 0, 0.18, 0.07, "triangle");
+  tone(base * 1.26, 0.08, 0.18, 0.07, "triangle");
+  tone(base * 1.5, 0.16, 0.18, 0.07, "triangle");
+  tone(base * 2, 0.24, 0.35, 0.08, "triangle");
+}
+
+let honkLevel = 0;
+let honkTimer: ReturnType<typeof setTimeout> | null = null;
+
+function honkOnce(level: number): void {
+  const audio = getCtx();
+  if (!audio || muted) return;
+  // A couple of horns, a little out of tune with each other, low-passed so it sounds like it is coming from the next block.
+  const root = 330 + Math.random() * 120;
+  const dur = 0.18 + Math.random() * 0.4;
+  const filter = audio.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 650;
+  const gain = audio.createGain();
+  const now = audio.currentTime;
+  const peak = 0.045 * level;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(peak, now + 0.02);
+  gain.gain.setValueAtTime(peak, now + dur);
+  gain.gain.linearRampToValueAtTime(0, now + dur + 0.05);
+  for (const ratio of [1, 1.26]) {
+    const osc = audio.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = root * ratio * (1 + (Math.random() - 0.5) * 0.02);
+    osc.connect(filter);
+    osc.start(now);
+    osc.stop(now + dur + 0.08);
+  }
+  filter.connect(gain);
+  gain.connect(audio.destination);
+}
+
+function scheduleHonk(): void {
+  if (honkLevel <= 0.03) {
+    honkTimer = null;
+    return;
+  }
+  honkOnce(honkLevel);
+  // The more drivers fuming nearby, the more often somebody leans on the horn.
+  honkTimer = setTimeout(scheduleHonk, 260 + (1 - honkLevel) * 1700 + Math.random() * 500);
+}
+
+/** `level` 0-1: how many angry drivers are near the listener. 0 silences the chorus. */
+export function setHonkChorus(level: number): void {
+  honkLevel = Math.min(1, Math.max(0, level));
+  if (honkLevel > 0.03 && honkTimer === null && !muted) honkTimer = setTimeout(scheduleHonk, 150);
 }

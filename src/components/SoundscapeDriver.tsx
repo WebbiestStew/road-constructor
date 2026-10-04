@@ -6,12 +6,14 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { useEditorStore } from "@/state/editorStore";
 import { getDetailShed } from "@/lib/perfDetail";
-import { setConcreteRoad, setJakeBrake, setRoadRoar, stopRoadSounds } from "@/lib/sound";
+import { setConcreteRoad, setHonkChorus, setJakeBrake, setRoadRoar, stopRoadSounds } from "@/lib/sound";
 
 /** Vehicles closer than this to the listener (ft) add to the tyre roar. */
 const ROAR_RADIUS_FT = 650;
 /** Roughly how many nearby vehicles make the roar as loud as it gets. */
 const ROAR_SATURATION = 5;
+/** Angry horns can be heard this far (ft). */
+const HONK_RADIUS_FT = 1100;
 /** A heavy truck's engine brake can be heard this far (ft). */
 const JAKE_RADIUS_FT = 900;
 
@@ -20,7 +22,7 @@ const JAKE_RADIUS_FT = 900;
  * on wet asphalt), and the engine-brake rumble of semis slowing down a grade. The listener is the chase camera when
  * riding along, otherwise the point the camera orbits. Renders nothing.
  */
-function SoundscapeDriver({ snapshotRef, wet, running, texas, avgMph }: { snapshotRef: RefObject<VehicleSnapshot | null>; wet: boolean; running: boolean; texas: boolean; avgMph: number }) {
+function SoundscapeDriver({ snapshotRef, wet, running, texas, avgMph, rageMarkers, rageCount }: { snapshotRef: RefObject<VehicleSnapshot | null>; wet: boolean; running: boolean; texas: boolean; avgMph: number; rageMarkers: [number, number, number][]; rageCount: number }) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
   const frame = useRef(0);
@@ -35,6 +37,7 @@ function SoundscapeDriver({ snapshotRef, wet, running, texas, avgMph }: { snapsh
     if (!running || !snapshot) {
       setRoadRoar(0, wet);
       setJakeBrake(0);
+      setHonkChorus(0);
       return;
     }
     setConcreteRoad(texas, avgMph);
@@ -56,6 +59,12 @@ function SoundscapeDriver({ snapshotRef, wet, running, texas, avgMph }: { snapsh
       jake = Math.max(jake, (1 - Math.min(1, d / JAKE_RADIUS_FT)) ** 2);
     }
     setJakeBrake(jake);
+
+    // Fuming drivers: the closer the nearest, and the more of them, the busier the horns.
+    let nearest = Infinity;
+    for (const p of rageMarkers) nearest = Math.min(nearest, Math.hypot(p[0] - lx, p[2] - lz));
+    const closeness = (1 - Math.min(1, nearest / HONK_RADIUS_FT)) ** 2;
+    setHonkChorus(closeness * Math.min(1, 0.35 + rageCount / 25));
   });
 
   return null;

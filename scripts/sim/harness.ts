@@ -11,6 +11,8 @@ export interface Tick {
   problems: string[];
   incidents: IncidentView[];
   jakeBrakes: number;
+  rageCount: number;
+  combos: number;
 }
 
 export async function createSim() {
@@ -27,6 +29,8 @@ export async function createSim() {
       peopleMovedTotal?: number;
       incidents?: IncidentView[];
       jakeBrakes?: unknown[];
+      rageCount?: number;
+      combos?: number;
       stats?: { problemEdgeIds: string[] };
     };
     last = {
@@ -38,6 +42,8 @@ export async function createSim() {
       problems: t.stats?.problemEdgeIds ?? last?.problems ?? [],
       incidents: t.incidents ?? [],
       jakeBrakes: t.jakeBrakes?.length ?? 0,
+      rageCount: t.rageCount ?? 0,
+      combos: t.combos ?? 0,
     };
   };
   await import("../../src/sim/worker");

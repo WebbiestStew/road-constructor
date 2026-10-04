@@ -22,6 +22,8 @@ import QualityNotice from "./hud/QualityNotice";
 import ToastHost from "./hud/ToastHost";
 import FlowFeedback from "./hud/FlowFeedback";
 import ChaosDirector from "./hud/ChaosDirector";
+import PanicBanner from "./hud/PanicBanner";
+import FlowComboBanner from "./hud/FlowComboBanner";
 import ScriptedEventAnnouncer from "./hud/ScriptedEventAnnouncer";
 import CoachBar from "./hud/CoachBar";
 import EmergencyAnnouncer from "./hud/EmergencyAnnouncer";
@@ -83,6 +85,8 @@ export default function SimControls({
       <ChaosDirector sim={sim} />
       <EmergencyAnnouncer sim={sim} />
       <ScriptedEventAnnouncer runner={scenarioRunner} />
+      <PanicBanner />
+      <FlowComboBanner sim={sim} />
       <CoachBar />
       <GuidedTour sim={sim} />
       <DayClock sim={sim} />

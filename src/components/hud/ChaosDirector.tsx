@@ -5,12 +5,16 @@ import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { useEditorStore } from "@/state/editorStore";
 import { useChaos } from "@/lib/chaos";
 import { pushToast } from "@/lib/toast";
+import { clearPanic, setPanic } from "@/lib/panic";
 
 /** Sim-seconds a breakdown blocks its lane. Kept under the 25 s gridlock-despawn timer so queued cars aren't deleted. */
 const BREAKDOWN_S = 18;
 const RUSH_HOUR_S = 40;
 const RUSH_MULTIPLIER = 1.6;
 const FIRST_EVENT_DELAY_S = 25;
+/** Seconds of warning, on the banner, before an announced event lands. */
+const WARNING_S = 10;
+const VENUES = ["STADIUM LETS OUT", "CONCERT ENDS", "SHIFT CHANGE AT THE PLANT", "FOOTBALL MATCH ENDS", "FESTIVAL CROWD HEADING HOME"];
 
 function between(min: number, max: number) {
   return min + Math.random() * (max - min);
@@ -53,8 +57,17 @@ export default function ChaosDirector({ sim }: { sim: UseTrafficSimulationReturn
     nextEventAt.current = null;
   }, [live]);
 
+  // The trouble that has been announced and is counting down.
+  const pending = useRef<{ id: string; text: string; fireAt: number; run: () => void } | null>(null);
+
   useEffect(() => {
-    if (!live) return;
+    if (!live) {
+      if (pending.current) {
+        clearPanic(pending.current.id);
+        pending.current = null;
+      }
+      return;
+    }
     if (nextEventAt.current === null) nextEventAt.current = simTime + FIRST_EVENT_DELAY_S;
 
     if (rushUntil.current !== null && simTime >= rushUntil.current) {
@@ -62,28 +75,58 @@ export default function ChaosDirector({ sim }: { sim: UseTrafficSimulationReturn
       pushToast("😮‍💨 Rush hour is over", "info");
     }
 
+    // Count down an announced event, and let it loose when the banner runs out.
+    const p = pending.current;
+    if (p) {
+      if (simTime >= p.fireAt) {
+        clearPanic(p.id);
+        pending.current = null;
+        p.run();
+      } else {
+        setPanic({ id: p.id, text: p.text, secondsLeft: p.fireAt - simTime });
+      }
+      return;
+    }
+
     if (simTime < nextEventAt.current) return;
-    nextEventAt.current = simTime + between(30, 55);
+    nextEventAt.current = simTime + WARNING_S + between(25, 45);
+
+    const state = useEditorStore.getState();
+    const streets = state.edges.filter((e) => e.name && !e.ramp && !e.isRoundaboutRing && !e.isTexasTurnaround && e.roadClassId !== "lane");
+    const street = streets.length > 0 ? streets[Math.floor(Math.random() * streets.length)] : null;
+    const announce = (text: string, run: () => void) => {
+      pending.current = { id: `chaos-${simTime}`, text, fireAt: simTime + WARNING_S, run };
+      setPanic({ id: pending.current.id, text, secondsLeft: WARNING_S });
+    };
 
     const canRush = rushUntil.current === null;
-    if (canRush && Math.random() < 0.4) {
+    const roll = Math.random();
+    if (canRush && roll < 0.35) {
       const base = new Map<string, number>();
-      for (const e of useEditorStore.getState().edges) {
+      for (const e of state.edges) {
         if (e.zone?.type === "entry") base.set(e.id, e.zone.demandVehPerHour);
       }
       if (base.size === 0) return;
-      rushBase.current = base;
-      rushUntil.current = simTime + RUSH_HOUR_S;
-      for (const [edgeId, vph] of base) setDemand(edgeId, Math.round(vph * RUSH_MULTIPLIER));
-      pushToast("🚗💨 RUSH HOUR! Demand is up 60% for 40 seconds", "alert");
-    } else if (Math.random() < 0.3) {
-      triggerCrash();
-    } else if (Math.random() < 0.35) {
-      triggerAmbulance();
-    } else if (Math.random() < 0.5) {
-      triggerBreakdown(BREAKDOWN_S);
+      let perHour = 0;
+      for (const v of base.values()) perHour += v;
+      const extra = Math.max(20, Math.round(((perHour * (RUSH_MULTIPLIER - 1) * RUSH_HOUR_S) / 3600) / 10) * 10);
+      const venue = state.placeName ? `${state.placeName.toUpperCase()}: EVENT LETS OUT` : VENUES[Math.floor(Math.random() * VENUES.length)];
+      announce(`${venue} - ${extra} VEHICLES INBOUND`, () => {
+        rushBase.current = base;
+        rushUntil.current = simTime + RUSH_HOUR_S;
+        for (const [edgeId, vph] of base) setDemand(edgeId, Math.round(vph * RUSH_MULTIPLIER));
+        pushToast("🚗💨 RUSH HOUR! Demand is up 60% for 40 seconds", "alert");
+      });
+    } else if (roll < 0.6 && street) {
+      announce(`OIL SPILL ON ${street.name!.toUpperCase()} - LANE BLOCKED`, () => triggerIncident("debris", street.id));
+    } else if (roll < 0.7) {
+      announce("MULTI-CAR PILE-UP REPORTED - POLICE DISPATCHED", () => triggerCrash());
+    } else if (roll < 0.8) {
+      announce("AMBULANCE ON THE WAY - CLEAR A LANE", () => triggerAmbulance());
+    } else if (roll < 0.9) {
+      announce("18-WHEELER LOSING POWER - EXPECT A BLOCKED LANE", () => triggerIncident("stall"));
     } else {
-      triggerIncident(((["stall", "debris", "fender"]) as const)[Math.floor(Math.random() * 3)]);
+      announce("CAR BREAKING DOWN AHEAD", () => triggerBreakdown(BREAKDOWN_S));
     }
   }, [live, simTime, setDemand, triggerBreakdown, triggerAmbulance, triggerCrash, triggerIncident]);
 

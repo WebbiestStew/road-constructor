@@ -59,6 +59,10 @@ export interface SimMetricsState {
   incidentMarkers: [number, number, number][];
   /** Stalled trucks, debris and crashes on the road, with the state of the wrecker sent to each. */
   incidents: IncidentView[];
+  /** Where stopped drivers are fuming, how many there are, and the flow combos earned so far. */
+  rageMarkers: [number, number, number][];
+  rageCount: number;
+  combos: number;
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -83,6 +87,9 @@ const DEFAULT_METRICS: SimMetricsState = {
   gridlockMarkers: [],
   incidentMarkers: [],
   incidents: [],
+  rageMarkers: [],
+  rageCount: 0,
+  combos: 0,
 };
 
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
@@ -113,6 +120,8 @@ function postRunFlags(worker: Worker) {
   const id = useEditorStore.getState().activeScenarioId;
   const enabled = id ? getScenarioById(id)?.leftTurnsYield === true : true;
   worker.postMessage({ type: "setLeftTurnsYield", enabled } satisfies WorkerInMessage);
+  // Desperate lane weaves are part of free play; the levels' baselines were measured without them.
+  worker.postMessage({ type: "setRageWeaves", enabled: !id } satisfies WorkerInMessage);
 }
 
 export function useTrafficSimulation() {
@@ -215,6 +224,9 @@ export function useTrafficSimulation() {
             gridlockMarkers: stats.gridlockMarkers,
             incidentMarkers: stats.incidentMarkers,
             incidents: msg.incidents ?? [],
+            rageMarkers: msg.rageMarkers ?? [],
+            rageCount: msg.rageCount ?? 0,
+            combos: msg.combos ?? 0,
           });
         }
       }
@@ -402,8 +414,8 @@ export function useTrafficSimulation() {
   }, []);
 
   /** Stalls an 18-wheeler, drops debris, or causes a fender bender somewhere on the open road. */
-  const triggerIncident = useCallback((kind: "stall" | "debris" | "fender") => {
-    workerRef.current?.postMessage({ type: "incident", kind } satisfies WorkerInMessage);
+  const triggerIncident = useCallback((kind: "stall" | "debris" | "fender", edgeId?: string) => {
+    workerRef.current?.postMessage({ type: "incident", kind, edgeId } satisfies WorkerInMessage);
   }, []);
 
   /** Sends a wrecker to an incident. */

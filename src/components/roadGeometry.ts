@@ -315,6 +315,18 @@ export function buildJerseyBarrier(edge: Edge3D, lateralOffsetFt: number, tStart
   return sweepProfileAlongCurve(edge, lateralOffsetFt, JERSEY_PROFILE, rangeSegments(edge, tStart, tEnd), true, tStart, tEnd);
 }
 
+/** A six-inch kerb: a low trapezoid of concrete, wide enough to read from above. */
+const CURB_PROFILE: ProfilePoint[] = [
+  { x: -0.6, y: 0 },
+  { x: 0.6, y: 0 },
+  { x: 0.45, y: 0.5 },
+  { x: -0.45, y: 0.5 },
+];
+
+export function buildCurb(edge: Edge3D, lateralOffsetFt: number, tStart = 0, tEnd = 1): THREE.BufferGeometry {
+  return sweepProfileAlongCurve(edge, lateralOffsetFt, CURB_PROFILE, rangeSegments(edge, tStart, tEnd), true, tStart, tEnd);
+}
+
 /** Simpler bridge parapet cross-section (in feet) — a plain vertical concrete rail, shorter than a full Jersey barrier, for non-freeway elevated roads. */
 const PARAPET_PROFILE: ProfilePoint[] = [
   { x: -0.6, y: 0 },

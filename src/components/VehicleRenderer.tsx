@@ -8,6 +8,7 @@ import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { useEditorStore } from "@/state/editorStore";
 import { useGraphics } from "@/lib/quality";
 import { KIND_DIMS, vehicleGeometry } from "./vehicleShapes";
+import { softShadowTexture } from "@/lib/softShadow";
 
 interface VehicleRendererProps {
   snapshotRef: RefObject<VehicleSnapshot | null>;
@@ -83,6 +84,7 @@ function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
     geo.translate(0, 0.002, 0);
     return geo;
   }, []);
+  const shadowTexture = useMemo(() => softShadowTexture(), []);
   const bodyGeometries = useMemo(() => KINDS.map((k) => vehicleGeometry(k, detailed)), [detailed]);
 
   useEffect(() => {
@@ -187,7 +189,7 @@ function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
         <meshStandardMaterial color="#ff2a2a" emissive="#ff2a2a" emissiveIntensity={1.4} toneMapped={false} />
       </instancedMesh>
       <instancedMesh ref={shadowRef} args={[shadowGeometry, undefined, MAX_VEHICLES]} frustumCulled={false}>
-        <meshBasicMaterial color="#000000" transparent opacity={0.32} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial color="#000000" map={shadowTexture} transparent opacity={0.62} depthWrite={false} toneMapped={false} />
       </instancedMesh>
     </>
   );

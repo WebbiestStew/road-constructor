@@ -322,6 +322,8 @@ function acquireVehicle(): VehicleState {
     blockedS: 0,
     leftWaitS: 0,
     leftMark: -1,
+    minSpeed: 1e9,
+    comboLegs: 0,
   };
 }
 
@@ -434,6 +436,9 @@ function resetRun() {
   resetCrashes();
   leftTurnsServed = 0;
   leftTurnWaitTotalS = 0;
+  comboPasses.length = 0;
+  combosTotal = 0;
+  nextComboAt = 0;
   nextBusAt.clear();
   scriptedWeather = null;
   gridlockPenaltyTotal = 0;
@@ -558,6 +563,8 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.blockedS = 0;
   v.leftWaitS = 0;
   v.leftMark = -1;
+  v.minSpeed = 1e9;
+  v.comboLegs = 0;
 
   vehicles.set(v.id, v);
   spawnedTotal++;
@@ -1090,6 +1097,8 @@ let crashPending = 0;
 let fenderPending = 0;
 let stallPending = 0;
 let debrisPending = 0;
+/** The road each queued debris spill should land on ("" = anywhere), in the same order. */
+const debrisEdges: string[] = [];
 
 const STALL_AUTO_CLEAR_S = 240;
 const DEBRIS_AUTO_CLEAR_S = 300;
@@ -1106,6 +1115,7 @@ function resetCrashes() {
   fenderPending = 0;
   stallPending = 0;
   debrisPending = 0;
+  debrisEdges.length = 0;
 }
 
 function crashStats(): CrashStats {
@@ -1135,6 +1145,7 @@ function incidentViews(): IncidentView[] {
     out.push({
       id: inc.id,
       kind: inc.kind,
+      edgeId: inc.edgeId,
       position: [_incPos.x, _incPos.y, _incPos.z],
       ageS: simTime - inc.startedAt,
       wrecker: wreckerState(inc),
@@ -1216,9 +1227,10 @@ function causeStall(): boolean {
 }
 
 /** Debris lands in a lane of an open road and sits there. */
-function causeDebris(): boolean {
+function causeDebris(onEdge?: string): boolean {
   if (!network) return false;
-  const edges = network.edges.filter((e) => !e.isRoundaboutRing && !e.isTexasTurnaround && e.length >= 300 && vehicles.size < maxVehicles);
+  const named = onEdge ? network.edgesById.get(onEdge) : undefined;
+  const edges = named && named.length >= 120 && !named.isRoundaboutRing ? [named] : network.edges.filter((e) => !e.isRoundaboutRing && !e.isTexasTurnaround && e.length >= 300 && vehicles.size < maxVehicles);
   if (edges.length === 0) return false;
   // Prefer roads that are carrying traffic, so the player has something to react to.
   const busy = edges.filter((e) => (laneOccupancy.get(e.id)?.reduce((n, l) => n + l.length, 0) ?? 0) >= 2);
@@ -1339,8 +1351,10 @@ function updateCrashes() {
     else break;
   }
   while (debrisPending > 0) {
-    if (causeDebris()) debrisPending--;
-    else break;
+    if (causeDebris(debrisEdges[0] || undefined)) {
+      debrisPending--;
+      debrisEdges.shift();
+    } else break;
   }
   for (let i = incidents.length - 1; i >= 0; i--) {
     const inc = incidents[i];
@@ -1425,6 +1439,54 @@ function updateShoulderMode(v: VehicleState, edge: Edge3D, dt: number) {
   if (v.blockedS >= SHOULDER_AFTER_S) v.shoulder = true;
 }
 const SHOULDER_AFTER_S = 3;
+
+// ---------------------------------------------------------------------------
+// Traffic rage and flow combos: how the drivers feel about the traffic. Rage shows who has been stopped for a while
+// (and, when `rageWeaves` is on, lets the angriest of them weave between lanes through gaps they would not normally
+// take); combos reward a platoon that sails through signals in a row.
+// ---------------------------------------------------------------------------
+
+/** Stopped this long (s) and a driver is visibly fuming. */
+const RAGE_AFTER_S = 5;
+/** Stopped this long and a driver starts weaving. */
+const RAGE_WEAVE_S = 8;
+const MAX_RAGE_MARKERS = 12;
+const RAGE_MARKER_SPACING_FT = 70;
+/** Whether the angriest drivers take desperate lane changes. Off in the levels, whose baselines were measured without it. */
+let rageWeaves = false;
+let rageMarkers: [number, number, number][] = [];
+let rageCount = 0;
+
+/** A flowing platoon: cars clearing signals without slowing below this speed (or half the limit on slower roads). */
+const COMBO_MIN_MPH = 35;
+const COMBO_PLATOON = 10;
+const COMBO_WINDOW_S = 15;
+const COMBO_COOLDOWN_S = 20;
+const comboPasses: { t: number; node: string }[] = [];
+let combosTotal = 0;
+let nextComboAt = 0;
+
+/** A driver (not an ambulance) in a jam who has had enough: no politeness, small gaps are fine. */
+const RAGE_MOBIL = { ...MOBIL_DEFAULTS, politeness: 0, changeThreshold: 0.02, bSafe: 22 };
+
+function noteSignalPass(v: VehicleState, edge: Edge3D) {
+  if (v.kind !== "car" && v.kind !== "truck") return;
+  const need = Math.min(mphToFtps(COMBO_MIN_MPH), mphToFtps(effectiveSpeedLimitMph(edge)) * 0.5);
+  v.comboLegs = v.minSpeed >= need ? v.comboLegs + 1 : 0;
+  v.minSpeed = v.speed;
+  // A car that has cleared this signal without braking hard since the last one is part of a flowing platoon.
+  if (v.comboLegs >= 1) comboPasses.push({ t: simTime, node: edge.toNodeId });
+}
+
+function updateFlowCombos() {
+  while (comboPasses.length > 0 && comboPasses[0].t < simTime - COMBO_WINDOW_S) comboPasses.shift();
+  // Ten cars, through at least two different signals, all inside the window.
+  if (comboPasses.length >= COMBO_PLATOON && simTime >= nextComboAt && new Set(comboPasses.map((p) => p.node)).size >= 2) {
+    combosTotal++;
+    nextComboAt = simTime + COMBO_COOLDOWN_S;
+    comboPasses.length = 0;
+  }
+}
 
 /** Returns the distance (ft) at which a vehicle must stop for a bus stop, a crossing or a junction it cannot yet enter, or null if clear. */
 function computeVirtualStopDistance(v: VehicleState, edge: Edge3D): number | null {
@@ -1766,8 +1828,9 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
   const yielding = v.yieldUntil > simTime;
   // A driver in a lane that has been closed ahead looks for a gap every tick rather than waiting out the usual pause.
   const leavingClosed = edge.closedLanes[v.laneIndex] && v.distanceAlongEdge >= gantryDistance(edge) - CLOSURE_WARNING_FT && !isEmergencyKind(v.kind);
+  const raging = rageWeaves && v.stuckTimeS >= RAGE_WEAVE_S && !isEmergencyKind(v.kind);
   if (v.laneChangeCooldown > 0 && !yielding && !leavingClosed) {
-    v.laneChangeCooldown -= 1;
+    v.laneChangeCooldown -= raging ? 4 : 1;
     return;
   }
 
@@ -1878,7 +1941,7 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
       extraBias,
     };
 
-    const result = mobilEvaluate(inputs, MOBIL_DEFAULTS);
+    const result = mobilEvaluate(inputs, raging ? RAGE_MOBIL : MOBIL_DEFAULTS);
     if (result.shouldChange && result.incentive > bestIncentive) {
       bestIncentive = result.incentive;
       bestLane = candidateLane;
@@ -1988,6 +2051,7 @@ function step(dt: number) {
   if (crossings.size > 0) updateCrossings();
   // Crashes first: towing a wreck removes vehicles, which must happen before this tick's lane lists are built.
   updateCrashes();
+  updateFlowCombos();
   rebuildLaneOccupancy();
   updateAmbulanceDispatch();
   updateTransit();
@@ -2026,6 +2090,7 @@ function step(dt: number) {
     }
     v.speed = clamp(v.speed + v.accel * dt, 0, MAX_SPEED_FTPS);
 
+    if (v.speed < v.minSpeed) v.minSpeed = v.speed;
     if (v.speed < STUCK_SPEED_THRESHOLD_FTPS) {
       v.stuckTimeS += dt;
     } else {
@@ -2060,6 +2125,7 @@ function step(dt: number) {
         leftTurnWaitTotalS += v.leftWaitS;
       }
       v.leftWaitS = 0;
+      if (network.nodesById.get(currentEdge.toNodeId)?.control?.type === "signal") noteSignalPass(v, currentEdge);
       v.edgeId = nextEdgeId;
       v.laneIndex = mapLaneAcross(currentEdge, nextEdge, v.laneIndex);
       v.distanceAlongEdge = overflow;
@@ -2143,6 +2209,7 @@ function writeSnapshot(
   const incidentMarkers: [number, number, number][] = [];
   const ambulancePositions: [number, number, number][] = [];
   jakeBrakePositions.length = 0;
+  const angry: { slot: number; s: number }[] = [];
   let i = 0;
   let speedSum = 0;
   for (const v of vehicles.values()) {
@@ -2244,9 +2311,24 @@ function writeSnapshot(
       edgeSpeedSumMph.set(edge.id, (edgeSpeedSumMph.get(edge.id) ?? 0) + ftpsToMph(v.speed));
     }
 
+    if (v.stuckTimeS >= RAGE_AFTER_S && v.frozenUntil <= simTime && (v.kind === "car" || v.kind === "truck" || v.kind === "bus")) angry.push({ slot: i, s: v.stuckTimeS });
+
     speedSum += v.speed;
     i++;
   }
+  // The longest-stopped drivers get a marker each, spread out so a standing queue shows a few faces rather than a carpet of them.
+  rageCount = angry.length;
+  angry.sort((a, b) => b.s - a.s);
+  const picked: [number, number, number][] = [];
+  for (const a of angry) {
+    if (picked.length >= MAX_RAGE_MARKERS) break;
+    const x = buf.matrices[a.slot * 16 + 12];
+    const y = buf.matrices[a.slot * 16 + 13];
+    const z = buf.matrices[a.slot * 16 + 14];
+    if (picked.some((p) => Math.hypot(p[0] - x, p[2] - z) < RAGE_MARKER_SPACING_FT)) continue;
+    picked.push([x, y, z]);
+  }
+  rageMarkers = picked;
   return { activeCount: i, avgSpeedFtS: i > 0 ? speedSum / i : 0, gridlockMarkers, incidentMarkers, ambulancePositions };
 }
 
@@ -2357,6 +2439,9 @@ function postSnapshot(forceStats: boolean) {
     ambulances: ambulancePositions,
     incidents: incidentViews(),
     jakeBrakes: jakeBrakePositions.slice(),
+    rageMarkers,
+    rageCount,
+    combos: combosTotal,
     weather: currentWeather(),
     clockHour: clockHour(),
     stats,
@@ -2453,7 +2538,10 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case "incident":
       if (msg.kind === "stall") stallPending++;
-      else if (msg.kind === "debris") debrisPending++;
+      else if (msg.kind === "debris") {
+        debrisPending++;
+        debrisEdges.push(msg.edgeId ?? "");
+      }
       else fenderPending++;
       break;
     case "dispatchWrecker": {
@@ -2461,6 +2549,9 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       if (inc && !inc.wreckerRequested) inc.wreckerRequested = true;
       break;
     }
+    case "setRageWeaves":
+      rageWeaves = msg.enabled;
+      break;
     case "setLeftTurnsYield":
       leftTurnsYield = msg.enabled;
       break;

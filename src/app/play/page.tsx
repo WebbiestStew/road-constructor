@@ -21,6 +21,8 @@ import { useFlyover } from "@/lib/cinematic";
 import SoundscapeDriver from "@/components/SoundscapeDriver";
 import IncidentPins from "@/components/IncidentPins";
 import { getScenarioById } from "@/sim/scenarios";
+import Curbs from "@/components/Curbs";
+import RagePins from "@/components/RagePins";
 import StreetNames from "@/components/StreetNames";
 import FreewaySigns from "@/components/FreewaySigns";
 import ManagementOverlays from "@/components/ManagementOverlays";
@@ -309,11 +311,11 @@ export default function Play() {
           </>
         ) : (
           <>
-            <hemisphereLight intensity={0.7} color="#fff6e0" groundColor="#5fb85f" />
-            <ambientLight intensity={0.35} />
+            <hemisphereLight intensity={0.5} color="#fff6e0" groundColor="#5fb85f" />
+            <ambientLight intensity={0.26} />
             <directionalLight
               position={[900, 1000, 500]}
-              intensity={1.35}
+              intensity={1.6}
               castShadow={q.shadows}
               shadow-mapSize-width={q.shadowMapSize}
               shadow-mapSize-height={q.shadowMapSize}
@@ -337,6 +339,7 @@ export default function Play() {
           gridlockMarkers={sim.metrics.gridlockMarkers}
           incidentMarkers={sim.metrics.incidentMarkers}
         />
+        <Curbs />
         <Streetlights />
         <RoadsideProps />
         <Scenery />
@@ -348,7 +351,8 @@ export default function Play() {
         <FreewaySigns />
         <StreetNames />
         {flyover && <LightTrails snapshotRef={sim.snapshotRef} />}
-        <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} texas={texasMap} avgMph={sim.metrics.avgSpeedMph} />
+        <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} texas={texasMap} avgMph={sim.metrics.avgSpeedMph} rageMarkers={sim.metrics.rageMarkers} rageCount={sim.metrics.rageCount} />
+        {sim.running && <RagePins markers={sim.metrics.rageMarkers} />}
         <IncidentPins incidents={sim.metrics.incidents} onDispatch={sim.dispatchWrecker} />
         <EmergencyPins snapshotRef={sim.snapshotRef} />
         {quality !== "low" && <JointClackDetector snapshotRef={sim.snapshotRef} />}

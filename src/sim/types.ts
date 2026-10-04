@@ -352,6 +352,9 @@ export interface VehicleState {
   /** Seconds spent waiting at the stop line for a gap to turn left; leftMark dedupes within a tick. */
   leftWaitS: number;
   leftMark: number;
+  /** Slowest speed (ft/s) since the last signal it passed, and how many signals in a row it has cleared without braking hard. */
+  minSpeed: number;
+  comboLegs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +381,8 @@ export type WorkerInMessage =
   /** Causes a crash now (Chaos mode). */
   | { type: "crash" }
   /** Starts an incident now: a stalled semi, debris in a lane, or a fender bender on a flyover. */
-  | { type: "incident"; kind: "stall" | "debris" | "fender" }
+  | { type: "incident"; kind: "stall" | "debris" | "fender"; /** Put a debris spill on this road (an oil slick, a dropped load). */ edgeId?: string }
+  | { type: "setRageWeaves"; enabled: boolean }
   /** Sends a wrecker to an open incident. */
   | { type: "dispatchWrecker"; incidentId: number }
   /** Whether left turns at signals give way to oncoming traffic (off for the classic levels, on where realistic left turns matter). */
@@ -446,6 +450,7 @@ export type EdgeSpeedRatio = [edgeId: string, ratio: number];
 export interface IncidentView {
   id: number;
   kind: "crash" | "stall" | "debris";
+  edgeId: string;
   position: [number, number, number];
   /** Sim-seconds since it began. */
   ageS: number;
@@ -495,6 +500,11 @@ export type WorkerOutMessage =
       incidents: IncidentView[];
       /** Where semis are braking hard on a downgrade (engine-brake rumble), nearest few. */
       jakeBrakes: [number, number, number][];
+      /** Where drivers who have sat stopped for over five seconds are fuming (at most a dozen, spread out), and how many there are. */
+      rageMarkers: [number, number, number][];
+      rageCount: number;
+      /** Flow combos earned this run: a platoon of ten cleared two signals in a row without slowing. */
+      combos: number;
       /** People who have crossed at a crossing or stepped into traffic since the run began. */
       pedServedTotal: number;
       /** Times someone stepped into traffic with cars coming (no marked crossing there). */

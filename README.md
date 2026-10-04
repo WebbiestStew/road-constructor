@@ -38,6 +38,14 @@ speed limits and signal timing, while every car drives for real. Play it on desk
 - **Incidents.** Stalled semis, debris and fender benders block lanes (Events menu, Chaos mode, scripted in levels like
   Clover Crossing). Tap the pin to send a wrecker, which drives the shoulder to the scene; police come to crashes on
   their own.
+- **Traffic rage.** Drivers stopped for over five seconds get a red stress icon, and the angriest weave between lanes in
+  free play. A chorus of muffled horns follows the fuming drivers near the camera.
+- **Flow combos.** A platoon of ten cars that clears signals back to back without slowing flashes "+500 FLOW COMBO!" with
+  a chime. Retime your signals into a green wave to earn them.
+- **Panic events.** Trouble arrives with a siren and a ten-second banner ("OIL SPILL ON AVENIDA ... - LANE BLOCKED",
+  "... 250 VEHICLES INBOUND"), in Chaos mode and in the levels' scripted events, so you can retime signals and change
+  limits before it lands.
+- **Depth.** Soft contact shadows under cars and bridge piers, six-inch kerbs along streets, and a punchier sun.
 - **Street names.** Real street names are painted along the roads and fade in as you zoom, and the road cards show the name.
 - **Soundscape.** Tyre roar near the camera (louder and brighter on wet asphalt), semis engine-braking on downgrades, and
   the expansion-joint clack on viaducts, all attenuated with distance from the camera or chase view.
