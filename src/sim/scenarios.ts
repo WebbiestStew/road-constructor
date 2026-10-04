@@ -775,6 +775,8 @@ export const REAL_PLANS: RealCityPlan[] = [
       "Valle Oriente, in San Pedro Garza García: Lázaro Cárdenas, Fundadores and the ramps between them, drawn from the real roads. Wide roads, long blocks and few places to turn. Open the bottlenecks without spending the budget on roads that don't need it.",
     budget: 7_000_000,
     baseline: 175,
+    twoStarRatio: 1.1,
+    threeStarRatio: 1.18,
   },
   {
     key: "monterrey-uanl",
@@ -784,6 +786,8 @@ export const REAL_PLANS: RealCityPlan[] = [
       "Ciudad Universitaria of the UANL, where Avenida Universidad, Fidel Velázquez and Nogalar meet around a set of ramps, all taken from the real map. Several flows want the same few intersections. Retime, re-limit and widen until it moves.",
     budget: 7_000_000,
     baseline: 349,
+    twoStarRatio: 1.1,
+    threeStarRatio: 1.18,
   },
   {
     key: "monterrey-hospital-universitario",
@@ -824,6 +828,8 @@ export const REAL_PLANS: RealCityPlan[] = [
       "Avenida Universidad at Juan Pablo II and Jorge A. Treviño in the north of the city, taken from the real map: fast avenues and tight ramps. A good place to try a different signal plan and see what the real roads can carry.",
     budget: 7_000_000,
     baseline: 295,
+    twoStarRatio: 1.1,
+    threeStarRatio: 1.18,
   },
 ];
 
