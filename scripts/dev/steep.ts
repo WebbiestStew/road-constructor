@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 const key = process.argv[2] ?? "san-antonio";
 const data = REAL_CITY_DATA[key].network;

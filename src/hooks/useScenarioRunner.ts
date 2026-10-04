@@ -16,6 +16,7 @@ import { useEditorStore } from "@/state/editorStore";
 import { recordStars } from "@/lib/progress";
 import { dateKey, recordDaily } from "@/lib/daily";
 import { pushToast } from "@/lib/toast";
+import { isRealCityLoaded, loadRealCity } from "@/sim/real";
 import type { UseTrafficSimulationReturn } from "./useTrafficSimulation";
 
 /**
@@ -122,10 +123,19 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
 
   const startScenario = useCallback(
     (def: ScenarioDef) => {
-      loadScenario(def);
-      setStartSimTime(null);
-      setResults(null);
-      setProgress(null);
+      const begin = () => {
+        loadScenario(def);
+        setStartSimTime(null);
+        setResults(null);
+        setProgress(null);
+      };
+      // A real city's roads are fetched the first time its level opens.
+      if (def.real && def.sceneryKey && !isRealCityLoaded(def.sceneryKey)) {
+        pushToast(`Loading ${def.name}…`, "info");
+        loadRealCity(def.sceneryKey).then(begin, () => pushToast("Couldn't load that map. Check your connection and try again", "bad"));
+        return;
+      }
+      begin();
     },
     [loadScenario]
   );

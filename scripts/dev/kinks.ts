@@ -1,6 +1,6 @@
 // Finds joints where one road continues into another with a sharp bend or a slope jump.
 import * as THREE from "three";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 
 const keys = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(REAL_CITY_DATA);

@@ -1,5 +1,5 @@
 import { buildCloverleaf, buildHarborDrive, buildInterchangeSite, buildLeftTurnCrossing, buildMidtown } from "./cities";
-import { REAL_CITY_DATA } from "./real";
+import { getRealCity } from "./real";
 import type { CrashStats, EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
@@ -849,7 +849,10 @@ function realScenario(plan: RealCityPlan): ScenarioDef {
     name: plan.name,
     tagline: plan.tagline,
     briefing: plan.briefing,
-    startingNetwork: REAL_CITY_DATA[plan.key].network,
+    // The city's data is fetched when the level is chosen (see useScenarioRunner), so this only reads it once it is there.
+    get startingNetwork() {
+      return getRealCity(plan.key).network;
+    },
     startingBudget: plan.budget,
     durationS: plan.durationS ?? 300,
     targetAvgSpeedMph: 25,

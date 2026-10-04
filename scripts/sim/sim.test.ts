@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { REAL_PLANS } from "../../src/sim/scenarios";
 import { assembleNetwork, computeRoute } from "../../src/sim/network";
 

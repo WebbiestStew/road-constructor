@@ -5,14 +5,15 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { MAX_VEHICLES } from "@/sim/types";
+import { useDetailShed } from "@/lib/perfDetail";
 
 /** Samples kept per vehicle, newest first. */
 const SAMPLES = 30;
 /** Real seconds between samples. */
 const SAMPLE_EVERY_S = 0.1;
 const HEIGHT_FT = 1.4;
-/** A slot that moves farther than this between samples is a different vehicle, so its trail starts over. */
-const JUMP_FT = 70;
+/** A vehicle that moves farther than this between samples jumped (left the map, or the run restarted), so its trail starts over. */
+const JUMP_FT = 150;
 /** A taillight at least this bright counts as braking. */
 const BRAKE_LEVEL = 0.95;
 
@@ -20,44 +21,39 @@ interface TrailBuffers {
   geometry: THREE.BufferGeometry;
   positions: Float32Array;
   colors: Float32Array;
-  history: Float32Array;
-  lastCount: number;
+  /** Recent positions (newest first, x y z each) of every vehicle on the road, by vehicle id. */
+  histories: Map<number, Float32Array>;
 }
 
-/** Adds one sample of every vehicle's position to its ribbon and rewrites the ribbon's vertices. */
+/** Adds one sample of every vehicle's position to its ribbon and rewrites the ribbons' vertices. */
 function sampleTrails(t: TrailBuffers, snap: VehicleSnapshot, halfWidth: number): void {
-  const { positions, colors, geometry } = t;
+  const { positions, colors, geometry, histories } = t;
   const n = Math.min(snap.activeCount, MAX_VEHICLES);
-  const h = t.history;
   const m = snap.matrices;
   const tl = snap.taillightColors;
-    for (let v = 0; v < n; v++) {
-    const base = v * SAMPLES * 3;
+  const seen = new Set<number>();
+
+  for (let v = 0; v < n; v++) {
+    const id = m[v * 16 + 11];
     const x = m[v * 16 + 12];
     const y = m[v * 16 + 13] + HEIGHT_FT;
     const z = m[v * 16 + 14];
-    // A slot is reused when vehicles come and go, so a new head that is far from, or off the line of, the old trail is a different vehicle.
-    let fresh = v >= t.lastCount;
-    if (!fresh) {
-      const mx = x - h[base];
-      const mz = z - h[base + 2];
-      const moved = Math.hypot(mx, mz);
-      const px = h[base] - h[base + 3];
-      const pz = h[base + 2] - h[base + 5];
-      const prev = Math.hypot(px, pz);
-      fresh = moved > JUMP_FT || (moved > 3 && prev > 3 && (mx * px + mz * pz) / (moved * prev) < 0.6);
-    }
-    if (fresh) {
+    seen.add(id);
+    let h = histories.get(id);
+    if (!h || Math.hypot(x - h[0], z - h[2]) > JUMP_FT) {
+      // A new vehicle, or one that jumped (it left the map and came back, or the run restarted): start its trail over.
+      h = new Float32Array(SAMPLES * 3);
       for (let k = 0; k < SAMPLES; k++) {
-        h[base + k * 3] = x;
-        h[base + k * 3 + 1] = y;
-        h[base + k * 3 + 2] = z;
+        h[k * 3] = x;
+        h[k * 3 + 1] = y;
+        h[k * 3 + 2] = z;
       }
+      histories.set(id, h);
     } else {
-      h.copyWithin(base + 3, base, base + (SAMPLES - 1) * 3);
-      h[base] = x;
-      h[base + 1] = y;
-      h[base + 2] = z;
+      h.copyWithin(3, 0, (SAMPLES - 1) * 3);
+      h[0] = x;
+      h[1] = y;
+      h[2] = z;
     }
 
     const braking = tl[v * 3] > BRAKE_LEVEL;
@@ -65,9 +61,9 @@ function sampleTrails(t: TrailBuffers, snap: VehicleSnapshot, halfWidth: number)
     const g = braking ? 0.1 : 0.78;
     const b = braking ? 0.06 : 0.42;
     for (let k = 0; k < SAMPLES; k++) {
-      const p = base + k * 3;
-      const q = base + Math.min(k + 1, SAMPLES - 1) * 3;
-      const p0 = base + Math.max(k - 1, 0) * 3;
+      const p = k * 3;
+      const q = Math.min(k + 1, SAMPLES - 1) * 3;
+      const p0 = Math.max(k - 1, 0) * 3;
       let dx = h[p0] - h[q];
       let dz = h[p0 + 2] - h[q + 2];
       const len = Math.hypot(dx, dz);
@@ -95,10 +91,15 @@ function sampleTrails(t: TrailBuffers, snap: VehicleSnapshot, halfWidth: number)
       }
     }
   }
-  t.lastCount = n;
+  // Vehicles that have left the road take their trails with them.
+  if (histories.size > seen.size) for (const id of histories.keys()) if (!seen.has(id)) histories.delete(id);
   geometry.setDrawRange(0, n * (SAMPLES - 1) * 6);
-  geometry.attributes.position.needsUpdate = true;
-  geometry.attributes.color.needsUpdate = true;
+  // Only the ribbons in use go to the GPU, not the whole worst-case buffer.
+  for (const attr of [geometry.getAttribute("position") as THREE.BufferAttribute, geometry.getAttribute("color") as THREE.BufferAttribute]) {
+    attr.clearUpdateRanges();
+    if (n > 0) attr.addUpdateRange(0, n * SAMPLES * 6);
+    attr.needsUpdate = true;
+  }
 }
 
 /**
@@ -108,6 +109,7 @@ function sampleTrails(t: TrailBuffers, snap: VehicleSnapshot, halfWidth: number)
  */
 function LightTrails({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot | null> }) {
   const clock = useRef(0);
+  const shed = useDetailShed();
   const camera = useThree((s) => s.camera);
 
   const { geometry, buffers } = useMemo(() => {
@@ -132,7 +134,7 @@ function LightTrails({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.setDrawRange(0, 0);
-    const buffers: TrailBuffers = { geometry, positions, colors, history: new Float32Array(MAX_VEHICLES * SAMPLES * 3), lastCount: 0 };
+    const buffers: TrailBuffers = { geometry, positions, colors, histories: new Map() };
     return { geometry, buffers };
   }, []);
 
@@ -159,7 +161,8 @@ function LightTrails({ snapshotRef }: { snapshotRef: RefObject<VehicleSnapshot |
 
   useFrame((_, delta) => {
     clock.current += delta;
-    if (clock.current < SAMPLE_EVERY_S) return;
+    // Under load the ribbons are refreshed less often (and not at all when the frame rate is really struggling).
+    if (shed >= 2 || clock.current < SAMPLE_EVERY_S * (shed === 1 ? 2.5 : 1)) return;
     clock.current = 0;
     const snap = snapshotRef.current;
     // Ribbons widen as the camera pulls back, so they still read in a wide shot.

@@ -1,4 +1,4 @@
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 for (const key of Object.keys(REAL_CITY_DATA)) {
   const net = assembleNetwork(REAL_CITY_DATA[key].network);

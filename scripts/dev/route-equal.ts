@@ -1,5 +1,5 @@
 // Checks the heap-based computeRoute against the original scan-based one on many pairs.
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork, computeRoute } from "../../src/sim/network";
 import type { RoadNetwork } from "../../src/sim/types";
 const mph = (m: number) => (m * 5280) / 3600;

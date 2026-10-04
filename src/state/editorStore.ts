@@ -6,7 +6,7 @@ import { assembleNetwork, assembleNetworkCached, computeRoute, computeSignalPhas
 import { pushToast } from "@/lib/toast";
 import { FREE_BUILD_ECONOMY_K, economyKFor, economyRates } from "@/sim/economy";
 import { EMPTY_SCENERY, type SceneryData } from "@/sim/osm/scenery";
-import { REAL_CITY_DATA } from "@/sim/real";
+import { getRealCity, isRealCityLoaded } from "@/sim/real";
 import { assembleCached } from "@/sim/assembleCache";
 import { findClearanceViolations } from "@/sim/clearance";
 import {
@@ -1657,7 +1657,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       realCityActive: scenario.real === true,
       transitLines: [],
       activeTransitId: null,
-      scenery: (scenario.sceneryKey && REAL_CITY_DATA[scenario.sceneryKey]?.scenery) || EMPTY_SCENERY,
+      scenery: (scenario.sceneryKey && isRealCityLoaded(scenario.sceneryKey) && getRealCity(scenario.sceneryKey).scenery) || EMPTY_SCENERY,
       placeName: null,
       economyK:
         scenario.kind === "manage"

@@ -6,6 +6,7 @@ import { assembleCached } from "@/sim/assembleCache";
 import { fastTangentAt, laneCenterPointAt } from "@/sim/laneGeometry";
 import type { Edge3D } from "@/sim/types";
 import { useEditorStore } from "@/state/editorStore";
+import { useDetailShed } from "@/lib/perfDetail";
 
 /** Green guide signs beside freeways: an advance warning and an EXIT sign before each ramp, and a route shield where a freeway begins. */
 
@@ -206,6 +207,8 @@ function FreewaySigns() {
   const edges = useEditorStore((s) => s.edges);
   const network = useMemo(() => assembleCached(nodes, edges), [nodes, edges]);
   const signs = useMemo(() => buildSigns(network.edges), [network]);
+  // The guide signs are decoration: first thing to go when the frame rate struggles.
+  if (useDetailShed() >= 2) return null;
   return (
     <group>
       {signs.map((p) => (

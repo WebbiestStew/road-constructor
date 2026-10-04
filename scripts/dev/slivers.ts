@@ -1,6 +1,6 @@
 // Finds ramps that run alongside another road with a thin strip of grass between the two pavements.
 import * as THREE from "three";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 import { carriagewayOffsetAt, widthScaleAt } from "../../src/sim/laneGeometry";
 const key = process.argv[2] ?? "chicago";

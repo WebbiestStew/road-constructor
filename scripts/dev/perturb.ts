@@ -1,5 +1,5 @@
 // Same seed, same traffic, but the first node nudged by a hair: how much does a jammed map's result move?
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "../sim/harness";
 const [key, eps] = process.argv.slice(2);
 async function main() {

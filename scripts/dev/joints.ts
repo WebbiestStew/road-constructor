@@ -1,6 +1,6 @@
 // Finds joints where a road continues into another but their pavements don't line up (offset or width jump).
 import * as THREE from "three";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 import { carriagewayOffsetAt, widthScaleAt } from "../../src/sim/laneGeometry";
 const key = process.argv[2] ?? "chicago";

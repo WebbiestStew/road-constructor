@@ -1,5 +1,5 @@
 // Cost of a widening variant against the level's budget: npx tsx scripts/sim/cost.ts <city> <maxLanes>
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { REAL_PLANS } from "../../src/sim/scenarios";
 import { estimateEdgeCost } from "../../src/sim/roadClasses";
 const [key, maxLanes = "5"] = process.argv.slice(2);

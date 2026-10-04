@@ -2,7 +2,7 @@
 // best-value-first until the budget is spent. Writes /tmp/plan-<city>.json for run.ts ("plan" variant).
 //   npx tsx scripts/sim/plan.ts <city> [budgetFraction]
 import fs from "node:fs";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { REAL_PLANS } from "../../src/sim/scenarios";
 import { estimateEdgeCost } from "../../src/sim/roadClasses";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";

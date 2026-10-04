@@ -1,4 +1,4 @@
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 import { carriagewayOffsetAt, widthScaleAt } from "../../src/sim/laneGeometry";
 const [key, prefix] = [process.argv[2], process.argv[3]];

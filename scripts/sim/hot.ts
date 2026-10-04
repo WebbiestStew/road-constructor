@@ -1,7 +1,7 @@
 // Where does a real-city level jam? Runs it and lists the most congested roads with where they are.
 //   npx tsx scripts/sim/hot.ts <city> [seconds]
 import fs from "node:fs";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 const [key, secs = "600"] = process.argv.slice(2);

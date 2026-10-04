@@ -1,5 +1,5 @@
 // Edge ends that sit within a short distance of another edge's start at a different node (a visual joint with no graph link).
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 const key = process.argv[2] ?? "chicago";
 const net = assembleNetwork(REAL_CITY_DATA[key].network);

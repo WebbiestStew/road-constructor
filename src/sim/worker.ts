@@ -2192,6 +2192,8 @@ function writeSnapshot(
     // renderer reads them and clears them before the matrix reaches the GPU.
     buf.matrices[i * 16 + 3] = VEHICLE_KIND_CODE[v.kind];
     buf.matrices[i * 16 + 7] = v.length;
+    // The vehicle's id rides in a third spare slot, so anything that follows a vehicle over time (light trails) can tell them apart.
+    buf.matrices[i * 16 + 11] = v.id;
 
     const speedLimitFtps = mphToFtps(effectiveSpeedLimitMph(edge));
     const ratio = v.speed / speedLimitFtps;

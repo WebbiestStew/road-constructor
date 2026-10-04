@@ -1,4 +1,4 @@
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "../sim/harness";
 const key = process.argv[2];
 async function main() {

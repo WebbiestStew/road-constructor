@@ -3,6 +3,7 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import * as THREE from "three";
 import { useFrame, useThree } from "@react-three/fiber";
+import { getDetailShed } from "@/lib/perfDetail";
 
 /**
  * Labels that follow a point in the 3D scene (zone badges, warning markers, the drag cost tag).
@@ -156,8 +157,12 @@ export function WorldLabelLayer() {
 export function WorldLabelProjector() {
   const camera = useThree((s) => s.camera);
   const size = useThree((s) => s.size);
+  const tick = useRef(0);
   useFrame(() => {
     lastView = { camera, width: size.width, height: size.height };
+    // Dozens of labels re-project every frame; when frames are slow they move at a third of the rate.
+    tick.current = (tick.current + 1) % 3;
+    if (getDetailShed() >= 1 && tick.current !== 0) return;
     projectLabels(camera, size.width, size.height);
   });
   return null;

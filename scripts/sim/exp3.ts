@@ -1,5 +1,5 @@
 // Ambulance experiment on Houston: response time vs ideal, with and without extra lanes.
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { cloneNetwork, createSim } from "./harness";
 const [key, variant = "none"] = process.argv.slice(2);
 async function main() {

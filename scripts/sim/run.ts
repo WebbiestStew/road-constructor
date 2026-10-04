@@ -1,6 +1,6 @@
 // Child-process entry: loads one real city (optionally with a variant applied), runs 300 sim-seconds, prints JSON.
 // The worker is a singleton per process, which is why the tests shell out to this instead of running in-process.
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import fs from "node:fs";
 import { REAL_PLANS } from "../../src/sim/scenarios";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";

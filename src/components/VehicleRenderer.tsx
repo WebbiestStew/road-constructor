@@ -23,6 +23,14 @@ function putColor(attr: THREE.BufferAttribute, slot: number, src: Float32Array, 
   a[slot * 3 + 2] = src[from * 3 + 2];
 }
 
+/** Flags the first `floats` values of an instance attribute for upload, and nothing past them. */
+function markUsed(attr: THREE.BufferAttribute, floats: number): void {
+  attr.clearUpdateRanges();
+  if (floats <= 0) return;
+  attr.addUpdateRange(0, floats);
+  attr.needsUpdate = true;
+}
+
 /** Writes a vehicle's matrix into `dst` at `at`: its heading columns scaled by (sx, sy, sz), and its position. */
 function putMatrix(dst: Float32Array, at: number, src: Float32Array, from: number, sx: number, sy: number, sz: number): void {
   dst[at] = src[from] * sx;
@@ -134,25 +142,27 @@ function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
       const sl = code === 0 ? len : dims.l;
       // Road debris has no lights to show.
       const lit = kind === "debris" ? 0 : 1;
-      putMatrix(headArr, o, src, o, dims.w * lit, dims.h * lit, sl * lit);
+      if (lightsOn) putMatrix(headArr, o, src, o, dims.w * lit, dims.h * lit, sl * lit);
       putMatrix(tailArr, o, src, o, dims.w * lit, dims.h * lit, sl * lit);
       putMatrix(shadowArr, o, src, o, dims.w, dims.h, sl);
       putColor(tail.instanceColor, i, snapshot.taillightColors, i);
     }
 
+    // Upload only the part of each buffer in use: with a couple of hundred vehicles on a 1,500-slot buffer, the whole
+    // thing is several times more than the GPU needs, for eleven buffers at every snapshot.
     bodyRefs.current.forEach((mesh, k) => {
       if (!mesh || !mesh.instanceColor) return;
       mesh.count = used[k];
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.instanceColor.needsUpdate = true;
+      markUsed(mesh.instanceMatrix, used[k] * 16);
+      markUsed(mesh.instanceColor, used[k] * 3);
     });
     head.count = lightsOn ? n : 0;
-    head.instanceMatrix.needsUpdate = true;
+    if (lightsOn) markUsed(head.instanceMatrix, n * 16);
     tail.count = n;
-    tail.instanceMatrix.needsUpdate = true;
-    tail.instanceColor.needsUpdate = true;
+    markUsed(tail.instanceMatrix, n * 16);
+    markUsed(tail.instanceColor, n * 3);
     shadow.count = n;
-    shadow.instanceMatrix.needsUpdate = true;
+    markUsed(shadow.instanceMatrix, n * 16);
   });
 
   return (

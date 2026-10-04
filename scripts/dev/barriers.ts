@@ -1,6 +1,6 @@
 // Lists short barrier runs (likely stray slabs) in a real city.
 import * as THREE from "three";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 import { indexPierConflicts, visibleRanges } from "../../src/components/roadGeometry";
 const key = process.argv[2] ?? "chicago";

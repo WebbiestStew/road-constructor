@@ -5,6 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { useEditorStore } from "@/state/editorStore";
+import { getDetailShed } from "@/lib/perfDetail";
 import { setConcreteRoad, setJakeBrake, setRoadRoar, stopRoadSounds } from "@/lib/sound";
 
 /** Vehicles closer than this to the listener (ft) add to the tyre roar. */
@@ -28,7 +29,7 @@ function SoundscapeDriver({ snapshotRef, wet, running, texas, avgMph }: { snapsh
 
   useFrame(() => {
     // The scan walks every vehicle, so it runs a few times a second rather than every rendered frame.
-    frame.current = (frame.current + 1) % 6;
+    frame.current = (frame.current + 1) % (getDetailShed() >= 1 ? 12 : 6);
     if (frame.current !== 0) return;
     const snapshot = snapshotRef.current;
     if (!running || !snapshot) {

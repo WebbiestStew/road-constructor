@@ -1,6 +1,6 @@
 // Headless checks for incidents and wreckers: npx tsx scripts/sim/features.ts <case>
 import { getScenarioById, REAL_PLANS } from "../../src/sim/scenarios";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import type { ScriptedEvent } from "../../src/sim/types";
 import { assembleNetwork, hasGantry } from "../../src/sim/network";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";

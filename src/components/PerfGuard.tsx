@@ -4,9 +4,14 @@ import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useEditorStore } from "@/state/editorStore";
 import { lowerQuality, setQuality, useQuality } from "@/lib/quality";
+import { getDetailShed, setDetailShed } from "@/lib/perfDetail";
 
 const WINDOW_SECONDS = 4;
 const MIN_FPS = 24;
+/** Below this the optional overlays start to run at a lower rate, and above SMOOTH_FPS for a while they come back. */
+const SHED_FPS = 40;
+const SMOOTH_FPS = 54;
+const SMOOTH_WINDOWS_TO_RESTORE = 3;
 
 /**
  * Watches render frame rate while traffic is running and, if it stays below
@@ -18,6 +23,7 @@ export default function PerfGuard({ active }: { active: boolean }) {
   const mode = useEditorStore((s) => s.mode);
   const elapsed = useRef(0);
   const frames = useRef(0);
+  const smooth = useRef(0);
 
   useFrame((_, delta) => {
     // `active` matters: while paused the limiter deliberately idles at a few fps, which is not a slow machine.
@@ -34,6 +40,20 @@ export default function PerfGuard({ active }: { active: boolean }) {
     elapsed.current = 0;
     frames.current = 0;
     if (fps < MIN_FPS) setQuality(lowerQuality(quality), true);
+    // Shed the optional overlays one step at a time before the whole quality tier has to drop, and bring them back slowly.
+    const shed = getDetailShed();
+    if (fps < SHED_FPS && shed < 2) {
+      setDetailShed((shed + 1) as 1 | 2);
+      smooth.current = 0;
+    } else if (fps >= SMOOTH_FPS && shed > 0) {
+      smooth.current += 1;
+      if (smooth.current >= SMOOTH_WINDOWS_TO_RESTORE) {
+        setDetailShed((shed - 1) as 0 | 1);
+        smooth.current = 0;
+      }
+    } else {
+      smooth.current = 0;
+    }
   });
 
   return null;

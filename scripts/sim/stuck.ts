@@ -1,5 +1,5 @@
 // What is a jam waiting on? npx tsx scripts/sim/stuck.ts <city> [seconds]
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 const [key, secs = "240"] = process.argv.slice(2);
 const dbg: Record<string, any> = {};
 (globalThis as any).__simDebug = dbg;

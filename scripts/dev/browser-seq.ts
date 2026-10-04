@@ -1,5 +1,5 @@
 // Replays the messages the browser sends before a run, to see which one moves the result.
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "../sim/harness";
 const [key, variant = "browser"] = process.argv.slice(2);
 async function main() {

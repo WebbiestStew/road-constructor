@@ -3,9 +3,15 @@ on:
   push:
   pull_request:
 
+# A newer push to the same branch makes an older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -15,6 +21,37 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run lint
+      - uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**') }}
+          restore-keys: next-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
       - run: npm run build
-      - name: Simulation regression suite
-        run: npm run test:sim
+
+  # The simulation suite is the slow part (about nine minutes in one piece), so it runs as two jobs side by side: the
+  # real-city baselines (the checks that catch a sim change quietly moving a level's star lines), and everything else.
+  sim-baselines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Real-city baselines
+        run: npm run test:sim -- --test-name-pattern="baseline holds"
+
+  sim-behaviour:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Levels, incidents, gantries and lefts
+        run: npm run test:sim -- --test-name-pattern="reach a destination|can be improved|Code Three|School Run|First Shift|Transit Street|Pile-Up|speed limits|Clover Crossing|stalled semi|closing a lane|Continuous Flow"

@@ -1,6 +1,6 @@
 // Finds joints where one road continues into another of a different width (a visible pavement step).
 import * as THREE from "three";
-import { REAL_CITY_DATA } from "../../src/sim/real";
+import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import { assembleNetwork } from "../../src/sim/network";
 const keys = Object.keys(REAL_CITY_DATA);
 for (const key of keys) {
