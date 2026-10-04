@@ -3,7 +3,7 @@
 import { REAL_CITY_DATA } from "../../src/sim/real";
 import fs from "node:fs";
 import { REAL_PLANS } from "../../src/sim/scenarios";
-import { cloneNetwork, createSim } from "./harness";
+import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 
 const [key, variant = "none", seed = "1337"] = process.argv.slice(2);
 
@@ -41,7 +41,7 @@ async function main() {
     if (m.type === "tick") lastTick = m;
     prevPost(m);
   };
-  sim.load(network, Number(seed), 20);
+  sim.load(network, Number(seed), HARNESS_SPEED);
   const r = await sim.runUntil(REAL_PLANS.find((p) => p.key === key)?.durationS ?? 300);
   console.log(JSON.stringify({ trips: r.trips, mph: r.avgMph, jams: r.problems.length, spawned: lastTick?.spawnedTotal, active: lastTick?.activeCount }));
   process.exit(0);

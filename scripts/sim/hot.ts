@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import { REAL_CITY_DATA } from "../../src/sim/real";
 import { assembleNetwork } from "../../src/sim/network";
-import { cloneNetwork, createSim } from "./harness";
+import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 const [key, secs = "600"] = process.argv.slice(2);
 async function main() {
   const data = REAL_CITY_DATA[key];
@@ -19,7 +19,7 @@ async function main() {
     }
     prev(m);
   };
-  sim.load(network, 1337, 20);
+  sim.load(network, 1337, HARNESS_SPEED);
   await sim.runUntil(Number(secs));
   const net = assembleNetwork(network);
   const [s, w, n, e] = data.meta.bbox;

@@ -15,6 +15,87 @@ function clampT(t: number): number {
   return t < 0 ? 0 : t > 1 ? 1 : t;
 }
 
+
+// ---------------------------------------------------------------------------
+// Fast sampling. The simulation asks for a position and heading for every vehicle many times a tick, and the spline's
+// own getPointAt/getTangentAt (arc-length lookup, then curve evaluation) was about a third of all simulation time.
+// Each road gets a table of points and headings at fixed arc-length steps, built once on first use, and lookups
+// interpolate between its entries. At this spacing the sag of a chord on any real curve is a couple of inches.
+// ---------------------------------------------------------------------------
+
+const LUT_STEP_FT = 3;
+interface EdgeLut {
+  n: number;
+  pos: Float64Array;
+  tan: Float64Array;
+}
+const luts = new WeakMap<Edge3D, EdgeLut>();
+
+function lutFor(edge: Edge3D): EdgeLut {
+  let lut = luts.get(edge);
+  if (lut) return lut;
+  const n = Math.max(2, Math.min(6000, Math.ceil(edge.length / LUT_STEP_FT)));
+  const pos = new Float64Array((n + 1) * 3);
+  const tan = new Float64Array((n + 1) * 3);
+  const p = new THREE.Vector3();
+  const t = new THREE.Vector3();
+  for (let i = 0; i <= n; i++) {
+    edge.spline.getPointAt(i / n, p);
+    edge.spline.getTangentAt(i / n, t);
+    pos[i * 3] = p.x;
+    pos[i * 3 + 1] = p.y;
+    pos[i * 3 + 2] = p.z;
+    tan[i * 3] = t.x;
+    tan[i * 3 + 1] = t.y;
+    tan[i * 3 + 2] = t.z;
+  }
+  lut = { n, pos, tan };
+  luts.set(edge, lut);
+  return lut;
+}
+
+/** Same as `edgePointAt`, from the road's lookup table. */
+export function fastPointAt(edge: Edge3D, t: number, out: THREE.Vector3): THREE.Vector3 {
+  const lut = lutFor(edge);
+  const f = clampT(t) * lut.n;
+  const i = f >= lut.n ? lut.n - 1 : Math.floor(f);
+  const w = f - i;
+  const a = i * 3;
+  const b = a + 3;
+  out.set(
+    lut.pos[a] + (lut.pos[b] - lut.pos[a]) * w,
+    lut.pos[a + 1] + (lut.pos[b + 1] - lut.pos[a + 1]) * w,
+    lut.pos[a + 2] + (lut.pos[b + 2] - lut.pos[a + 2]) * w
+  );
+  return out;
+}
+
+/** Same as `edgeTangentAt` (a unit vector), from the road's lookup table. */
+export function fastTangentAt(edge: Edge3D, t: number, out: THREE.Vector3): THREE.Vector3 {
+  const lut = lutFor(edge);
+  const f = clampT(t) * lut.n;
+  const i = f >= lut.n ? lut.n - 1 : Math.floor(f);
+  const w = f - i;
+  const a = i * 3;
+  const b = a + 3;
+  out.set(
+    lut.tan[a] + (lut.tan[b] - lut.tan[a]) * w,
+    lut.tan[a + 1] + (lut.tan[b + 1] - lut.tan[a + 1]) * w,
+    lut.tan[a + 2] + (lut.tan[b + 2] - lut.tan[a + 2]) * w
+  );
+  const len = out.length();
+  if (len > 1e-9) out.multiplyScalar(1 / len);
+  return out;
+}
+
+function fastRightVectorAt(edge: Edge3D, t: number, tangentScratch: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+  fastTangentAt(edge, t, tangentScratch);
+  out.crossVectors(tangentScratch, _upVector);
+  if (out.lengthSq() < 1e-8) out.set(1, 0, 0);
+  else out.normalize();
+  return out;
+}
+
 /** Signed lateral offset (feet) of a lane's centerline from the edge centerline. */
 export function laneOffsetFt(
   laneIndex: number,
@@ -167,8 +248,8 @@ export function laneCenterPointAt(
   out: THREE.Vector3
 ): THREE.Vector3 {
   const ct = clampT(t);
-  edgePointAt(edge, ct, out);
-  edgeRightVectorAt(edge, ct, tangentScratch, rightScratch);
+  fastPointAt(edge, ct, out);
+  fastRightVectorAt(edge, ct, tangentScratch, rightScratch);
   const d = ct * edge.length;
   const k = widthScaleAt(edge, d);
   const offset = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt) * k + carriagewayOffsetAt(edge, d, k);

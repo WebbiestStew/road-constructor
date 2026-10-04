@@ -51,6 +51,9 @@ export async function createSim() {
   };
 }
 
+/** Simulated seconds per real second. The worker's loop can do 40 (30 Hz frames x 40 steps); it steps at a fixed dt, so the speed changes only how fast a run finishes. */
+export const HARNESS_SPEED = 40;
+
 export function cloneNetwork(n: NetworkSnapshot): NetworkSnapshot {
   return JSON.parse(JSON.stringify(n));
 }

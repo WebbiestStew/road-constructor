@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { REAL_CITY_DATA } from "../../src/sim/real";
 import { REAL_PLANS } from "../../src/sim/scenarios";
 import { estimateEdgeCost } from "../../src/sim/roadClasses";
-import { cloneNetwork, createSim } from "./harness";
+import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 
 const [key, frac = "0.95"] = process.argv.slice(2);
 async function main() {
@@ -25,7 +25,7 @@ async function main() {
     }
     prev(m);
   };
-  sim.load(network, 1337, 20);
+  sim.load(network, 1337, HARNESS_SPEED);
   await sim.runUntil(Math.min(600, plan0.durationS ?? 300));
   const nodes = new Map(network.nodes.map((n) => [n.id, n]));
   const plan = REAL_PLANS.find((p) => p.key === key)!;

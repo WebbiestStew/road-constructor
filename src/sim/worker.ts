@@ -12,7 +12,7 @@ import {
   mobilEvaluate,
   type MobilInputs,
 } from "./idm";
-import { distanceToT, laneCenterPointAt } from "./laneGeometry";
+import { distanceToT, fastTangentAt, laneCenterPointAt } from "./laneGeometry";
 import { computeEdgeTrafficStats, type EdgeTrafficStats } from "./los";
 import { assembleNetwork, computeRoute, patchEdge } from "./network";
 import {
@@ -324,6 +324,7 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   rng = mulberry32(msg.seed);
 
   laneOccupancy.clear();
+  occupiedLanes = [];
   incomingEdgeCountByNode.clear();
   for (const edge of network.edges) {
     const lanes: number[][] = [];
@@ -535,22 +536,41 @@ function updateSpawning() {
 // Lane occupancy rebuild (per tick)
 // ---------------------------------------------------------------------------
 
+/** Lane lists that held vehicles at the last rebuild: the only ones that need clearing (most of a big map is empty). */
+let occupiedLanes: number[][] = [];
 function rebuildLaneOccupancy() {
-  for (const lanes of laneOccupancy.values()) {
-    for (const arr of lanes) arr.length = 0;
-  }
+  for (const arr of occupiedLanes) arr.length = 0;
+  occupiedLanes = [];
   for (const v of vehicles.values()) {
     const lanes = laneOccupancy.get(v.edgeId);
     if (!lanes) continue;
     const laneArr = lanes[clamp(v.laneIndex, 0, lanes.length - 1)];
+    if (laneArr.length === 0) occupiedLanes.push(laneArr);
     laneArr.push(v.id);
   }
-  for (const lanes of laneOccupancy.values()) {
-    for (const arr of lanes) {
-      arr.sort((a, b) => vehicles.get(a)!.distanceAlongEdge - vehicles.get(b)!.distanceAlongEdge);
+  // Lanes keep almost the same order from one tick to the next, so an insertion sort on each lane's distances (read
+  // once per vehicle) beats a comparator that looks both vehicles up on every comparison. It is stable, like sort().
+  for (const arr of occupiedLanes) {
+    const n = arr.length;
+    if (n < 2) continue;
+    if (occupancyScratch.length < n) occupancyScratch = new Float64Array(n * 2);
+    const d = occupancyScratch;
+    for (let i = 0; i < n; i++) d[i] = vehicles.get(arr[i])!.distanceAlongEdge;
+    for (let i = 1; i < n; i++) {
+      const di = d[i];
+      const idi = arr[i];
+      let j = i - 1;
+      while (j >= 0 && d[j] > di) {
+        d[j + 1] = d[j];
+        arr[j + 1] = arr[j];
+        j--;
+      }
+      d[j + 1] = di;
+      arr[j + 1] = idi;
     }
   }
 }
+let occupancyScratch = new Float64Array(256);
 
 // ---------------------------------------------------------------------------
 // Junction control: gap-acceptance priority yielding + signal phases
@@ -1341,8 +1361,8 @@ function curvatureSpeedCapFtps(edge: Edge3D, distanceAlongEdge: number): number 
   if (edge.length <= CURVATURE_LOOKAHEAD_FT) return Infinity;
   const t0 = distanceToT(edge, Math.max(0, distanceAlongEdge - CURVATURE_LOOKAHEAD_FT / 2));
   const t1 = distanceToT(edge, Math.min(edge.length, distanceAlongEdge + CURVATURE_LOOKAHEAD_FT / 2));
-  edge.spline.getTangentAt(t0, _curveTangentA);
-  edge.spline.getTangentAt(t1, _curveTangentB);
+  fastTangentAt(edge, t0, _curveTangentA);
+  fastTangentAt(edge, t1, _curveTangentB);
   const angleRad = _curveTangentA.angleTo(_curveTangentB);
   if (angleRad < 0.015) return Infinity; // effectively straight — no cap
   const turnRadiusFt = CURVATURE_LOOKAHEAD_FT / angleRad;
@@ -1357,7 +1377,7 @@ function curvatureSpeedCapFtps(edge: Edge3D, distanceAlongEdge: number): number 
  */
 function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
   const t = distanceToT(edge, clamp(distanceAlongEdge, 0, edge.length));
-  edge.spline.getTangentAt(t, _gradeTangent);
+  fastTangentAt(edge, t, _gradeTangent);
   return _gradeTangent.y;
 }
 

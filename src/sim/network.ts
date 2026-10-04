@@ -739,16 +739,68 @@ export function computeRoute(
   const dist = new Map<string, number>();
   const prev = new Map<string, string>();
   const visited = new Set<string>();
+  // A binary heap in place of scanning every known edge for the nearest one. Ties go to whichever edge was reached
+  // first, exactly as the scan did, so routes are unchanged.
+  const heapD: number[] = [];
+  const heapO: number[] = [];
+  const heapId: string[] = [];
+  const order = new Map<string, number>();
+  const less = (i: number, j: number) => heapD[i] < heapD[j] || (heapD[i] === heapD[j] && heapO[i] < heapO[j]);
+  const swap = (i: number, j: number) => {
+    [heapD[i], heapD[j]] = [heapD[j], heapD[i]];
+    [heapO[i], heapO[j]] = [heapO[j], heapO[i]];
+    [heapId[i], heapId[j]] = [heapId[j], heapId[i]];
+  };
+  const push = (id: string, d: number) => {
+    let o = order.get(id);
+    if (o === undefined) {
+      o = order.size;
+      order.set(id, o);
+    }
+    heapD.push(d);
+    heapO.push(o);
+    heapId.push(id);
+    let i = heapD.length - 1;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (!less(i, parent)) break;
+      swap(i, parent);
+      i = parent;
+    }
+  };
+  const pop = () => {
+    const top = heapId[0];
+    const last = heapD.length - 1;
+    swap(0, last);
+    heapD.pop();
+    heapO.pop();
+    heapId.pop();
+    let i = 0;
+    for (;;) {
+      const l = 2 * i + 1;
+      const r = l + 1;
+      let m = i;
+      if (l < heapD.length && less(l, m)) m = l;
+      if (r < heapD.length && less(r, m)) m = r;
+      if (m === i) break;
+      swap(i, m);
+      i = m;
+    }
+    return top;
+  };
   dist.set(fromEdgeId, travelTime(startEdge));
+  push(fromEdgeId, dist.get(fromEdgeId)!);
 
   for (;;) {
     let currentId: string | null = null;
     let currentDist = Infinity;
-    for (const [id, d] of dist) {
-      if (!visited.has(id) && d < currentDist) {
-        currentDist = d;
-        currentId = id;
-      }
+    while (heapD.length > 0) {
+      const d = heapD[0];
+      const id = pop();
+      if (visited.has(id) || d !== dist.get(id)) continue; // a stale entry
+      currentId = id;
+      currentDist = d;
+      break;
     }
     if (currentId === null || currentId === toEdgeId) break;
     visited.add(currentId);
@@ -764,6 +816,7 @@ export function computeRoute(
       if (candidate < (dist.get(nextId) ?? Infinity)) {
         dist.set(nextId, candidate);
         prev.set(nextId, currentId);
+        push(nextId, candidate);
       }
     }
   }

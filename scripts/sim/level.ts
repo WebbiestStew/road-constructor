@@ -3,7 +3,7 @@
 import { buildHarborDrive, buildMidtown } from "../../src/sim/cities";
 import { getScenarioById } from "../../src/sim/scenarios";
 import type { NetworkSnapshot } from "../../src/sim/types";
-import { cloneNetwork, createSim } from "./harness";
+import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 
 const [levelId, variantArg = "none", seed = "1337"] = process.argv.slice(2);
 const variants = new Set(variantArg.split(","));
@@ -52,7 +52,7 @@ async function main() {
     prev(m);
   };
   sim.send({ type: "setTrafficMix", bus: scenario.trafficMix?.bus ?? 0, bike: scenario.trafficMix?.bike ?? 0 });
-  sim.load(network, Number(seed), 20);
+  sim.load(network, Number(seed), HARNESS_SPEED);
   if (scenario.scriptedEvents) sim.send({ type: "scheduleEvents", events: scenario.scriptedEvents });
   const r = await sim.runUntil(scenario.durationS);
   const em = last?.emergency;
