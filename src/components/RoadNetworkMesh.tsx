@@ -12,6 +12,7 @@ import { carriagewayOffsetAt, widthScaleAt } from "@/sim/laneGeometry";
 import { useEditorStore } from "@/state/editorStore";
 import { getPrefs } from "@/lib/prefs";
 import { usePhotoMode } from "@/lib/photoMode";
+import { getScenarioById } from "@/sim/scenarios";
 import type { ContractStatus, Edge3D, EdgeSpeedRatio, NetworkSnapshot, NodeSpec } from "@/sim/types";
 import { badgeColorForIndex } from "./hud/badgeColors";
 import { IconWarning } from "./hud/icons";
@@ -24,6 +25,7 @@ import {
   buildJerseyBarrier,
   buildLaneArrows,
   buildParapet,
+  buildTexasRail,
   buildSolidStripe,
   buildStopBar,
   buildGores,
@@ -49,6 +51,9 @@ const YELLOW_COLOR = "#eab308";
 const BUS_LANE_COLOR = "#b4432f";
 const BIKE_LANE_COLOR = "#2f9e5b";
 const BARRIER_COLOR = "#9a9aa0";
+/** TxDOT concrete: the light, warm grey of Texas bridge decks, rails and bents. */
+const TX_DECK_COLOR = "#9a9892";
+const TX_CONCRETE_COLOR = "#c3c0b8";
 const PIER_COLOR = "#75757c";
 const DECK_UNDERSIDE_COLOR = "#5a5a62";
 const JOINT_COLOR = "#232326";
@@ -141,7 +146,7 @@ function buildBelowGradeOverlay(edge: Edge3D): THREE.BufferGeometry | null {
   return geo;
 }
 
-function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolean, hasCrosswalk: boolean): EdgeGeometries {
+function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolean, hasCrosswalk: boolean, texas: boolean): EdgeGeometries {
   const pavedHalfWidth = (edge.lanes * edge.laneWidthFt) / 2;
   const ribbon = buildAsphaltRibbon(edge, SHOULDER_FT, edge.isElevated ? DECK_THICKNESS_FT : 0);
   const roadClass = ROAD_CLASSES[edge.roadClassId];
@@ -275,6 +280,12 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
   const sunken = edge.sunken;
   if (sunken) {
     // nothing
+  } else if (texas && edge.isElevated && !edge.isRoundaboutRing) {
+    // TxDOT overpasses, freeway or street, carry the open-slot Texas Classic rail along the deck edge.
+    const railOffset = pavedHalfWidth + (edge.isFreeway ? SHOULDER_FT - 0.5 : 0.5);
+    for (const off of [-railOffset, railOffset]) {
+      for (const [a, b] of barrierRuns(off)) parapets.push(buildTexasRail(edge, off, a, b));
+    }
   } else if (edge.isFreeway) {
     // Freeways keep the heavier F-shape Jersey barrier at grade or elevated.
     const barrierOffset = pavedHalfWidth + SHOULDER_FT - 0.5;
@@ -640,9 +651,12 @@ const EdgeGroup = memo(function EdgeGroup({
     g.position.set(cx * (1 - s), 0, cz * (1 - s));
   });
 
+  const texas = useEditorStore((st) => (st.activeScenarioId ? getScenarioById(st.activeScenarioId)?.texas === true : false));
+  // Overpasses on a Texas map are TxDOT concrete; everything else keeps the asphalt look.
+  const concrete = texas && edge.isElevated;
   const geometries = useMemo(
-    () => buildEdgeGeometries(edge, isTwoWay, hasStopBar, hasCrosswalk),
-    [edge, isTwoWay, hasStopBar, hasCrosswalk]
+    () => buildEdgeGeometries(edge, isTwoWay, hasStopBar, hasCrosswalk, texas),
+    [edge, isTwoWay, hasStopBar, hasCrosswalk, texas]
   );
   const isSelected = useEditorStore(
     (s) => s.selection?.kind === "edge" && s.selection.id === edge.id
@@ -720,7 +734,9 @@ const EdgeGroup = memo(function EdgeGroup({
                     ? heatmapColorHex(speedRatio!)
                     : isSelected
                       ? ASPHALT_SELECTED_COLOR
-                      : ASPHALT_COLOR
+                      : concrete
+                        ? TX_DECK_COLOR
+                        : ASPHALT_COLOR
           }
           roughness={0.95}
           metalness={0.05}
@@ -774,7 +790,7 @@ const EdgeGroup = memo(function EdgeGroup({
 
       {geometries.parapets.map((geo, i) => (
         <mesh key={i} geometry={geo} castShadow receiveShadow>
-          <meshStandardMaterial color={BARRIER_COLOR} roughness={0.88} side={THREE.DoubleSide} />
+          <meshStandardMaterial color={concrete ? TX_CONCRETE_COLOR : BARRIER_COLOR} roughness={0.88} side={THREE.DoubleSide} />
         </mesh>
       ))}
 
@@ -799,7 +815,7 @@ const EdgeGroup = memo(function EdgeGroup({
           receiveShadow
         >
           <boxGeometry args={[abutment.halfWidth * 2, abutment.heightFt, 3]} />
-          <meshStandardMaterial color={ABUTMENT_COLOR} roughness={0.9} />
+          <meshStandardMaterial color={concrete ? TX_CONCRETE_COLOR : ABUTMENT_COLOR} roughness={0.9} />
         </mesh>
       ))}
 
@@ -809,7 +825,7 @@ const EdgeGroup = memo(function EdgeGroup({
           <group key={i} position={pier.capPosition} rotation={[0, pier.rotationY, 0]}>
             <mesh castShadow receiveShadow>
               <boxGeometry args={[pier.capLength, 2, 3.5]} />
-              <meshStandardMaterial color={PIER_COLOR} roughness={0.92} />
+              <meshStandardMaterial color={concrete ? TX_CONCRETE_COLOR : PIER_COLOR} roughness={0.92} />
             </mesh>
             {pier.columnOffsets.map((offset, ci) => (
               <mesh
@@ -819,7 +835,7 @@ const EdgeGroup = memo(function EdgeGroup({
                 position={[offset, -(columnTopY / 2 + 1), 0]}
                 geometry={geometries.pierColumnGeometries[i]}
               >
-                <meshStandardMaterial color={PIER_COLOR} roughness={0.92} />
+                <meshStandardMaterial color={concrete ? TX_CONCRETE_COLOR : PIER_COLOR} roughness={0.92} />
               </mesh>
             ))}
           </group>

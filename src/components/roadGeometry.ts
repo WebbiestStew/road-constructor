@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { carriagewayOffsetAt, edgePointAt, edgeRightVectorAt, laneOffsetFt, widthScaleAt } from "@/sim/laneGeometry";
 import { JOIN_STEP_FT, type Edge3D, type JoinPad } from "@/sim/types";
 
@@ -324,6 +325,50 @@ const PARAPET_PROFILE: ProfilePoint[] = [
 
 export function buildParapet(edge: Edge3D, lateralOffsetFt: number, tStart = 0, tEnd = 1): THREE.BufferGeometry {
   return sweepProfileAlongCurve(edge, lateralOffsetFt, PARAPET_PROFILE, rangeSegments(edge, tStart, tEnd), true, tStart, tEnd);
+}
+
+/** Cross-sections (feet) of the Texas Classic rail: a solid curb, the open slots between posts, and a top rail. */
+const TX_CURB_PROFILE: ProfilePoint[] = [
+  { x: -0.65, y: 0 },
+  { x: 0.65, y: 0 },
+  { x: 0.55, y: 1.3 },
+  { x: -0.55, y: 1.3 },
+];
+const TX_TOP_RAIL_PROFILE: ProfilePoint[] = [
+  { x: -0.6, y: 2.4 },
+  { x: 0.6, y: 2.4 },
+  { x: 0.5, y: 3.3 },
+  { x: -0.5, y: 3.3 },
+];
+const TX_POST_PROFILE: ProfilePoint[] = [
+  { x: -0.55, y: 1.2 },
+  { x: 0.55, y: 1.2 },
+  { x: 0.55, y: 2.5 },
+  { x: -0.55, y: 2.5 },
+];
+const TX_POST_EVERY_FT = 7;
+const TX_POST_LENGTH_FT = 1.1;
+
+/**
+ * A TxDOT Texas Classic bridge rail: a concrete curb and a concrete top rail held apart by evenly spaced posts, so you
+ * see through the slots between them. Returned as one merged geometry.
+ */
+export function buildTexasRail(edge: Edge3D, lateralOffsetFt: number, tStart = 0, tEnd = 1): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [
+    sweepProfileAlongCurve(edge, lateralOffsetFt, TX_CURB_PROFILE, rangeSegments(edge, tStart, tEnd), true, tStart, tEnd),
+    sweepProfileAlongCurve(edge, lateralOffsetFt, TX_TOP_RAIL_PROFILE, rangeSegments(edge, tStart, tEnd), true, tStart, tEnd),
+  ];
+  const runFt = (tEnd - tStart) * edge.length;
+  const posts = Math.max(2, Math.floor(runFt / TX_POST_EVERY_FT) + 1);
+  for (let i = 0; i < posts; i++) {
+    const t0 = tStart + ((tEnd - tStart) * i) / (posts - 1) - (i === posts - 1 ? TX_POST_LENGTH_FT / edge.length : 0);
+    const t1 = Math.min(tEnd, t0 + TX_POST_LENGTH_FT / edge.length);
+    if (t1 <= t0) continue;
+    parts.push(sweepProfileAlongCurve(edge, lateralOffsetFt, TX_POST_PROFILE, 1, true, Math.max(tStart, t0), t1));
+  }
+  const merged = mergeGeometries(parts, false);
+  for (const p of parts) p.dispose();
+  return merged ?? parts[0];
 }
 
 /**

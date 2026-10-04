@@ -81,6 +81,8 @@ export interface ScenarioDef {
   real?: boolean;
   /** The real-city data key, for the buildings drawn around its roads. */
   sceneryKey?: string;
+  /** A Texas map: its overpasses are drawn TxDOT style (concrete decks, open-slot Texas Classic rails). */
+  texas?: boolean;
   /** Left turns at signals give way to oncoming traffic in this level (otherwise they run unopposed, as in the classic levels). */
   leftTurnsYield?: boolean;
   /** Share of traffic that is buses and bikes in this level. Omitted = cars and trucks only. */
@@ -835,10 +837,14 @@ export const REAL_PLANS: RealCityPlan[] = [
   },
 ];
 
+/** The real-city levels in Texas. */
+const TEXAS_KEYS = new Set(["houston", "san-antonio", "dallas"]);
+
 function realScenario(plan: RealCityPlan): ScenarioDef {
   return {
     id: `real-${plan.key}`,
     real: true,
+    texas: TEXAS_KEYS.has(plan.key),
     sceneryKey: plan.key,
     name: plan.name,
     tagline: plan.tagline,
