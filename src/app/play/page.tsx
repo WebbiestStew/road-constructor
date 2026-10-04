@@ -20,6 +20,7 @@ import FlyoverDirector from "@/components/FlyoverDirector";
 import { useFlyover } from "@/lib/cinematic";
 import SoundscapeDriver from "@/components/SoundscapeDriver";
 import IncidentPins from "@/components/IncidentPins";
+import { getScenarioById } from "@/sim/scenarios";
 import FreewaySigns from "@/components/FreewaySigns";
 import ManagementOverlays from "@/components/ManagementOverlays";
 import SimControls from "@/components/SimControls";
@@ -170,6 +171,7 @@ const CROSSHAIR_TOOLS = new Set<EditorTool>(["draw", "zone", "turnaround"]);
 export default function Play() {
   const sim = useTrafficSimulation();
   const flyover = useFlyover();
+  const texasMap = useEditorStore((s) => (s.activeScenarioId ? getScenarioById(s.activeScenarioId)?.texas === true : false));
   // Dev builds only: `__sim` lets the browser console read the live simulation state.
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") (window as unknown as { __sim: unknown }).__sim = sim;
@@ -344,7 +346,7 @@ export default function Play() {
         <ManagementOverlays />
         <FreewaySigns />
         {flyover && <LightTrails snapshotRef={sim.snapshotRef} />}
-        <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} />
+        <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} texas={texasMap} avgMph={sim.metrics.avgSpeedMph} />
         <IncidentPins incidents={sim.metrics.incidents} onDispatch={sim.dispatchWrecker} />
         <EmergencyPins snapshotRef={sim.snapshotRef} />
         {quality !== "low" && <JointClackDetector snapshotRef={sim.snapshotRef} />}

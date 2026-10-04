@@ -5,7 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { useEditorStore } from "@/state/editorStore";
-import { setJakeBrake, setRoadRoar, stopRoadSounds } from "@/lib/sound";
+import { setConcreteRoad, setJakeBrake, setRoadRoar, stopRoadSounds } from "@/lib/sound";
 
 /** Vehicles closer than this to the listener (ft) add to the tyre roar. */
 const ROAR_RADIUS_FT = 650;
@@ -19,7 +19,7 @@ const JAKE_RADIUS_FT = 900;
  * on wet asphalt), and the engine-brake rumble of semis slowing down a grade. The listener is the chase camera when
  * riding along, otherwise the point the camera orbits. Renders nothing.
  */
-function SoundscapeDriver({ snapshotRef, wet, running }: { snapshotRef: RefObject<VehicleSnapshot | null>; wet: boolean; running: boolean }) {
+function SoundscapeDriver({ snapshotRef, wet, running, texas, avgMph }: { snapshotRef: RefObject<VehicleSnapshot | null>; wet: boolean; running: boolean; texas: boolean; avgMph: number }) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
   const frame = useRef(0);
@@ -36,6 +36,7 @@ function SoundscapeDriver({ snapshotRef, wet, running }: { snapshotRef: RefObjec
       setJakeBrake(0);
       return;
     }
+    setConcreteRoad(texas, avgMph);
     const rideAlong = useEditorStore.getState().rideAlongActive;
     const lx = rideAlong || !controls ? camera.position.x : controls.target.x;
     const lz = rideAlong || !controls ? camera.position.z : controls.target.z;

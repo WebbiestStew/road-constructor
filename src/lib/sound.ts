@@ -398,11 +398,16 @@ interface RoadGraph {
   roarGain: GainNode;
   roarFilter: BiquadFilterNode;
   jakeGain: GainNode;
+  /** Level of the slab-joint thumps, and the two sawtooths (one per axle) that clock them. */
+  thumpGain: GainNode;
+  thumpClocks: OscillatorNode[];
 }
 let road: RoadGraph | null = null;
 let roarLevel = 0;
 let roarWet = false;
 let jakeLevel = 0;
+let concreteRoad = false;
+let concreteMph = 0;
 
 function ensureRoad(): RoadGraph | null {
   const audio = getCtx();
@@ -452,7 +457,45 @@ function ensureRoad(): RoadGraph | null {
   jakeOsc.start();
   lfo.start();
 
-  road = { roarGain, roarFilter, jakeGain };
+  // Concrete slab joints: low, rounded noise that a pair of sawtooth clocks (front and rear axle, a beat apart) gate
+  // into short thumps through a waveshaper, so each joint goes "ba-dum". The clock rate follows speed over slab length.
+  const thumpSrc = audio.createBufferSource();
+  thumpSrc.buffer = buf;
+  thumpSrc.loop = true;
+  const thumpFilter = audio.createBiquadFilter();
+  thumpFilter.type = "lowpass";
+  thumpFilter.frequency.value = 170;
+  const thumpGain = audio.createGain();
+  thumpGain.gain.value = 0;
+  const gate = audio.createGain();
+  gate.gain.value = 0;
+  const curve = new Float32Array(256);
+  for (let i = 0; i < curve.length; i++) {
+    const x = (i / (curve.length - 1)) * 2 - 1;
+    curve[i] = x > 0.55 ? ((x - 0.55) / 0.45) ** 2 : 0;
+  }
+  const thumpClocks: OscillatorNode[] = [];
+  for (const lag of [0, 0.045]) {
+    const clock = audio.createOscillator();
+    clock.type = "sawtooth";
+    clock.frequency.value = 4.5;
+    const shaper = audio.createWaveShaper();
+    shaper.curve = curve;
+    const axle = audio.createGain();
+    axle.gain.value = lag === 0 ? 1 : 0.7;
+    clock.connect(shaper);
+    shaper.connect(axle);
+    axle.connect(gate.gain);
+    clock.start(audio.currentTime + lag);
+    thumpClocks.push(clock);
+  }
+  thumpSrc.connect(thumpFilter);
+  thumpFilter.connect(gate);
+  gate.connect(thumpGain);
+  thumpGain.connect(audio.destination);
+  thumpSrc.start();
+
+  road = { roarGain, roarFilter, jakeGain, thumpGain, thumpClocks };
   return road;
 }
 
@@ -460,9 +503,13 @@ function applyRoadLevels(): void {
   const audio = getCtx();
   if (!road || !audio) return;
   const now = audio.currentTime;
-  const roar = muted ? 0 : roarLevel * (roarWet ? 0.055 : 0.02);
+  // Transverse-tined concrete sings higher and louder than asphalt, and its joints thump in time with the speed.
+  const roar = muted ? 0 : roarLevel * (roarWet ? 0.055 : concreteRoad ? 0.032 : 0.02);
   road.roarGain.gain.linearRampToValueAtTime(roar, now + 0.25);
-  road.roarFilter.frequency.linearRampToValueAtTime(roarWet ? 1900 : 750, now + 0.6);
+  road.roarFilter.frequency.linearRampToValueAtTime(roarWet ? 1900 : concreteRoad ? 1150 : 750, now + 0.6);
+  road.thumpGain.gain.linearRampToValueAtTime(muted || !concreteRoad ? 0 : roarLevel * 0.2, now + 0.25);
+  const jointsPerS = Math.min(9, Math.max(1.2, (concreteMph * 1.4667) / CONCRETE_SLAB_FT));
+  for (const clock of road.thumpClocks) clock.frequency.linearRampToValueAtTime(jointsPerS, now + 0.4);
   road.jakeGain.gain.linearRampToValueAtTime(muted ? 0 : jakeLevel * 0.045, now + 0.2);
 }
 
@@ -471,6 +518,18 @@ export function setRoadRoar(level: number, wet: boolean): void {
   roarLevel = Math.min(1, Math.max(0, level));
   roarWet = wet;
   if (roarLevel === 0 && !road) return;
+  if (!ensureRoad()) return;
+  applyRoadLevels();
+}
+
+/** A transverse-joint spacing typical of Texas concrete freeways. */
+const CONCRETE_SLAB_FT = 17;
+
+/** Switches on the TxDOT concrete sound (the ba-dum of slab joints, and a higher tyre whine) at roughly `mph` of traffic speed. */
+export function setConcreteRoad(on: boolean, mph: number): void {
+  concreteRoad = on;
+  concreteMph = mph;
+  if (!on && !road) return;
   if (!ensureRoad()) return;
   applyRoadLevels();
 }
@@ -487,5 +546,6 @@ export function setJakeBrake(level: number): void {
 export function stopRoadSounds(): void {
   roarLevel = 0;
   jakeLevel = 0;
+  concreteRoad = false;
   if (road) applyRoadLevels();
 }

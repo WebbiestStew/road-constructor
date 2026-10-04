@@ -24,7 +24,8 @@ speed limits and signal timing, while every car drives for real. Play it on desk
   real ones. Monterrey has eight spots in all: downtown, the Tec, Valle Oriente, Ciudad Universitaria, Gonzalitos by
   the Hospital Universitario, Fundidora, the Estadio BBVA and Juan Pablo II.
 - **TxDOT overpasses.** On the Texas maps (Houston, San Antonio, Dallas) elevated roads are light concrete with open-slot
-  Texas Classic rails and concrete bents; everywhere else keeps asphalt decks.
+  Texas Classic rails and concrete bents, and the road sounds like it: the ba-dum of slab joints and a higher tyre whine.
+  Everywhere else keeps asphalt decks.
 - **Clover Crossing.** A cloverleaf interchange designed for the game, not taken from a map: a freeway climbs over
   another, four loops carry the left turns and four outer ramps the right turns, and the weaves between them are the
   puzzle.
