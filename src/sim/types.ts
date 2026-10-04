@@ -140,6 +140,8 @@ export interface EdgeSpec {
   name?: string;
   /** Route reference such as "I 35", for route shields. */
   ref?: string;
+  /** A ramp or link road, whose `name` says where it leads rather than what it is called. */
+  ramp?: boolean;
 }
 
 export type ReservedLane = "bus" | "bike";
@@ -260,6 +262,7 @@ export interface Edge3D {
   displacedLeft: boolean;
   name?: string;
   ref?: string;
+  ramp?: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
   /** Player-set lane arrows copied from the spec (null = automatic). */

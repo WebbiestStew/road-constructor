@@ -104,7 +104,7 @@ export function LaneManagerCard() {
 
   if (assembled.laneAllowed === null) {
     return (
-      <Shell icon={IconLanes} title="Lane arrows" subtitle={`${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""}`} onClose={close}>
+      <Shell icon={IconLanes} title="Lane arrows" subtitle={`${spec.name && !spec.ramp ? `${spec.name} · ` : ""}${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""}`} onClose={close}>
         <p className="text-[11.5px] font-semibold leading-snug text-zinc-600">
           {assembled.nextEdgeIds.length === 0
             ? "This road ends here, so there's nothing to assign."
@@ -124,7 +124,7 @@ export function LaneManagerCard() {
   };
 
   return (
-    <Shell icon={IconLanes} title="Lane arrows" subtitle={`${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""} · ${isCustom ? "custom" : "automatic"}`} onClose={close}>
+    <Shell icon={IconLanes} title="Lane arrows" subtitle={`${spec.name && !spec.ramp ? `${spec.name} · ` : ""}${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""} · ${isCustom ? "custom" : "automatic"}`} onClose={close}>
       <div className="flex items-end justify-between text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">
         <span>← Left</span>
         <span>Right →</span>
@@ -199,7 +199,7 @@ export function SpeedLimitCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean
   const cls = ROAD_CLASSES[spec.roadClassId];
 
   return (
-    <Shell icon={IconSpeedSign} title="Speed limit" subtitle={`${cls.label} · now ${spec.speedLimitMph} mph`} onClose={() => setSelection(null)}>
+    <Shell icon={IconSpeedSign} title="Speed limit" subtitle={`${spec.name && !spec.ramp ? `${spec.name} · ` : ""}${cls.label} · now ${spec.speedLimitMph} mph`} onClose={() => setSelection(null)}>
       <div className="grid grid-cols-5 gap-2">
         {SPEED_LIMIT_CHOICES_MPH.map((mph) => {
           const active = spec.speedLimitMph === mph;
@@ -511,7 +511,7 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
   const canCross = !spec.isRoundaboutRing && lengthFt >= MIN_CROSSWALK_ROAD_FT;
 
   return (
-    <Shell icon={IconRoad} title="Streets" subtitle={`${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""} · ${twoWay ? "two-way" : "one-way"}`} onClose={() => setSelection(null)}>
+    <Shell icon={IconRoad} title="Streets" subtitle={`${spec.name && !spec.ramp ? `${spec.name} · ` : ""}${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""} · ${twoWay ? "two-way" : "one-way"}`} onClose={() => setSelection(null)}>
       <div className="flex flex-col gap-1.5">
         <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Right-hand lane</span>
         <div className="grid grid-cols-3 gap-1.5">

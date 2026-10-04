@@ -21,6 +21,7 @@ import { useFlyover } from "@/lib/cinematic";
 import SoundscapeDriver from "@/components/SoundscapeDriver";
 import IncidentPins from "@/components/IncidentPins";
 import { getScenarioById } from "@/sim/scenarios";
+import StreetNames from "@/components/StreetNames";
 import FreewaySigns from "@/components/FreewaySigns";
 import ManagementOverlays from "@/components/ManagementOverlays";
 import SimControls from "@/components/SimControls";
@@ -345,6 +346,7 @@ export default function Play() {
         <Pedestrians snapshotRef={sim.snapshotRef} />
         <ManagementOverlays />
         <FreewaySigns />
+        <StreetNames />
         {flyover && <LightTrails snapshotRef={sim.snapshotRef} />}
         <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} texas={texasMap} avgMph={sim.metrics.avgSpeedMph} />
         <IncidentPins incidents={sim.metrics.incidents} onDispatch={sim.dispatchWrecker} />

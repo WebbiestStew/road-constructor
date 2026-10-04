@@ -547,6 +547,7 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       displacedLeft: spec.displacedLeft ?? false,
       name: spec.name,
       ref: spec.ref,
+      ramp: spec.ramp,
       nextEdgeIds: [],
       manualLaneMoves: spec.laneMoves ?? null,
       nextMoves: new Map(),

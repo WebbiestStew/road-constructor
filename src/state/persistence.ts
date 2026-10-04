@@ -72,6 +72,7 @@ const edgeSchema = z.object({
   displacedLeft: z.boolean().optional(),
   name: z.string().max(60).optional(),
   ref: z.string().max(20).optional(),
+  ramp: z.boolean().optional(),
 });
 
 const networkSnapshotSchema = z.object({

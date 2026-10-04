@@ -395,6 +395,7 @@ function buildNetwork(city: ConvertConfig, data: OsmData) {
       ...(d.ring ? { isRoundaboutRing: true } : {}),
       ...(d.name ? { name: d.name } : {}),
       ...(d.ref ? { ref: d.ref } : {}),
+      ...(d.link ? { ramp: true } : {}),
     });
     if (d.forward) edges.push(make(`${base}f`, fromId, toId, interior, d.lanesF));
     if (d.backward) edges.push(make(`${base}b`, toId, fromId, [...interior].reverse(), d.lanesB));

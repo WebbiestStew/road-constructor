@@ -38,6 +38,7 @@ speed limits and signal timing, while every car drives for real. Play it on desk
 - **Incidents.** Stalled semis, debris and fender benders block lanes (Events menu, Chaos mode, scripted in levels like
   Clover Crossing). Tap the pin to send a wrecker, which drives the shoulder to the scene; police come to crashes on
   their own.
+- **Street names.** Real street names are painted along the roads and fade in as you zoom, and the road cards show the name.
 - **Soundscape.** Tyre roar near the camera (louder and brighter on wet asphalt), semis engine-braking on downgrades, and
   the expansion-joint clack on viaducts, all attenuated with distance from the camera or chase view.
 - **Drone flyover.** After winning a level, a dusk-to-night flyover with time-lapsed traffic and light trails. Save a
