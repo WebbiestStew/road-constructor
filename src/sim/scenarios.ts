@@ -1,4 +1,4 @@
-import { buildCloverleaf, buildHarborDrive, buildInterchangeSite, buildMidtown } from "./cities";
+import { buildCloverleaf, buildHarborDrive, buildInterchangeSite, buildLeftTurnCrossing, buildMidtown } from "./cities";
 import { REAL_CITY_DATA } from "./real";
 import type { CrashStats, EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
@@ -81,6 +81,8 @@ export interface ScenarioDef {
   real?: boolean;
   /** The real-city data key, for the buildings drawn around its roads. */
   sceneryKey?: string;
+  /** Left turns at signals give way to oncoming traffic in this level (otherwise they run unopposed, as in the classic levels). */
+  leftTurnsYield?: boolean;
   /** Share of traffic that is buses and bikes in this level. Omitted = cars and trucks only. */
   trafficMix?: { bus: number; bike: number };
   /** Trouble that arrives at fixed moments of the run (a surge, a breakdown), so every attempt faces the same thing. */
@@ -861,8 +863,11 @@ const FIRST_SHIFT_NETWORK = withJaywalkers(buildHarborDrive({ speed: true, signa
 const FIRST_SHIFT_PAR = 236;
 const INTERCHANGE_NETWORK = buildInterchangeSite();
 const CLOVERLEAF_NETWORK = buildCloverleaf();
+const LEFT_TURN_NETWORK = buildLeftTurnCrossing();
+/** Vehicles moved in 300 s by the untouched Continuous Flow crossing, the mean of eight seeds in the headless sim. */
+const CONTINUOUS_FLOW_BASELINE = 89;
 /** Vehicles moved in 300 s by the untouched Clover Crossing, the mean of eight seeds in the headless sim. */
-const CLOVER_BASELINE = 270;
+const CLOVER_BASELINE = 258;
 function createFivePointsEvaluator(): ScenarioEvaluator {
   const sustain = createSustainTracker(FP_SUSTAIN_S);
   return (ctx) => {
@@ -1563,7 +1568,25 @@ export const SCENARIOS: ScenarioDef[] = [
     startingBudget: 6_000_000,
     durationS: 300,
     targetAvgSpeedMph: 40,
+    // A semi dies in a freeway lane and a load comes off a truck; a wrecker (tap the pin) clears them far sooner than waiting.
+    scriptedEvents: [
+      { atS: 70, kind: "stall" },
+      { atS: 150, kind: "debris" },
+    ],
     createEvaluator: createRealCityEvaluator(CLOVER_BASELINE, 300),
+  },
+  {
+    id: "continuous-flow",
+    name: "Continuous Flow",
+    tagline: "Half the cars turn left, and each one waits for a gap.",
+    briefing:
+      "Two avenues cross at one big signal. Half the cars turn left, and on a green every left turn gives way to the oncoming traffic, so a few of them hold up everyone behind. Displace the left turns ahead of the junction (the Junctions tool, Continuous flow): they cross over to the far side of the road a little before the light and run with the through traffic, so nobody waits for a gap. It costs money and room, so use it where it pays.",
+    startingNetwork: LEFT_TURN_NETWORK,
+    startingBudget: 2_500_000,
+    durationS: 300,
+    targetAvgSpeedMph: 25,
+    leftTurnsYield: true,
+    createEvaluator: createRealCityEvaluator(CONTINUOUS_FLOW_BASELINE, 300, 1.1, 1.05),
   },
   {
     id: "midtown",

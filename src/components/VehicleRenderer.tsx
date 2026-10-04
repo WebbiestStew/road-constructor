@@ -13,7 +13,7 @@ interface VehicleRendererProps {
   snapshotRef: RefObject<VehicleSnapshot | null>;
 }
 
-const KINDS: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance", "police"];
+const KINDS: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance", "police", "wrecker", "debris"];
 
 /** Copies one vehicle's colour triple into a colour attribute at a slot. */
 function putColor(attr: THREE.BufferAttribute, slot: number, src: Float32Array, from: number): void {
@@ -111,14 +111,14 @@ function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
 
     const src = snapshot.matrices;
     const n = snapshot.activeCount;
-    const used = [0, 0, 0, 0, 0, 0];
+    const used = [0, 0, 0, 0, 0, 0, 0, 0];
     const headArr = head.instanceMatrix.array as Float32Array;
     const tailArr = tail.instanceMatrix.array as Float32Array;
     const shadowArr = shadow.instanceMatrix.array as Float32Array;
 
     for (let i = 0; i < n; i++) {
       const o = i * 16;
-      const code = Math.min(5, Math.max(0, Math.round(src[o + 3])));
+      const code = Math.min(7, Math.max(0, Math.round(src[o + 3])));
       const kind = VEHICLE_KIND_BY_CODE[code];
       const len = src[o + 7];
       const mesh = bodyRefs.current[code];
@@ -132,8 +132,10 @@ function VehicleRenderer({ snapshotRef }: VehicleRendererProps) {
       // Lights and shadow: the same position and heading, scaled to this kind's real size.
       const dims = KIND_DIMS[kind];
       const sl = code === 0 ? len : dims.l;
-      putMatrix(headArr, o, src, o, dims.w, dims.h, sl);
-      putMatrix(tailArr, o, src, o, dims.w, dims.h, sl);
+      // Road debris has no lights to show.
+      const lit = kind === "debris" ? 0 : 1;
+      putMatrix(headArr, o, src, o, dims.w * lit, dims.h * lit, sl * lit);
+      putMatrix(tailArr, o, src, o, dims.w * lit, dims.h * lit, sl * lit);
       putMatrix(shadowArr, o, src, o, dims.w, dims.h, sl);
       putColor(tail.instanceColor, i, snapshot.taillightColors, i);
     }

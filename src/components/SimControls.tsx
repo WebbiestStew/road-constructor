@@ -34,6 +34,8 @@ import SettingsMenu from "./hud/SettingsMenu";
 import KeyboardRoads from "./KeyboardRoads";
 import DayClock from "./hud/DayClock";
 import PhotoOverlay from "./hud/PhotoOverlay";
+import CinematicOverlay from "./hud/CinematicOverlay";
+import { useFlyover } from "@/lib/cinematic";
 import { usePhotoMode } from "@/lib/photoMode";
 import Tutorial from "./hud/Tutorial";
 
@@ -45,11 +47,12 @@ export default function SimControls({
   scenarioRunner: UseScenarioRunnerReturn;
 }) {
   const photo = usePhotoMode();
+  const flyover = useFlyover();
   // Photo mode: a clean frame. Toasts stay (for "saved"); everything else steps aside.
   if (photo) {
     return (
       <div className="pointer-events-none absolute inset-0 z-10">
-        <PhotoOverlay />
+        {flyover ? <CinematicOverlay info={flyover} /> : <PhotoOverlay />}
         <ToastHost />
       </div>
     );

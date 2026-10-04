@@ -305,3 +305,27 @@ export function buildCloverleaf(): NetworkSnapshot {
   }
   return { nodes: [...b.nodes.values()], edges: b.edges };
 }
+
+/**
+ * Continuous Flow: one big signalised crossing of two avenues where a third of the cars turn left. On a green they give
+ * way to the oncoming traffic, so the left turners and the cars stuck behind them are what clog it.
+ * Displacing the left turns ahead of the junction (the Junctions tool) lets them run with the through traffic.
+ */
+export function buildLeftTurnCrossing(): NetworkSnapshot {
+  const b = new Builder();
+  const reach = 700;
+  const c = b.node("J", 0, 0);
+  // Every car comes in on the east-west avenue and leaves on the north or south street, so half of them turn left across the other direction's flow.
+  const arms: [string, number, number, ZoneSpec | undefined, ZoneSpec | undefined][] = [
+    ["W", -reach, 0, ENTRY(1100), undefined],
+    ["E", reach, 0, ENTRY(1100), undefined],
+    ["N", 0, -reach, undefined, DEST],
+    ["S", 0, reach, undefined, DEST],
+  ];
+  for (const [name, x, z, entry, exit] of arms) {
+    const end = b.node(`arm${name}`, x, z);
+    b.road(0, `a${name}`, end, c, "street", "ground", { forward: entry, backward: exit });
+  }
+  addSignal(b, c, 24, 2);
+  return { nodes: [...b.nodes.values()], edges: b.edges };
+}

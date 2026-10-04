@@ -23,6 +23,8 @@ export const KIND_DIMS: Record<VehicleKind, { w: number; h: number; l: number }>
   bike: { w: 1.6, h: 6.8, l: 6 },
   ambulance: { w: 7, h: 8.4, l: 21 },
   police: { w: 6.3, h: 5.6, l: 16 },
+  wrecker: { w: 8, h: 9.4, l: 28 },
+  debris: { w: 6, h: 2.6, l: 6 },
 };
 
 interface PartOptions {
@@ -155,7 +157,39 @@ function police(): THREE.BufferGeometry {
   ]);
 }
 
-const DETAILED: Record<VehicleKind, () => THREE.BufferGeometry> = { car, truck, bus, bike, ambulance, police };
+/** A tow truck: a cab, a flatbed behind it, an amber light bar and a boom. */
+function wrecker(): THREE.BufferGeometry {
+  return merge([
+    box(7.4, 1.1, 26, 0, 1.3, 0, DARK),
+    box(8, 6.6, 7, 0, 2.4, 9.4, PAINT),
+    box(7.2, 2.2, 0.3, 0, 6.2, 12.9, GLASS),
+    box(7.8, 0.9, 15, 0, 2.4, -4.2, PAINT),
+    box(7.4, 0.35, 15.5, 0, 3.3, -4.2, [0.25, 0.25, 0.28]),
+    box(1, 5.4, 1, 2.4, 3.6, -10.5, [0.9, 0.55, 0.1]),
+    box(2.6, 0.7, 1.2, 0, 9.0, 8.6, [1, 0.65, 0.05]),
+    wheel(1.6, 1.1, 3.4, 10.5),
+    wheel(1.6, 1.1, -3.4, 10.5),
+    wheel(1.6, 1.1, 3.4, -6.5),
+    wheel(1.6, 1.1, -3.4, -6.5),
+    wheel(1.6, 1.1, 3.4, -10.5),
+    wheel(1.6, 1.1, -3.4, -10.5),
+  ]);
+}
+
+/** Road debris: a heap of broken crates and a tyre, low enough to straddle but not to drive over. */
+function debris(): THREE.BufferGeometry {
+  const crate: RGB = [0.46, 0.34, 0.2];
+  const grey: RGB = [0.42, 0.42, 0.45];
+  return merge([
+    box(3.2, 1.3, 2.4, -0.8, 0, 0.3, crate),
+    box(2.4, 1.6, 2.6, 1.2, 0, -0.6, grey),
+    box(1.8, 1.0, 1.6, 0.2, 1.1, -0.1, crate),
+    box(2.6, 0.5, 0.7, -1.6, 0, -1.8, DARK),
+    wheel(1.0, 0.9, 1.9, 1.7),
+  ]);
+}
+
+const DETAILED: Record<VehicleKind, () => THREE.BufferGeometry> = { car, truck, bus, bike, ambulance, police, wrecker, debris };
 
 /** Plain box fallback: same footprint and height, no detail. */
 function plain(kind: VehicleKind): THREE.BufferGeometry {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useRef, type RefObject, memo } from "react";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { assembleNetworkCached } from "@/sim/network";
 import { computePierDescriptors } from "./roadGeometry";
 import { useEditorStore } from "@/state/editorStore";
@@ -17,6 +18,8 @@ interface JointClackDetectorProps {
 const TRIGGER_RADIUS_SQ_FT = 5 * 5;
 /** Minimum real seconds before the same vehicle instance slot can re-trigger, so one lingering near a joint (e.g. stopped in traffic) doesn't spam the sound. */
 const RETRIGGER_COOLDOWN_S = 1.5;
+/** Beyond this distance (ft) from where the player is looking, a joint is too far away to hear. */
+const CLACK_HEARING_FT = 900;
 /** Caps how many clacks can fire in a single frame, so a platoon crossing a joint together doesn't spike the audio. */
 const MAX_CLACKS_PER_FRAME = 3;
 
@@ -32,6 +35,8 @@ function JointClackDetector({ snapshotRef }: JointClackDetectorProps) {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const mode = useEditorStore((s) => s.mode);
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
 
   const jointPositions = useMemo(() => {
     if (mode !== "simulate") return [];
@@ -69,7 +74,12 @@ function JointClackDetector({ snapshotRef }: JointClackDetectorProps) {
         const dx = x - jx;
         const dz = z - jz;
         if (dx * dx + dz * dz <= TRIGGER_RADIUS_SQ_FT) {
-          playExpansionJointClack();
+          // Loudest right under the chase camera, fading with distance from the camera (or from where the player is looking).
+          const rideAlong = useEditorStore.getState().rideAlongActive;
+          const lx = rideAlong || !controls ? camera.position.x : controls.target.x;
+          const lz = rideAlong || !controls ? camera.position.z : controls.target.z;
+          const d = Math.hypot(x - lx, z - lz);
+          playExpansionJointClack(Math.max(0, 1 - d / (rideAlong ? CLACK_HEARING_FT / 2 : CLACK_HEARING_FT)) ** 2);
           cooldowns[i] = RETRIGGER_COOLDOWN_S;
           clacksThisFrame += 1;
           break;

@@ -542,6 +542,9 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       jaywalkers: spec.jaywalkers ?? false,
       busStop: spec.busStop ?? false,
       parking: spec.parking ?? false,
+      vslMph: spec.vslMph ?? null,
+      closedLanes: Array.from({ length: spec.lanes }, (_, i) => (spec.closedLanes ?? []).includes(i)),
+      displacedLeft: spec.displacedLeft ?? false,
       nextEdgeIds: [],
       manualLaneMoves: spec.laneMoves ?? null,
       nextMoves: new Map(),
@@ -704,6 +707,16 @@ function orderMoves(set: Set<LaneMove>): LaneMove[] {
   return (["left", "straight", "right"] as LaneMove[]).filter((m) => set.has(m));
 }
 
+/** The limit drivers actually obey: the gantry's advisory if one is set (never above the posted limit), else the posted limit. */
+export function effectiveSpeedLimitMph(edge: Edge3D): number {
+  return edge.vslMph !== null ? Math.min(edge.vslMph, edge.speedLimitMph) : edge.speedLimitMph;
+}
+
+/** Whether a road gets an overhead gantry: a freeway with room for one. Where it stands: halfway along. */
+export function hasGantry(edge: Edge3D): boolean {
+  return edge.isFreeway && edge.lanes >= 2 && edge.length >= 700 && !edge.isRoundaboutRing && !edge.isTexasTurnaround;
+}
+
 /** Applies a live edit (speed limit and/or lane arrows) to an assembled edge in place. */
 export function patchEdge(
   edge: Edge3D,
@@ -716,6 +729,9 @@ export function patchEdge(
   if (patch.crosswalk !== undefined) edge.crosswalk = patch.crosswalk;
   if (patch.busStop !== undefined) edge.busStop = patch.busStop;
   if (patch.parking !== undefined) edge.parking = patch.parking;
+  if (patch.vslMph !== undefined) edge.vslMph = patch.vslMph;
+  if (patch.closedLanes !== undefined) edge.closedLanes = Array.from({ length: edge.lanes }, (_, i) => patch.closedLanes!.includes(i));
+  if (patch.displacedLeft !== undefined) edge.displacedLeft = patch.displacedLeft;
   computeLaneUse(edge, edgesById);
 }
 

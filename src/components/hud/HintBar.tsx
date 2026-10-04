@@ -11,6 +11,7 @@ const HINTS: Record<EditorTool, string> = {
   speed: "⚡ Click a road and pick a speed limit. Slow stretches back traffic up.",
   street: "🛣️ Click a road to reserve a lane for buses or bikes, make it one-way, or add a pedestrian crossing.",
   transit: "🚌 Click roads in order to draw a bus line. Buses run along it on a timetable and stop at bus stops.",
+  gantry: "🛣️ Click a freeway gantry to post a speed advisory or close a lane ahead of an incident or a merge.",
   junction: "🚦 Click a junction to set priority or a traffic light, and tune its timing.",
   turnaround: "🔁 Click a frontage road — we'll loop a one-way Texas turnaround to the nearest opposing road within 220 ft.",
 };

@@ -14,7 +14,7 @@ import {
 } from "./idm";
 import { distanceToT, fastTangentAt, laneCenterPointAt } from "./laneGeometry";
 import { computeEdgeTrafficStats, type EdgeTrafficStats } from "./los";
-import { assembleNetwork, computeRoute, patchEdge } from "./network";
+import { assembleNetwork, computeRoute, effectiveSpeedLimitMph, hasGantry, patchEdge } from "./network";
 import {
   MAX_VEHICLES,
   SIM_DT,
@@ -29,6 +29,7 @@ import {
   type RoadNetwork,
   type CrashStats,
   type EmergencyStats,
+  type IncidentView,
   type TickStats,
   type TransitLine,
   type VehicleKind,
@@ -79,6 +80,9 @@ interface ApproachEntry {
   edgeId: string;
   priority: number;
   distanceToNode: number;
+  speed: number;
+  /** Where this vehicle goes at the junction. */
+  turn: "left" | "straight" | "right";
 }
 /** Vehicles currently within decision range of each node's stop line. Rebuilt every tick. */
 const nodeApproaches = new Map<string, ApproachEntry[]>();
@@ -115,6 +119,27 @@ let lastWallTimeMs = 0;
 
 /** Multiplies every entry's spawn rate while a scripted surge is on. */
 let demandScale = 1;
+
+/** Whether left turns at signals give way to oncoming traffic. Off for the classic levels; the player sets it per level. */
+let leftTurnsYield = false;
+/** How close (seconds) an oncoming vehicle must be for a left-turner to wait, and how long before the green ends the wait is dropped (the last car or two always get through). */
+const LEFT_GAP_S = 9;
+const LEFT_SNEAK_S = 1.5;
+const LEFT_QUEUE_FT = 140;
+const DISPLACED_LEFT_ZONE_FT = 320;
+/** Left turns made at a junction and the time they spent waiting for a gap, since the run began (counted when the turn is made). */
+let leftTurnsServed = 0;
+let leftTurnWaitTotalS = 0;
+/** Counts one step per tick toward a vehicle's wait, however many times the stop line is looked at in that tick. */
+let stepCounter = 0;
+function markLeftWait(v: VehicleState) {
+  if (v.leftMark === stepCounter) return;
+  v.leftMark = stepCounter;
+  v.leftWaitS += SIM_DT;
+}
+const PERMISSIVE_LEFT_ZONE_FT = 130;
+const PERMISSIVE_LEFT_SPEED_FTPS = mphToFtps(9);
+const DISPLACED_LEFT_SPEED_FTPS = mphToFtps(28);
 
 // ---------------------------------------------------------------------------
 // Weather and the day cycle
@@ -162,6 +187,9 @@ type QueuedEvent =
   | { atS: number; kind: "surgeEnd" }
   | { atS: number; kind: "ambulance" }
   | { atS: number; kind: "crash" }
+  | { atS: number; kind: "stall" }
+  | { atS: number; kind: "debris" }
+  | { atS: number; kind: "fender" }
   | { atS: number; kind: "weatherOn"; weather: Exclude<Weather, "clear"> }
   | { atS: number; kind: "weatherOff" };
 let eventQueue: QueuedEvent[] = [];
@@ -215,6 +243,8 @@ const COLOR_STOP = new THREE.Color(0xef4444);
 /** Body paint palettes, sampled once per vehicle at spawn — a wide mix for sedans, a duller fleet-like set for semis. */
 const SEDAN_PALETTE = [0xf4f4f5, 0x1c1c22, 0x8a8f98, 0xb0281c, 0x2452a6, 0x2f6b3a, 0xc9a13b, 0x5b5f66];
 const AMBULANCE_COLOR = 0xffffff;
+const WRECKER_COLOR = 0xffb020;
+const DEBRIS_COLOR = 0x6b5436;
 const BUS_PALETTE = [0xf2c230, 0x2563eb, 0xdc2626];
 const BIKE_PALETTE = [0xff7a00, 0x00b8a0, 0xe0457b, 0x6d5bd0];
 const TRUCK_PALETTE = [0xf4f4f5, 0xc23b2e, 0x2452a6, 0x8a8f98, 0x1c1c22];
@@ -288,6 +318,10 @@ function acquireVehicle(): VehicleState {
     bodyColorR: 1,
     bodyColorG: 1,
     bodyColorB: 1,
+    shoulder: false,
+    blockedS: 0,
+    leftWaitS: 0,
+    leftMark: -1,
   };
 }
 
@@ -398,6 +432,8 @@ function resetRun() {
   crossingByEdge.clear();
   resetEmergency();
   resetCrashes();
+  leftTurnsServed = 0;
+  leftTurnWaitTotalS = 0;
   nextBusAt.clear();
   scriptedWeather = null;
   gridlockPenaltyTotal = 0;
@@ -485,35 +521,43 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   const isBike = forcedKind === "bike";
   const isAmbulance = forcedKind === "ambulance";
   const isPolice = forcedKind === "police";
-  const isTruck = !isBus && !isBike && !isAmbulance && !isPolice && rng() < 0.15;
+  const isWrecker = forcedKind === "wrecker";
+  const isDebris = forcedKind === "debris";
+  // Responders and debris never touch the random stream that decides who is a truck, so adding an incident to a run
+  // does not reshuffle everyone else's vehicle.
+  const isTruck = !isBus && !isBike && !isAmbulance && !isPolice && !isWrecker && !isDebris && rng() < 0.15;
   v.isTruck = isTruck;
-  v.kind = isBus ? "bus" : isBike ? "bike" : isAmbulance ? "ambulance" : isPolice ? "police" : isTruck ? "truck" : "car";
-  const palette = isBus ? BUS_PALETTE : isBike ? BIKE_PALETTE : isAmbulance || isPolice ? [AMBULANCE_COLOR] : isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
+  v.kind = isBus ? "bus" : isBike ? "bike" : isAmbulance ? "ambulance" : isPolice ? "police" : isWrecker ? "wrecker" : isDebris ? "debris" : isTruck ? "truck" : "car";
+  const palette = isBus ? BUS_PALETTE : isBike ? BIKE_PALETTE : isAmbulance || isPolice ? [AMBULANCE_COLOR] : isWrecker ? [WRECKER_COLOR] : isDebris ? [DEBRIS_COLOR] : isTruck ? TRUCK_PALETTE : SEDAN_PALETTE;
   _spawnColor.set(palette[Math.floor(rng() * palette.length)]);
   v.bodyColorR = _spawnColor.r;
   v.bodyColorG = _spawnColor.g;
   v.bodyColorB = _spawnColor.b;
   v.weightToPowerLbPerHp = isBus ? randRange(190, 240) : isBike ? 8 : isTruck ? randRange(260, 340) : randRange(18, 32);
-  v.length = isBus ? randRange(38, 42) : isBike ? 6 : isAmbulance ? 21 : isPolice ? 16 : isTruck ? randRange(32, 42) : randRange(13, 19);
-  v.maxAccel = isBus ? randRange(2.2, 2.9) : isBike ? randRange(1.2, 1.8) : isAmbulance || isPolice ? 6 : isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
-  v.comfortBrake = isBus ? randRange(4.5, 5.5) : isBike ? 3.5 : isAmbulance || isPolice ? 8 : isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
-  v.passengers = isBus ? Math.round(randRange(22, 42)) : isAmbulance || isPolice ? 0 : isBike || isTruck ? 1 : 1.4;
+  v.length = isBus ? randRange(38, 42) : isBike ? 6 : isAmbulance ? 21 : isPolice ? 16 : isWrecker ? 28 : isDebris ? 5 : isTruck ? randRange(32, 42) : randRange(13, 19);
+  v.maxAccel = isBus ? randRange(2.2, 2.9) : isBike ? randRange(1.2, 1.8) : isAmbulance || isPolice || isWrecker ? 6 : isTruck ? randRange(2.6, 3.6) : randRange(3.8, 5.4);
+  v.comfortBrake = isBus ? randRange(4.5, 5.5) : isBike ? 3.5 : isAmbulance || isPolice || isWrecker ? 8 : isTruck ? randRange(5.5, 6.5) : randRange(5.8, 7.6);
+  v.passengers = isBus ? Math.round(randRange(22, 42)) : isAmbulance || isPolice || isWrecker || isDebris ? 0 : isBike || isTruck ? 1 : 1.4;
   v.yieldUntil = 0;
   v.yieldLane = 0;
   v.stopServedEdge = "";
   v.dwellUntil = 0;
   v.maxSpeedFtps = isBike ? mphToFtps(randRange(10, 13)) : Infinity;
   v.jamDistance = isBike ? randRange(2.5, 3.5) : randRange(5.5, 7.5);
-  v.desiredHeadway = isBus || isTruck ? randRange(1.6, 2.0) : isBike ? randRange(0.8, 1.1) : isAmbulance || isPolice ? 0.9 : randRange(1.1, 1.7);
+  v.desiredHeadway = isBus || isTruck ? randRange(1.6, 2.0) : isBike ? randRange(0.8, 1.1) : isAmbulance || isPolice || isWrecker ? 0.9 : randRange(1.1, 1.7);
   v.minGap = v.jamDistance;
-  v.speedFactor = isAmbulance || isPolice ? 1.3 : isBus ? randNormalish(0.92, 0.05) : randNormalish(1.0, 0.12);
-  v.speed = Math.min(Math.min(v.speedFactor, 1.0) * mphToFtps(edge.speedLimitMph) * 0.85, v.maxSpeedFtps);
+  v.speedFactor = isAmbulance || isPolice || isWrecker ? 1.3 : isBus ? randNormalish(0.92, 0.05) : randNormalish(1.0, 0.12);
+  v.speed = Math.min(Math.min(v.speedFactor, 1.0) * mphToFtps(effectiveSpeedLimitMph(edge)) * 0.85, v.maxSpeedFtps);
   v.accel = 0;
   v.laneChangeCooldown = randRange(0, 60);
   v.spawnTime = simTime;
   v.wrongLaneWaitS = 0;
   v.stuckTimeS = 0;
   v.frozenUntil = 0;
+  v.shoulder = false;
+  v.blockedS = 0;
+  v.leftWaitS = 0;
+  v.leftMark = -1;
 
   vehicles.set(v.id, v);
   spawnedTotal++;
@@ -631,7 +675,8 @@ function rebuildNodeApproaches() {
       arr = [];
       nodeApproaches.set(edge.toNodeId, arr);
     }
-    arr.push({ edgeId: edge.id, priority: edge.priority, distanceToNode });
+    const nextId = v.routeEdgeIds[v.routeIndex + 1];
+    arr.push({ edgeId: edge.id, priority: edge.priority, distanceToNode, speed: v.speed, turn: (nextId && edge.nextMoves.get(nextId)) || "straight" });
   }
 }
 
@@ -1012,17 +1057,26 @@ const CRASH_SCENE_RADIUS_FT = 90;
 const CRASH_FOREVER = 1e12;
 const RESPONDER_RETRY_S = 5;
 
+type IncidentKind = "crash" | "stall" | "debris";
+
 interface Incident {
   id: number;
+  kind: IncidentKind;
   edgeId: string;
   distanceAlongEdge: number;
   vehicleIds: number[];
   startedAt: number;
-  /** Sim time at which the police car is sent (after the crash is reported). */
+  /** Sim time at which the police car is sent (after the crash is reported). Crashes only. */
   dispatchAt: number;
   responderId: number | null;
-  /** Set once the police car has reached the scene: when the wreck is towed. */
+  /** The player asked for a wrecker, and the one that was sent (if it has set out). */
+  wreckerRequested: boolean;
+  wreckerId: number | null;
+  wreckerRetryAt: number;
+  /** Set once a responder has reached the scene: when the road is cleared. */
   clearAt: number;
+  /** Stalls and debris clear themselves after this long if nobody comes (a patrol finds them eventually). */
+  autoClearAt: number;
 }
 const incidents: Incident[] = [];
 const responders = new Set<number>();
@@ -1032,6 +1086,14 @@ let crashesCleared = 0;
 let crashTotalClearS = 0;
 let crashLastClearS = 0;
 let crashPending = 0;
+/** Fender benders still to happen, which must be on an elevated road. */
+let fenderPending = 0;
+let stallPending = 0;
+let debrisPending = 0;
+
+const STALL_AUTO_CLEAR_S = 240;
+const DEBRIS_AUTO_CLEAR_S = 300;
+const WRECKER_ON_SCENE_S = 8;
 
 function resetCrashes() {
   incidents.length = 0;
@@ -1041,19 +1103,75 @@ function resetCrashes() {
   crashTotalClearS = 0;
   crashLastClearS = 0;
   crashPending = 0;
+  fenderPending = 0;
+  stallPending = 0;
+  debrisPending = 0;
 }
 
 function crashStats(): CrashStats {
-  return { happened: crashesHappened, cleared: crashesCleared, open: incidents.length, totalClearS: crashTotalClearS, lastClearS: crashLastClearS };
+  const open = incidents.reduce((n, i) => n + (i.kind === "crash" ? 1 : 0), 0);
+  return { happened: crashesHappened, cleared: crashesCleared, open, totalClearS: crashTotalClearS, lastClearS: crashLastClearS };
+}
+
+/** The wrecker state of an incident, for its marker. */
+function wreckerState(inc: Incident): IncidentView["wrecker"] {
+  if (inc.wreckerId === null) return "none";
+  return inc.clearAt > 0 ? "onscene" : "enroute";
+}
+
+const _incPos = new THREE.Vector3();
+const _incTan = new THREE.Vector3();
+const _incRight = new THREE.Vector3();
+
+function incidentViews(): IncidentView[] {
+  if (!network) return [];
+  const out: IncidentView[] = [];
+  for (const inc of incidents) {
+    const edge = network.edgesById.get(inc.edgeId);
+    if (!edge) continue;
+    const first = inc.vehicleIds.length > 0 ? vehicles.get(inc.vehicleIds[0]) : undefined;
+    const lane = first ? first.laneIndex : Math.floor(edge.lanes / 2);
+    laneCenterPointAt(edge, distanceToT(edge, first ? first.distanceAlongEdge : inc.distanceAlongEdge), lane, _incTan, _incRight, _incPos);
+    out.push({
+      id: inc.id,
+      kind: inc.kind,
+      position: [_incPos.x, _incPos.y, _incPos.z],
+      ageS: simTime - inc.startedAt,
+      wrecker: wreckerState(inc),
+      elevated: edge.isElevated,
+    });
+  }
+  return out;
+}
+
+function newIncident(kind: IncidentKind, edgeId: string, distance: number, vehicleIds: number[]): Incident {
+  const inc: Incident = {
+    id: crashSeq++,
+    kind,
+    edgeId,
+    distanceAlongEdge: distance,
+    vehicleIds,
+    startedAt: simTime,
+    dispatchAt: simTime + CRASH_REPORT_DELAY_S,
+    responderId: null,
+    wreckerRequested: false,
+    wreckerId: null,
+    wreckerRetryAt: 0,
+    clearAt: 0,
+    autoClearAt: kind === "stall" ? simTime + STALL_AUTO_CLEAR_S : kind === "debris" ? simTime + DEBRIS_AUTO_CLEAR_S : 0,
+  };
+  incidents.push(inc);
+  return inc;
 }
 
 /** Picks a moving car mid-way along a longish open road, freezes it with the car behind it, and starts the clock. */
-function causeCrash(): boolean {
+function causeCrash(elevatedOnly = false): boolean {
   if (!network) return false;
   const candidates: VehicleState[] = [];
   for (const v of vehicles.values()) {
     const edge = network.edgesById.get(v.edgeId);
-    if (!edge || edge.isRoundaboutRing || edge.length < 220 || v.frozenUntil > simTime || v.speed < 8 || isEmergencyKind(v.kind)) continue;
+    if (!edge || edge.isRoundaboutRing || edge.length < 220 || v.frozenUntil > simTime || v.speed < 8 || isEmergencyKind(v.kind) || v.kind === "debris") continue;
+    if (elevatedOnly && !edge.isElevated) continue;
     const f = v.distanceAlongEdge / edge.length;
     if (f > 0.3 && f < 0.7) candidates.push(v);
   }
@@ -1069,29 +1187,87 @@ function causeCrash(): boolean {
   }
   if (behind && first.distanceAlongEdge - behind.distanceAlongEdge < 140) hit.push(behind);
   for (const v of hit) v.frozenUntil = CRASH_FOREVER;
-  incidents.push({
-    id: crashSeq++,
-    edgeId: first.edgeId,
-    distanceAlongEdge: first.distanceAlongEdge,
-    vehicleIds: hit.map((v) => v.id),
-    startedAt: simTime,
-    dispatchAt: simTime + CRASH_REPORT_DELAY_S,
-    responderId: null,
-    clearAt: 0,
-  });
+  newIncident("crash", first.edgeId, first.distanceAlongEdge, hit.map((v) => v.id));
   crashesHappened++;
   return true;
 }
 
-/** Sends a police car from a random entry, by a route that passes the crash and carries on to an exit. */
-function trySpawnResponder(inc: Incident): boolean {
+/** A semi dies in the middle lane of a freeway (any road, if there is no freeway with a truck on it). */
+function causeStall(): boolean {
   if (!network) return false;
+  const best: VehicleState[] = [];
+  const fallback: VehicleState[] = [];
+  for (const v of vehicles.values()) {
+    const edge = network.edgesById.get(v.edgeId);
+    if (!edge || edge.isRoundaboutRing || edge.length < 260 || v.frozenUntil > simTime || v.speed < 8 || isEmergencyKind(v.kind) || v.kind === "debris" || v.kind === "bike") continue;
+    const f = v.distanceAlongEdge / edge.length;
+    if (f < 0.25 || f > 0.75) continue;
+    const middle = Math.floor((edge.lanes - 1) / 2);
+    if (v.isTruck && edge.isFreeway && v.laneIndex === middle) best.push(v);
+    else if (v.isTruck) fallback.push(v);
+    else if (edge.isFreeway) fallback.push(v);
+  }
+  const pool = best.length > 0 ? best : fallback;
+  if (pool.length === 0) return false;
+  const pick = pool[Math.floor(rng() * pool.length)];
+  pick.frozenUntil = CRASH_FOREVER;
+  newIncident("stall", pick.edgeId, pick.distanceAlongEdge, [pick.id]);
+  return true;
+}
+
+/** Debris lands in a lane of an open road and sits there. */
+function causeDebris(): boolean {
+  if (!network) return false;
+  const edges = network.edges.filter((e) => !e.isRoundaboutRing && !e.isTexasTurnaround && e.length >= 300 && vehicles.size < maxVehicles);
+  if (edges.length === 0) return false;
+  // Prefer roads that are carrying traffic, so the player has something to react to.
+  const busy = edges.filter((e) => (laneOccupancy.get(e.id)?.reduce((n, l) => n + l.length, 0) ?? 0) >= 2);
+  const pool = busy.length > 0 ? busy : edges;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const edge = pool[Math.floor(rng() * pool.length)];
+    const lane = Math.floor(rng() * edge.lanes);
+    const dist = edge.length * (0.4 + rng() * 0.2);
+    const occupied = (laneOccupancy.get(edge.id)?.[lane] ?? []).some((id) => {
+      const o = vehicles.get(id);
+      return o && Math.abs(o.distanceAlongEdge - dist) < 50;
+    });
+    if (occupied) continue;
+    const before = spawnedTotal;
+    spawnVehicle(edge, lane, [edge.id], edge.id, "debris");
+    spawnedTotal = before; // litter is not traffic
+    const v = vehicles.get(nextVehicleId - 1)!;
+    v.distanceAlongEdge = dist;
+    v.speed = 0;
+    v.frozenUntil = CRASH_FOREVER;
+    newIncident("debris", edge.id, dist, [v.id]);
+    return true;
+  }
+  return false;
+}
+
+/** Sends a responder (a police car, or a wrecker) from an entry, by a route that passes the incident and carries on to an exit. */
+function trySpawnResponder(inc: Incident, kind: "police" | "wrecker"): number | null {
+  if (!network) return null;
   const entries = network.edges.filter((e) => e.zone?.type === "entry");
   const destinations = network.edges.filter((e) => e.zone?.type === "destination");
-  if (entries.length === 0 || destinations.length === 0) return false;
-  const start = Math.floor(rng() * entries.length);
-  for (let k = 0; k < entries.length; k++) {
-    const entry = entries[(start + k) % entries.length];
+  if (entries.length === 0 || destinations.length === 0) return null;
+  // A wrecker is sent from the entry nearest the scene; a police car from wherever it happens to be.
+  let order: Edge3D[];
+  if (kind === "wrecker") {
+    const lengthOf = (route: string[]) => route.reduce((n, id) => n + (network!.edgesById.get(id)?.length ?? 0), 0);
+    order = entries
+      .map((entry) => {
+        const r = entry.id === inc.edgeId ? [entry.id] : computeRoute(network!, entry.id, inc.edgeId);
+        return { entry, d: r ? lengthOf(r) : Infinity };
+      })
+      .filter((x) => x.d < Infinity)
+      .sort((a, b) => a.d - b.d)
+      .map((x) => x.entry);
+  } else {
+    const start = Math.floor(rng() * entries.length);
+    order = entries.map((_, k) => entries[(start + k) % entries.length]);
+  }
+  for (const entry of order) {
     const occupancy = laneOccupancy.get(entry.id);
     if (!occupancy) continue;
     const toScene = entry.id === inc.edgeId ? [entry.id] : computeRoute(network, entry.id, inc.edgeId);
@@ -1112,59 +1288,143 @@ function trySpawnResponder(inc: Incident): boolean {
     for (let lane = 0; lane < entry.lanes; lane++) {
       const first = occupancy[lane].length > 0 ? vehicles.get(occupancy[lane][0])?.distanceAlongEdge ?? Infinity : Infinity;
       if (first < MIN_SPAWN_CLEARANCE_FT) continue;
-      spawnVehicle(entry, lane, route, destId, "police");
-      inc.responderId = nextVehicleId - 1;
-      responders.add(inc.responderId);
-      return true;
+      spawnVehicle(entry, lane, route, destId, kind);
+      const id = nextVehicleId - 1;
+      responders.add(id);
+      return id;
     }
   }
-  return false;
+  return null;
+}
+
+/** Whether a responder is close enough to an incident to start work. */
+function atScene(r: VehicleState, inc: Incident): boolean {
+  return r.edgeId === inc.edgeId && Math.abs(r.distanceAlongEdge - inc.distanceAlongEdge) < CRASH_SCENE_RADIUS_FT;
+}
+
+function clearIncident(index: number) {
+  const inc = incidents[index];
+  // Towed away: the vehicles leave without counting as completed trips.
+  for (const id of inc.vehicleIds) {
+    const w = vehicles.get(id);
+    if (w) {
+      releaseVehicle(w);
+      vehicles.delete(id);
+    }
+  }
+  for (const rid of [inc.responderId, inc.wreckerId]) {
+    const r = rid === null ? undefined : vehicles.get(rid);
+    if (r) r.frozenUntil = 0;
+  }
+  if (inc.kind === "crash") {
+    crashesCleared++;
+    crashLastClearS = simTime - inc.startedAt;
+    crashTotalClearS += crashLastClearS;
+  }
+  incidents.splice(index, 1);
 }
 
 function updateCrashes() {
-  if (incidents.length === 0 && crashPending === 0) return;
+  if (incidents.length === 0 && crashPending === 0 && fenderPending === 0 && stallPending === 0 && debrisPending === 0) return;
   while (crashPending > 0) {
     if (causeCrash()) crashPending--;
     else break;
   }
+  while (fenderPending > 0) {
+    if (causeCrash(true)) fenderPending--;
+    else break;
+  }
+  while (stallPending > 0) {
+    if (causeStall()) stallPending--;
+    else break;
+  }
+  while (debrisPending > 0) {
+    if (causeDebris()) debrisPending--;
+    else break;
+  }
   for (let i = incidents.length - 1; i >= 0; i--) {
     const inc = incidents[i];
-    // Dispatch once the crash has been reported, and again if the police car vanished before it got there.
-    if (inc.responderId === null) {
-      if (simTime >= inc.dispatchAt && trySpawnResponder(inc)) inc.dispatchAt = simTime + RESPONDER_RETRY_S;
-      continue;
-    }
-    const r = vehicles.get(inc.responderId);
-    if (!r) {
-      responders.delete(inc.responderId);
-      inc.responderId = null;
-      inc.dispatchAt = simTime + RESPONDER_RETRY_S;
-      continue;
-    }
-    if (inc.clearAt === 0) {
-      if (r.edgeId === inc.edgeId && Math.abs(r.distanceAlongEdge - inc.distanceAlongEdge) < CRASH_SCENE_RADIUS_FT) {
-        inc.clearAt = simTime + CRASH_ON_SCENE_S;
-        r.frozenUntil = inc.clearAt;
+
+    // The player's wrecker: sent on request, and again if it vanished before it got there.
+    if (inc.wreckerRequested) {
+      const w = inc.wreckerId === null ? undefined : vehicles.get(inc.wreckerId);
+      if (inc.wreckerId !== null && !w) {
+        responders.delete(inc.wreckerId);
+        inc.wreckerId = null;
+        inc.wreckerRetryAt = simTime + RESPONDER_RETRY_S;
+        if (inc.clearAt > 0 && inc.responderId === null) inc.clearAt = 0;
       }
-      continue;
+      if (inc.wreckerId === null && simTime >= inc.wreckerRetryAt) {
+        inc.wreckerId = trySpawnResponder(inc, "wrecker");
+        inc.wreckerRetryAt = simTime + RESPONDER_RETRY_S;
+      }
     }
-    if (simTime >= inc.clearAt) {
-      // Towed away: the wreck leaves without counting as a completed trip, and the police car drives on.
-      for (const id of inc.vehicleIds) {
-        const w = vehicles.get(id);
-        if (w) {
-          releaseVehicle(w);
-          vehicles.delete(id);
+
+    // Police come to crashes by themselves, once the crash has been reported.
+    if (inc.kind === "crash") {
+      if (inc.responderId === null) {
+        if (simTime >= inc.dispatchAt) {
+          const id = trySpawnResponder(inc, "police");
+          if (id !== null) {
+            inc.responderId = id;
+            inc.dispatchAt = simTime + RESPONDER_RETRY_S;
+          } else inc.dispatchAt = simTime + RESPONDER_RETRY_S;
         }
+      } else if (!vehicles.get(inc.responderId)) {
+        responders.delete(inc.responderId);
+        inc.responderId = null;
+        inc.dispatchAt = simTime + RESPONDER_RETRY_S;
       }
-      r.frozenUntil = 0;
-      crashesCleared++;
-      crashLastClearS = simTime - inc.startedAt;
-      crashTotalClearS += crashLastClearS;
-      incidents.splice(i, 1);
     }
+
+    // Work starts when anyone sent has arrived.
+    if (inc.clearAt === 0) {
+      const police = inc.responderId === null ? undefined : vehicles.get(inc.responderId);
+      const wrecker = inc.wreckerId === null ? undefined : vehicles.get(inc.wreckerId);
+      if (wrecker && atScene(wrecker, inc)) {
+        inc.clearAt = simTime + WRECKER_ON_SCENE_S;
+        wrecker.frozenUntil = inc.clearAt;
+      } else if (police && atScene(police, inc) && inc.kind === "crash") {
+        inc.clearAt = simTime + CRASH_ON_SCENE_S;
+        police.frozenUntil = inc.clearAt;
+      }
+    }
+
+    if (inc.clearAt > 0 && simTime >= inc.clearAt) {
+      clearIncident(i);
+      continue;
+    }
+    // A stall or debris nobody came for is eventually found by a patrol.
+    if (inc.autoClearAt > 0 && inc.clearAt === 0 && simTime >= inc.autoClearAt) clearIncident(i);
   }
 }
+
+/**
+ * A wrecker stuck in a queue it cannot pull out of drives up the shoulder instead, ignoring the cars in its lane,
+ * until the road ahead opens up. (Without this a jam behind a stall keeps the tow truck out of reach, and the jam
+ * never clears.)
+ */
+function updateShoulderMode(v: VehicleState, edge: Edge3D, dt: number) {
+  // Only wreckers: police stuck in a jam is what the Pile-Up level is about, so they still have to fight through it.
+  if (v.kind !== "wrecker") return;
+  if (v.frozenUntil > simTime) {
+    v.shoulder = false;
+    v.blockedS = 0;
+    return;
+  }
+  const limit = mphToFtps(effectiveSpeedLimitMph(edge));
+  if (v.shoulder) {
+    // back to the lane once it is moving freely again
+    if (v.speed > limit * 0.75) v.blockedS = Math.max(0, v.blockedS - dt * 2);
+    else v.blockedS = Math.min(v.blockedS + dt, SHOULDER_AFTER_S + 1);
+    if (v.blockedS <= 0) v.shoulder = false;
+    return;
+  }
+  if (v.speed < limit * 0.4) v.blockedS += dt;
+  else if (v.speed > limit * 0.7) v.blockedS = 0;
+  if (v.blockedS >= SHOULDER_AFTER_S) v.shoulder = true;
+}
+const SHOULDER_AFTER_S = 3;
 
 /** Returns the distance (ft) at which a vehicle must stop for a bus stop, a crossing or a junction it cannot yet enter, or null if clear. */
 function computeVirtualStopDistance(v: VehicleState, edge: Edge3D): number | null {
@@ -1204,6 +1464,7 @@ function junctionStopDistance(v: VehicleState, edge: Edge3D): number | null {
     if (phaseState.phase === "ALLRED" || phaseState.phase !== myGroup) {
       return distanceToNode;
     }
+    if (leftTurnsYield && mustYieldLeft(v, edge, node!.id, control, phaseState, distanceToNode)) return distanceToNode;
     return null;
   }
 
@@ -1218,6 +1479,51 @@ function junctionStopDistance(v: VehicleState, edge: Edge3D): number | null {
   return null;
 }
 
+/**
+ * A left turn on a green light gives way to oncoming traffic that is going straight on or turning left across the
+ * same junction, unless the road has a continuous-flow (displaced) left, where the turn has already crossed over.
+ * The last seconds of the green are free: the car or two waiting in the middle always get through.
+ */
+function mustYieldLeft(v: VehicleState, edge: Edge3D, nodeId: string, control: { groupA: string[]; groupB: string[]; greenDurationS: number }, phase: SignalPhaseState, distanceToNode: number): boolean {
+  if (edge.displacedLeft) return false;
+  const nextId = v.routeEdgeIds[v.routeIndex + 1];
+  if (!nextId || edge.nextMoves.get(nextId) !== "left") return false;
+  if (phase.timer > control.greenDurationS - LEFT_SNEAK_S) return false;
+  const approaches = nodeApproaches.get(nodeId);
+  if (!approaches) return false;
+  const myGroup = control.groupA.includes(edge.id) ? control.groupA : control.groupB;
+  for (const other of approaches) {
+    if (other.edgeId === edge.id || other.turn === "right" || !myGroup.includes(other.edgeId)) continue;
+    const oe = network!.edgesById.get(other.edgeId);
+    if (!oe || !opposes(edge, oe)) continue;
+    // A car about to arrive blocks the turn, and so does a queue still crawling across the stop line.
+    if (other.distanceToNode / Math.max(other.speed, 5) < LEFT_GAP_S || other.distanceToNode < LEFT_QUEUE_FT) { markLeftWait(v); return true; }
+  }
+  return false;
+}
+
+const _oppA = new THREE.Vector3();
+const _oppB = new THREE.Vector3();
+/** True when two roads arrive at a junction from opposite directions. */
+function opposes(a: Edge3D, b: Edge3D): boolean {
+  fastTangentAt(a, 1, _oppA);
+  fastTangentAt(b, 1, _oppB);
+  return _oppA.x * _oppB.x + _oppA.z * _oppB.z < -0.7;
+}
+
+/** Left-turners on a displaced-left road creep through the crossover at a modest speed. */
+function displacedLeftSpeedCapFtps(v: VehicleState, edge: Edge3D): number {
+  if (!edge.displacedLeft) {
+    // With left turns giving way, a driver turning across the junction does it slowly, hunting for a gap and swinging through the tight corner.
+    if (!leftTurnsYield || edge.length - v.distanceAlongEdge > PERMISSIVE_LEFT_ZONE_FT) return Infinity;
+    const next = v.routeEdgeIds[v.routeIndex + 1];
+    return next && edge.nextMoves.get(next) === "left" ? PERMISSIVE_LEFT_SPEED_FTPS : Infinity;
+  }
+  if (edge.length - v.distanceAlongEdge > DISPLACED_LEFT_ZONE_FT) return Infinity;
+  const nextId = v.routeEdgeIds[v.routeIndex + 1];
+  return nextId && edge.nextMoves.get(nextId) === "left" ? DISPLACED_LEFT_SPEED_FTPS : Infinity;
+}
+
 // ---------------------------------------------------------------------------
 // Leader gap lookup (same-lane, crossing edge boundary via the vehicle's own route, and junction stop lines)
 // ---------------------------------------------------------------------------
@@ -1229,9 +1535,25 @@ interface GapInfo {
 
 /** Lanes of `edge` that may take the vehicle's next route edge (index 0 = leftmost), or null if any lane may. */
 function allowedLanesForNext(v: VehicleState, edge: Edge3D): boolean[] | null {
-  if (!edge.laneAllowed) return null;
   const nextRouteEdgeId = v.routeEdgeIds[v.routeIndex + 1];
-  return nextRouteEdgeId ? (edge.laneAllowed.get(nextRouteEdgeId) ?? null) : null;
+  const turn = edge.laneAllowed && nextRouteEdgeId ? (edge.laneAllowed.get(nextRouteEdgeId) ?? null) : null;
+  // Closed lanes (a red X on the gantry) are off limits from a warning distance before the gantry onward.
+  if (edge.closedLanes.some(Boolean) && v.distanceAlongEdge >= gantryDistance(edge) - CLOSURE_WARNING_FT && !isEmergencyKind(v.kind)) {
+    const open = edge.closedLanes.map((closed) => !closed);
+    if (!open.some(Boolean)) return turn; // a road can't be closed outright
+    if (!turn) return open;
+    const both = turn.map((ok, i) => ok && open[i]);
+    // If no open lane can make the turn, making the turn wins and the closure is ignored for that driver.
+    return both.some(Boolean) ? both : turn;
+  }
+  return turn;
+}
+
+/** How far ahead of a gantry drivers start leaving a closed lane. */
+const CLOSURE_WARNING_FT = 450;
+/** Where a road's gantry stands: halfway along. */
+function gantryDistance(edge: Edge3D): number {
+  return edge.length * 0.5;
 }
 
 /**
@@ -1253,7 +1575,7 @@ function mapLaneAcross(from: Edge3D, to: Edge3D, lane: number): number {
 
 /** Ambulances and police cars run with their lights on: they ignore signals and crossings, and traffic gives way. */
 function isEmergencyKind(kind: VehicleKind): boolean {
-  return kind === "ambulance" || kind === "police";
+  return kind === "ambulance" || kind === "police" || kind === "wrecker";
 }
 
 /** How fast a driver wants to go relative to the limit: most cruise near it, an ambulance with its siren on well over. */
@@ -1383,8 +1705,9 @@ function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
 
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
   const v0 = Math.min(
-    mphToFtps(edge.speedLimitMph) * cruiseFactor(v) * weatherSpeedMult() * parkingSpeedMult(edge, v),
+    mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(v) * weatherSpeedMult() * parkingSpeedMult(edge, v),
     curvatureSpeedCapFtps(edge, v.distanceAlongEdge),
+    displacedLeftSpeedCapFtps(v, edge),
     v.maxSpeedFtps
   );
   const deltaV = v.speed - gapInfo.leaderSpeed;
@@ -1416,7 +1739,7 @@ const CRAWL_SPEED_FTPS = mphToFtps(10);
 // ---------------------------------------------------------------------------
 
 function pairAccel(followerV: VehicleState, followerDist: number, leader: VehicleState | null, edge: Edge3D): number {
-  const v0 = Math.min(mphToFtps(edge.speedLimitMph) * cruiseFactor(followerV) * weatherSpeedMult() * parkingSpeedMult(edge, followerV), followerV.maxSpeedFtps);
+  const v0 = Math.min(mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(followerV) * weatherSpeedMult() * parkingSpeedMult(edge, followerV), followerV.maxSpeedFtps);
   let gap = NO_LEADER_GAP;
   let leaderSpeed = followerV.speed;
   if (leader) {
@@ -1441,7 +1764,9 @@ function pairAccel(followerV: VehicleState, followerDist: number, leader: Vehicl
 function tryLaneChange(v: VehicleState, edge: Edge3D) {
   if (edge.lanes < 2) return;
   const yielding = v.yieldUntil > simTime;
-  if (v.laneChangeCooldown > 0 && !yielding) {
+  // A driver in a lane that has been closed ahead looks for a gap every tick rather than waiting out the usual pause.
+  const leavingClosed = edge.closedLanes[v.laneIndex] && v.distanceAlongEdge >= gantryDistance(edge) - CLOSURE_WARNING_FT && !isEmergencyKind(v.kind);
+  if (v.laneChangeCooldown > 0 && !yielding && !leavingClosed) {
     v.laneChangeCooldown -= 1;
     return;
   }
@@ -1468,6 +1793,8 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
     if (nearest >= 0) {
       requiredDirection = nearest < v.laneIndex ? -1 : 1;
       mergeUrgency = clamp(1 - distanceToNode / 500, 0.15, 1);
+      // A closed lane is left well before the end of the road, not just near the junction.
+      if (edge.closedLanes[v.laneIndex]) mergeUrgency = Math.max(mergeUrgency, clamp(1 - Math.max(0, gantryDistance(edge) - v.distanceAlongEdge) / CLOSURE_WARNING_FT, 0.4, 1));
     }
   }
 
@@ -1490,7 +1817,7 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
   // desired speed (typically a heavy semi losing the fight against a steep
   // grade, or a cyclist) gets an extra shove toward overtaking, on top of whatever
   // incentive MOBIL's own acceleration-gain math already produces.
-  const followerV0 = mphToFtps(edge.speedLimitMph) * cruiseFactor(v);
+  const followerV0 = mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(v);
   const truckOvertakeBias =
     !v.isTruck && v.kind !== "bike" && oldLeader && (oldLeader.isTruck || oldLeader.kind === "bike") && oldLeader.speed < followerV0 * 0.6 ? 6 : 0;
 
@@ -1500,6 +1827,8 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
   for (const candidateLane of [v.laneIndex - 1, v.laneIndex + 1]) {
     if (candidateLane < 0 || candidateLane >= edge.lanes) continue;
     if (laneForbidden(v, edge, candidateLane)) continue;
+    // Nobody moves into a lane that is closed ahead.
+    if (edge.closedLanes[candidateLane] && !edge.closedLanes[v.laneIndex] && v.distanceAlongEdge >= gantryDistance(edge) - CLOSURE_WARNING_FT && !isEmergencyKind(v.kind)) continue;
     const candArr = lanes[candidateLane];
 
     let insertIdx = 0;
@@ -1532,7 +1861,7 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
 
     const candidateDirection = candidateLane > v.laneIndex ? 1 : -1;
     const extraBias =
-      (requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * 8 : 0) +
+      (requiredDirection !== 0 && candidateDirection === requiredDirection ? mergeUrgency * (leavingClosed ? 14 : 8) : 0) +
       truckOvertakeBias +
       // Pull out of an ambulance's way, and an ambulance swings round anything slow in front of it.
       (yielding && candidateLane !== v.yieldLane ? 12 : 0) +
@@ -1634,6 +1963,9 @@ function runDueEvents() {
     if (e.kind === "breakdown") breakDownOneCar(e.durationS);
     else if (e.kind === "ambulance") ambPending.push(simTime);
     else if (e.kind === "crash") crashPending++;
+    else if (e.kind === "stall") stallPending++;
+    else if (e.kind === "debris") debrisPending++;
+    else if (e.kind === "fender") fenderPending++;
     else if (e.kind === "weatherOn") scriptedWeather = e.weather;
     else if (e.kind === "weatherOff") scriptedWeather = null;
     else if (e.kind === "surge") {
@@ -1648,6 +1980,7 @@ function runDueEvents() {
 
 function step(dt: number) {
   if (!network) return;
+  stepCounter++;
   simTime += dt;
   runDueEvents();
 
@@ -1666,7 +1999,8 @@ function step(dt: number) {
     if (!edge) continue;
     updateWrongLaneTimer(v, edge, dt);
     updateBusDwell(v, edge);
-    const gapInfo = findLeaderGapForVehicle(v, edge);
+    updateShoulderMode(v, edge, dt);
+    const gapInfo = v.shoulder ? { gap: NO_LEADER_GAP, leaderSpeed: v.speed } : findLeaderGapForVehicle(v, edge);
     v.accel = idmAccelForVehicle(v, edge, gapInfo);
     if (v.frozenUntil > simTime) v.accel = -30; // broken down: hold still
   }
@@ -1721,6 +2055,11 @@ function step(dt: number) {
         toRemove.push(v.id);
         break;
       }
+      if (currentEdge.nextMoves.get(nextEdgeId) === "left" && (incomingEdgeCountByNode.get(currentEdge.toNodeId) ?? 0) > 1) {
+        leftTurnsServed++;
+        leftTurnWaitTotalS += v.leftWaitS;
+      }
+      v.leftWaitS = 0;
       v.edgeId = nextEdgeId;
       v.laneIndex = mapLaneAcross(currentEdge, nextEdge, v.laneIndex);
       v.distanceAlongEdge = overflow;
@@ -1734,8 +2073,10 @@ function step(dt: number) {
     if (v) {
       // Only trips that actually reached their destination count toward
       // throughput — a gridlock-forced removal is a penalty, not a completion.
-      if (v.kind === "police") {
+      if (v.kind === "police" || v.kind === "wrecker") {
         responders.delete(id);
+      } else if (v.kind === "debris") {
+        // litter that somehow left its road: not a trip
       } else if (v.kind === "ambulance") {
         if (!gridlockRemoved.has(id)) recordAmbulanceArrival(v);
         ambulances.delete(id);
@@ -1759,6 +2100,12 @@ function step(dt: number) {
 // ---------------------------------------------------------------------------
 // Output buffer writing
 // ---------------------------------------------------------------------------
+
+/** Semis braking hard on a downgrade, as of the last snapshot. */
+const jakeBrakePositions: [number, number, number][] = [];
+const MAX_JAKE_BRAKES = 10;
+const JAKE_BRAKE_DECEL_FTPS2 = -1.3;
+const JAKE_BRAKE_SLOPE = -0.012;
 
 /** Green(blue) >80% of the limit, amber 40-80%, red below 40% — matches the spec's 3-tier congestion coloring, substituting blue for green so the free-flow/stopped contrast survives red-green colorblindness. */
 function speedColorInto(ratio: number, out: THREE.Color) {
@@ -1795,6 +2142,7 @@ function writeSnapshot(
   const gridlockMarkers: [number, number, number][] = [];
   const incidentMarkers: [number, number, number][] = [];
   const ambulancePositions: [number, number, number][] = [];
+  jakeBrakePositions.length = 0;
   let i = 0;
   let speedSum = 0;
   for (const v of vehicles.values()) {
@@ -1822,10 +2170,15 @@ function writeSnapshot(
     // The renderer builds each kind of vehicle's own shape, standing on the road: the matrix carries only where it is
     // and which way it faces, plus two spare slots (below) for what kind it is and how long.
     _pos.y += 0.1;
+    if (v.shoulder) _pos.addScaledVector(_right, (edge.lanes * edge.laneWidthFt) / 2 + 3.5);
 
-    const broken = v.frozenUntil > simTime && v.kind !== "police";
+    const broken = v.frozenUntil > simTime && v.kind !== "police" && v.kind !== "wrecker" && v.kind !== "debris";
+    // A loaded semi slowing down a long hill brakes with its engine: a rumble the sound layer plays near the camera.
+    if (v.kind === "truck" && v.accel < JAKE_BRAKE_DECEL_FTPS2 && v.speed > 25 && jakeBrakePositions.length < MAX_JAKE_BRAKES && edgeSinThetaAt(edge, v.distanceAlongEdge) < JAKE_BRAKE_SLOPE) {
+      jakeBrakePositions.push([_pos.x, _pos.y, _pos.z]);
+    }
     if (v.kind === "ambulance") ambulancePositions.push([_pos.x, _pos.y, _pos.z]);
-    if (broken) {
+    if (broken || v.kind === "debris") {
       incidentMarkers.push([_pos.x, _pos.y, _pos.z]);
     } else if (v.stuckTimeS >= GRIDLOCK_WARNING_S) {
       gridlockMarkers.push([_pos.x, _pos.y, _pos.z]);
@@ -1840,13 +2193,19 @@ function writeSnapshot(
     buf.matrices[i * 16 + 3] = VEHICLE_KIND_CODE[v.kind];
     buf.matrices[i * 16 + 7] = v.length;
 
-    const speedLimitFtps = mphToFtps(edge.speedLimitMph);
+    const speedLimitFtps = mphToFtps(effectiveSpeedLimitMph(edge));
     const ratio = v.speed / speedLimitFtps;
     if (broken) {
       // Hazard red, whatever the paint or heatmap would say.
       buf.colors[i * 3] = 1;
       buf.colors[i * 3 + 1] = 0.12;
       buf.colors[i * 3 + 2] = 0.12;
+    } else if (v.kind === "wrecker") {
+      // Amber, flashing.
+      const on = Math.floor(simTime * 3) % 2 === 0;
+      buf.colors[i * 3] = on ? 1 : 0.55;
+      buf.colors[i * 3 + 1] = on ? 0.72 : 0.38;
+      buf.colors[i * 3 + 2] = on ? 0.1 : 0.05;
     } else if (v.kind === "police") {
       // Blue and white, four times a second.
       const blue = Math.floor(simTime * 4) % 2 === 0;
@@ -1994,6 +2353,8 @@ function postSnapshot(forceStats: boolean) {
     emergency: emergencyStats(),
     crashes: crashStats(),
     ambulances: ambulancePositions,
+    incidents: incidentViews(),
+    jakeBrakes: jakeBrakePositions.slice(),
     weather: currentWeather(),
     clockHour: clockHour(),
     stats,
@@ -2088,6 +2449,19 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
     case "crash":
       crashPending++;
       break;
+    case "incident":
+      if (msg.kind === "stall") stallPending++;
+      else if (msg.kind === "debris") debrisPending++;
+      else fenderPending++;
+      break;
+    case "dispatchWrecker": {
+      const inc = incidents.find((i) => i.id === msg.incidentId);
+      if (inc && !inc.wreckerRequested) inc.wreckerRequested = true;
+      break;
+    }
+    case "setLeftTurnsYield":
+      leftTurnsYield = msg.enabled;
+      break;
     case "setTransit":
       transitLines = msg.lines;
       for (const id of Array.from(nextBusAt.keys())) if (!transitLines.some((l) => l.id === id)) nextBusAt.delete(id);
@@ -2106,6 +2480,7 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       for (const e of msg.events) {
         if (e.kind === "ambulance") eventQueue.push({ atS: e.atS, kind: "ambulance" });
         else if (e.kind === "crash") eventQueue.push({ atS: e.atS, kind: "crash" });
+        else if (e.kind === "stall" || e.kind === "debris" || e.kind === "fender") eventQueue.push({ atS: e.atS, kind: e.kind });
         else if (e.kind === "weather") {
           eventQueue.push({ atS: e.atS, kind: "weatherOn", weather: e.weather });
           eventQueue.push({ atS: e.atS + e.durationS, kind: "weatherOff" });
@@ -2140,7 +2515,7 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
 // The headless harness sets this before importing the worker to get at the live state when diagnosing jams.
 const debugSlot = (globalThis as { __simDebug?: Record<string, unknown> }).__simDebug;
 if (debugSlot) {
-  debugSlot.state = () => ({ vehicles, network, laneOccupancy, signalPhaseState, nodeApproaches, simTime });
+  debugSlot.state = () => ({ vehicles, network, laneOccupancy, signalPhaseState, nodeApproaches, simTime, incidents, leftStats: () => ({ served: leftTurnsServed, waitS: leftTurnWaitTotalS }) });
   debugSlot.stopFor = (v: VehicleState, edge: Edge3D) => ({
     junction: junctionStopDistance(v, edge),
     crossing: crossingStopDistance(v, edge),

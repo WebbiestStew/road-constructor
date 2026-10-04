@@ -397,6 +397,16 @@ export function IconSpeedSign(props: IconProps) {
   );
 }
 
+export function IconGantry(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 21V7M21 21V7M3 7h18" />
+      <path d="M8 10.5l2.5 3M10.5 10.5l-2.5 3" />
+      <path d="M15.5 10.5v3.5M14 12.5l1.5 1.7 1.5-1.7" />
+    </svg>
+  );
+}
+
 export function IconJunction(props: IconProps) {
   return (
     <svg {...base} {...props}>

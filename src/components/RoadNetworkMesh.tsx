@@ -661,7 +661,7 @@ const EdgeGroup = memo(function EdgeGroup({
       store.extendTransit(edge.id);
       return;
     }
-    if (store.tool === "lanes" || store.tool === "speed" || store.tool === "street") {
+    if (store.tool === "lanes" || store.tool === "speed" || store.tool === "street" || store.tool === "gantry") {
       store.setSelection({ kind: "edge", id: edge.id });
       return;
     }
@@ -1051,12 +1051,12 @@ export default function RoadNetworkMesh({
             <ProblemMarker key={`problem-${edge.id}`} edge={edge} />
           ))}
 
-      {mode === "simulate" &&
+      {mode === "simulate" && !photo &&
         (incidentMarkers ?? []).map((position, i) => (
           <GridlockMarker key={`incident-${i}`} position={position} />
         ))}
 
-      {mode === "simulate" &&
+      {mode === "simulate" && !photo &&
         (gridlockMarkers ?? []).map((position, i) => (
           <GridlockMarker key={`gridlock-${i}`} position={position} />
         ))}

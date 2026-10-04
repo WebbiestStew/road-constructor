@@ -26,6 +26,19 @@ speed limits and signal timing, while every car drives for real. Play it on desk
 - **Clover Crossing.** A cloverleaf interchange designed for the game, not taken from a map: a freeway climbs over
   another, four loops carry the left turns and four outer ramps the right turns, and the weaves between them are the
   puzzle.
+- **Continuous-flow lefts.** With left turns giving way to oncoming traffic, a few waiting cars hold up a whole
+  approach. The Junctions tool can displace a left turn ahead of a signalised junction: the turners cross over at a
+  small signal and run with the through traffic, and nobody waits for a gap. The *Continuous Flow* level is built
+  around it.
+- **Gantries.** Freeway stretches carry overhead gantries (Gantries tool, `G`): post a speed advisory to smooth a
+  shockwave, or close a lane with a red X, and drivers merge out a quarter mile ahead.
+- **Incidents.** Stalled semis, debris and fender benders block lanes (Events menu, Chaos mode, scripted in levels like
+  Clover Crossing). Tap the pin to send a wrecker, which drives the shoulder to the scene; police come to crashes on
+  their own.
+- **Soundscape.** Tyre roar near the camera (louder and brighter on wet asphalt), semis engine-braking on downgrades, and
+  the expansion-joint clack on viaducts, all attenuated with distance from the camera or chase view.
+- **Drone flyover.** After winning a level, a dusk-to-night flyover with time-lapsed traffic and light trails. Save a
+  clip or copy a link to challenge a friend.
 - **Campaign, daily challenge and sandbox.** Hand-built levels with par-based stars, scripted trouble (a stalled
   car, a stadium letting out), a seeded daily scenario, and a no-money-limit sandbox.
 - **Real merges and exits.** Where a ramp joins or leaves a bigger road, its pavement rides alongside as an added

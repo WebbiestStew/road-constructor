@@ -33,7 +33,7 @@ export default function ChaosDirector({ sim }: { sim: UseTrafficSimulationReturn
   const rushUntil = useRef<number | null>(null);
   const rushBase = useRef<Map<string, number> | null>(null);
   const lastIncidents = useRef(0);
-  const { setDemand, triggerBreakdown, triggerAmbulance, triggerCrash } = sim;
+  const { setDemand, triggerBreakdown, triggerAmbulance, triggerCrash, triggerIncident } = sim;
 
   // Put entry demand back exactly as it was.
   const endRush = useRef(() => {});
@@ -80,10 +80,12 @@ export default function ChaosDirector({ sim }: { sim: UseTrafficSimulationReturn
       triggerCrash();
     } else if (Math.random() < 0.35) {
       triggerAmbulance();
-    } else {
+    } else if (Math.random() < 0.5) {
       triggerBreakdown(BREAKDOWN_S);
+    } else {
+      triggerIncident(((["stall", "debris", "fender"]) as const)[Math.floor(Math.random() * 3)]);
     }
-  }, [live, simTime, setDemand, triggerBreakdown, triggerAmbulance, triggerCrash]);
+  }, [live, simTime, setDemand, triggerBreakdown, triggerAmbulance, triggerCrash, triggerIncident]);
 
   // The worker confirms a breakdown by listing it; announce each new one.
   const incidents = sim.metrics.incidentMarkers.length;

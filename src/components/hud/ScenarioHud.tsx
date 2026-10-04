@@ -12,6 +12,7 @@ import { IconClock, IconFlag, IconStar } from "./icons";
 import PlaceSearch from "./PlaceSearch";
 import DailyBoard from "./DailyBoard";
 import { makeShareCard, shareOrDownload } from "@/lib/shareCard";
+import { startFlyover } from "@/lib/cinematic";
 import { challengerName, encodeChallenge, setActiveChallenge, useActiveChallenge } from "@/lib/challenge";
 import type { NetworkSnapshot } from "@/sim/types";
 import type { SceneryData } from "@/sim/osm/scenery";
@@ -305,6 +306,33 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
             className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-rose-400 to-orange-500 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
           >
             ⚔️ Challenge a friend to beat {results.score}
+          </button>
+        )}
+        {results.won && (
+          <button
+            type="button"
+            onClick={() => {
+              const from = challengerName();
+              const isCustom = scenario.id.startsWith(CHALLENGE_PREFIX);
+              const score = results.score ?? 0;
+              startFlyover({
+                name: scenario.name,
+                stars: results.stars,
+                summary: results.summaryLines[0] ?? "",
+                makeLink:
+                  score > 0
+                    ? () =>
+                        encodeChallenge(
+                          isCustom
+                            ? { kind: "custom", name: scenario.name.slice(0, 40), network: scenario.startingNetwork, from, target: score }
+                            : { kind: "level", id: scenario.id, from, target: score }
+                        )
+                    : null,
+              });
+            }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-500 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
+          >
+            🎬 {results.stars === 3 ? "Watch your 3★ flyover" : "Drone flyover at dusk"}
           </button>
         )}
         {results.won && (

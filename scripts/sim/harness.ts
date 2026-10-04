@@ -1,6 +1,6 @@
 // Runs the real simulation worker in Node: stub `self`, import it, drive it with messages.
 // src/sim has no DOM or React dependencies, so this is the same code the browser runs.
-import type { NetworkSnapshot, WorkerInMessage, WorkerOutMessage } from "../../src/sim/types";
+import type { IncidentView, NetworkSnapshot, WorkerInMessage, WorkerOutMessage } from "../../src/sim/types";
 
 export interface Tick {
   simTime: number;
@@ -9,6 +9,8 @@ export interface Tick {
   trips: number;
   people: number;
   problems: string[];
+  incidents: IncidentView[];
+  jakeBrakes: number;
 }
 
 export async function createSim() {
@@ -23,6 +25,8 @@ export async function createSim() {
       avgSpeedFtS: number;
       completedTripsTotal: number;
       peopleMovedTotal?: number;
+      incidents?: IncidentView[];
+      jakeBrakes?: unknown[];
       stats?: { problemEdgeIds: string[] };
     };
     last = {
@@ -32,6 +36,8 @@ export async function createSim() {
       trips: t.completedTripsTotal,
       people: t.peopleMovedTotal ?? 0,
       problems: t.stats?.problemEdgeIds ?? last?.problems ?? [],
+      incidents: t.incidents ?? [],
+      jakeBrakes: t.jakeBrakes?.length ?? 0,
     };
   };
   await import("../../src/sim/worker");

@@ -63,7 +63,7 @@ function EventsMenu({ sim }: { sim: UseTrafficSimulationReturn }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        title="Events: ambulance, crash, chaos, weather, day cycle"
+        title="Events: ambulance, crash, stalls, debris, chaos, weather, day cycle"
         className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
           active ? "bg-gradient-to-br from-amber-400 to-red-500 text-white shadow" : "bg-black/5 text-zinc-600 hover:text-zinc-900"
         }`}
@@ -77,6 +77,15 @@ function EventsMenu({ sim }: { sim: UseTrafficSimulationReturn }) {
           </button>
           <button type="button" className={item} onClick={() => { sim.triggerCrash(); setOpen(false); }}>
             💥 <span>Cause a crash</span>
+          </button>
+          <button type="button" className={item} onClick={() => { sim.triggerIncident("stall"); setOpen(false); }}>
+            🚛 <span>Stall an 18-wheeler</span>
+          </button>
+          <button type="button" className={item} onClick={() => { sim.triggerIncident("debris"); setOpen(false); }}>
+            🧱 <span>Drop debris on the road</span>
+          </button>
+          <button type="button" className={item} onClick={() => { sim.triggerIncident("fender"); setOpen(false); }}>
+            🚗 <span>Fender bender</span>
           </button>
           <button type="button" className={`${item} ${chaos ? "bg-amber-100" : ""}`} aria-pressed={chaos} onClick={() => setChaos(!chaos)}>
             🎲 <span>Chaos mode {chaos ? "(on)" : ""}</span>

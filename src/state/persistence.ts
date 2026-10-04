@@ -67,6 +67,9 @@ const edgeSchema = z.object({
   jaywalkers: z.boolean().optional(),
   busStop: z.boolean().optional(),
   parking: z.boolean().optional(),
+  vslMph: z.number().optional(),
+  closedLanes: z.array(z.number()).optional(),
+  displacedLeft: z.boolean().optional(),
 });
 
 const networkSnapshotSchema = z.object({

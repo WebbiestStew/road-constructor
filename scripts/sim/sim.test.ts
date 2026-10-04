@@ -111,3 +111,40 @@ test("Clover Crossing: the untouched interchange earns one star, and a second la
   assert.equal(stars(base), 1, `untouched moved ${base}`);
   assert.equal(stars(fixed), 3, `ramps widened moved ${fixed}`);
 });
+
+// ---------------------------------------------------------------------------
+// Incidents, gantries and continuous-flow lefts (scripts/sim/features.ts).
+// ---------------------------------------------------------------------------
+
+function feature(arg: string): Record<string, number | string | null> {
+  const out = execFileSync("npx", ["tsx", "scripts/sim/features.ts", arg], { encoding: "utf8" });
+  return JSON.parse(out.trim().split("\n").pop()!);
+}
+
+test("a stalled semi blocks the road until a wrecker comes, and sending one clears it far sooner", () => {
+  const waited = feature("stall");
+  const sent = feature("stall:10");
+  assert.equal(waited.opened, 1, "the scripted stall should open an incident");
+  assert.ok(typeof sent.clearedAtS === "number", "a dispatched wrecker should clear the stall");
+  const sentAt = sent.clearedAtS as number;
+  const waitedAt = (waited.clearedAtS as number | null) ?? Infinity;
+  assert.ok(sentAt <= 60 + 10 + 110, `wrecker took until ${sentAt}s`);
+  assert.ok(waitedAt > sentAt, `waiting (${waitedAt}s) should be slower than dispatching (${sentAt}s)`);
+});
+
+test("closing a lane at a gantry keeps drivers out of it, and an advisory slows the road", () => {
+  const open = feature("none");
+  const closed = feature("closure");
+  assert.ok((open.share as number) > 0.2, `lane 1 carries only ${open.share} when open`);
+  assert.ok((closed.share as number) < 0.1, `lane 1 still carries ${closed.share} when closed`);
+  const slow = feature("vsl:35");
+  assert.ok((slow.avgMph as number) < (open.avgMph as number), `35 mph advisory: ${slow.avgMph} vs ${open.avgMph}`);
+});
+
+test("Continuous Flow: yielding left turns cost throughput, and displaced lefts win it back", () => {
+  const seeds = [1337, 22];
+  const mean = (mode: string) => seeds.reduce((sum, s) => sum + (feature(`cross:${mode}:${s}`).trips as number), 0) / seeds.length;
+  const yielding = mean("yield");
+  const displaced = mean("cfi");
+  assert.ok(displaced > yielding * 1.08, `displaced ${displaced} vs yielding ${yielding}`);
+});

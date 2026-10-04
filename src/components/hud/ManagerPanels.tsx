@@ -2,15 +2,17 @@
 
 import { useMemo, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { assembleCached } from "@/sim/assembleCache";
+import { hasGantry } from "@/sim/network";
 import { ROAD_CLASSES, maxSpeedLimitFor } from "@/sim/roadClasses";
 import { LANE_MOVES, type LaneMove, type ReservedLane } from "@/sim/types";
-import { CLASSIC_MIX, MIN_BUS_STOP_ROAD_FT, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
+import { CLASSIC_MIX, DISPLACED_LEFT_COST, MIN_BUS_STOP_ROAD_FT, MIN_DISPLACED_LEFT_ROAD_FT, VSL_CHOICES_MPH, isSandboxBudget, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
 import {
   IconTurnLeft,
   IconTurnRight,
   IconGoStraight,
   IconBus,
   IconClose,
+  IconGantry,
   IconJunction,
   IconLanes,
   IconRoad,
@@ -235,6 +237,147 @@ export function SpeedLimitCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean
   );
 }
 
+const COMPASS = ["east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east"];
+
+/** The gantry over a freeway: a speed advisory for the whole stretch, and a red X or green arrow for each lane. */
+export function GantryCard() {
+  const { spec, assembled } = useSelectedEdge();
+  const setSelection = useEditorStore((s) => s.setSelection);
+  const setVslAdvisory = useEditorStore((s) => s.setVslAdvisory);
+  const toggleLaneClosed = useEditorStore((s) => s.toggleLaneClosed);
+  if (!spec || !assembled) return null;
+  const close = () => setSelection(null);
+
+  if (!hasGantry(assembled)) {
+    return (
+      <Shell icon={IconGantry} title="Gantry" subtitle="No gantry on this road" onClose={close}>
+        <p className="text-[11.5px] font-semibold leading-snug text-zinc-600">
+          Gantries span freeway stretches of at least two lanes and 700 ft. Pick one of the roads with signs over it.
+        </p>
+      </Shell>
+    );
+  }
+
+  const closed = new Set(spec.closedLanes ?? []);
+  return (
+    <Shell
+      icon={IconGantry}
+      title="Gantry"
+      subtitle={`${ROAD_CLASSES[spec.roadClassId].label} · posted ${spec.speedLimitMph} mph${spec.vslMph ? ` · advisory ${spec.vslMph}` : ""}`}
+      onClose={close}
+    >
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Speed advisory</span>
+        <div className="grid grid-cols-5 gap-1.5">
+          <button
+            type="button"
+            aria-pressed={!spec.vslMph}
+            onClick={() => setVslAdvisory(spec.id, null)}
+            className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 ${!spec.vslMph ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+          >
+            Off
+          </button>
+          {VSL_CHOICES_MPH.map((mph) => {
+            const tooFast = mph >= spec.speedLimitMph;
+            const active = spec.vslMph === mph;
+            return (
+              <button
+                key={mph}
+                type="button"
+                aria-pressed={active}
+                disabled={tooFast}
+                onClick={() => setVslAdvisory(spec.id, mph)}
+                className={`font-display rounded-full border-[3px] bg-white py-1.5 text-xs font-extrabold tabular-nums text-[#241b3d] transition active:scale-90 disabled:cursor-not-allowed disabled:opacity-30 ${
+                  active ? "border-amber-500 shadow-[0_0_0_3px_rgba(245,158,11,0.3)]" : "border-amber-400/60 hover:scale-105"
+                }`}
+              >
+                {mph}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] leading-snug text-zinc-500">
+          A modest advisory just upstream of a bottleneck evens out the stop-and-go waves. Set it too low and you only slow everyone down.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Lanes (left to right)</span>
+        <div className="flex gap-1 rounded-xl bg-[#3a4155] p-1.5">
+          {Array.from({ length: spec.lanes }).map((_, lane) => {
+            const isClosed = closed.has(lane);
+            return (
+              <button
+                key={lane}
+                type="button"
+                aria-pressed={isClosed}
+                title={isClosed ? `Reopen lane ${lane + 1}` : `Close lane ${lane + 1}`}
+                onClick={() => toggleLaneClosed(spec.id, lane)}
+                className={`flex h-14 flex-1 flex-col items-center justify-center rounded-md border-2 text-lg font-black leading-none transition active:scale-95 ${
+                  isClosed ? "border-red-400 bg-red-950 text-red-500" : "border-emerald-400/70 bg-[#10231a] text-emerald-400"
+                }`}
+              >
+                {isClosed ? "✕" : "↓"}
+                <span className="mt-1 text-[8.5px] font-bold uppercase tracking-wide opacity-80">{isClosed ? "closed" : "open"}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] leading-snug text-zinc-500">
+          Drivers see the red X a quarter mile ahead and merge out early. Close the lane that holds a stalled truck, or one that squeezes into a merge.
+        </p>
+      </div>
+    </Shell>
+  );
+}
+
+function ContinuousFlowSection({ nodeId }: { nodeId: string }) {
+  const edges = useEditorStore((s) => s.edges);
+  const nodesById = useEditorStore((s) => s.nodesById);
+  const setDisplacedLeft = useEditorStore((s) => s.setDisplacedLeft);
+  const budget = useEditorStore((s) => s.budget);
+  const node = nodesById.get(nodeId);
+  if (node?.control?.type !== "signal") return null;
+  const approaches = edges.filter((e) => e.toNodeId === nodeId && !e.isRoundaboutRing && !e.isTexasTurnaround && e.roadClassId !== "motorway");
+  if (approaches.length < 3) return null;
+  const free = isSandboxBudget(budget);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Continuous flow left turns</span>
+      <div className="flex flex-col gap-1">
+        {approaches.map((e) => {
+          const from = nodesById.get(e.fromNodeId);
+          const heading = from ? Math.atan2(node.position[2] - from.position[2], node.position[0] - from.position[0]) : 0;
+          const dir = COMPASS[(Math.round(heading / (Math.PI / 4)) + 8) % 8];
+          const lengthFt = from ? Math.hypot(node.position[0] - from.position[0], node.position[2] - from.position[2]) : 0;
+          const roomy = lengthFt >= MIN_DISPLACED_LEFT_ROAD_FT;
+          const on = !!e.displacedLeft;
+          return (
+            <button
+              key={e.id}
+              type="button"
+              aria-pressed={on}
+              disabled={!on && !roomy}
+              onClick={() => setDisplacedLeft(e.id, !on)}
+              title={roomy || on ? undefined : `Needs ${MIN_DISPLACED_LEFT_ROAD_FT} ft of road, this has ${Math.round(lengthFt)}`}
+              className={`flex items-center justify-between rounded-xl px-3 py-2 text-[11px] font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+                on ? "bg-gradient-to-br from-amber-300 to-orange-400 text-[#2b1c40] shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"
+              }`}
+            >
+              <span>↰ Heading {dir}</span>
+              <span className="tabular-nums">{on ? "Displaced ✓" : free ? "Build" : `Build · $${Math.round(DISPLACED_LEFT_COST / 1000)}k`}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[11px] leading-snug text-zinc-500">
+        Left-turners cross to the far side of the road at a small signal before the junction, then turn with the through traffic, so nobody waits for a gap in oncoming cars. Needs 380 ft of approach.
+      </p>
+    </div>
+  );
+}
+
 export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
   const selection = useEditorStore((s) => s.selection);
   const nodesById = useEditorStore((s) => s.nodesById);
@@ -318,6 +461,8 @@ export function JunctionCard({ allowRebuild }: { allowRebuild: boolean }) {
           Higher-class roads get right of way; equal roads yield to whoever arrives first.
         </p>
       )}
+
+      <ContinuousFlowSection nodeId={node.id} />
 
       {allowRebuild ? (
         <button

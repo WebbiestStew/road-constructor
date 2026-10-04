@@ -50,6 +50,7 @@ export function setMuted(value: boolean): void {
     ambience.rumbleGain.gain.value = 0;
   }
   if (fx) applyFxLevels();
+  if (road) applyRoadLevels();
   for (const l of listeners) l(muted);
 }
 
@@ -156,13 +157,13 @@ export function playGridlockHonk(): void {
   tone(190, 0.16, 0.16, 0.07, "sawtooth");
 }
 
-/** A quick double clack-clack when a vehicle rolls over a bridge expansion joint. */
-export function playExpansionJointClack(): void {
-  if (muted) return;
-  noiseBurst(0.035, 0.05, 3200);
-  tone(140, 0.05, 0.03, 0.03, "square");
-  noiseBurst(0.035, 0.045, 3000);
-  tone(130, 0.14, 0.03, 0.025, "square");
+/** A quick double clack-clack when a vehicle rolls over a bridge expansion joint. `volume` (0-1) is how near the listener is. */
+export function playExpansionJointClack(volume = 1): void {
+  if (muted || volume <= 0.01) return;
+  noiseBurst(0.035, 0.05 * volume, 3200);
+  tone(140, 0.05, 0.03, 0.03 * volume, "square");
+  noiseBurst(0.035, 0.045 * volume, 3000);
+  tone(130, 0.14, 0.03, 0.025 * volume, "square");
 }
 
 // ---------------------------------------------------------------------------
@@ -386,4 +387,105 @@ export function playCrossingBeep(): void {
   if (muted) return;
   tone(1040, 0, 0.07, 0.035, "square");
   tone(1040, 0.12, 0.07, 0.035, "square");
+}
+
+// ---------------------------------------------------------------------------
+// Road texture: the roar of tyres near the listener (a hiss that gets louder and brighter on wet asphalt) and the
+// stuttering rumble of a truck's engine brake on a downgrade. Both are fed a 0-1 level from what is near the camera.
+// ---------------------------------------------------------------------------
+
+interface RoadGraph {
+  roarGain: GainNode;
+  roarFilter: BiquadFilterNode;
+  jakeGain: GainNode;
+}
+let road: RoadGraph | null = null;
+let roarLevel = 0;
+let roarWet = false;
+let jakeLevel = 0;
+
+function ensureRoad(): RoadGraph | null {
+  const audio = getCtx();
+  if (!audio) return null;
+  if (road) return road;
+
+  const len = audio.sampleRate * 2;
+  const buf = audio.createBuffer(1, len, audio.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const src = audio.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  const roarFilter = audio.createBiquadFilter();
+  roarFilter.type = "bandpass";
+  roarFilter.frequency.value = 700;
+  roarFilter.Q.value = 0.7;
+  const roarGain = audio.createGain();
+  roarGain.gain.value = 0;
+  src.connect(roarFilter);
+  roarFilter.connect(roarGain);
+  roarGain.connect(audio.destination);
+  src.start();
+
+  // Engine brake: a low sawtooth chopped by a fast tremolo, which is what makes it a "brrrrap" and not a hum.
+  const jakeOsc = audio.createOscillator();
+  jakeOsc.type = "sawtooth";
+  jakeOsc.frequency.value = 74;
+  const jakeFilter = audio.createBiquadFilter();
+  jakeFilter.type = "lowpass";
+  jakeFilter.frequency.value = 380;
+  const chop = audio.createGain();
+  chop.gain.value = 0.5;
+  const lfo = audio.createOscillator();
+  lfo.type = "square";
+  lfo.frequency.value = 23;
+  const lfoDepth = audio.createGain();
+  lfoDepth.gain.value = 0.5;
+  lfo.connect(lfoDepth);
+  lfoDepth.connect(chop.gain);
+  const jakeGain = audio.createGain();
+  jakeGain.gain.value = 0;
+  jakeOsc.connect(jakeFilter);
+  jakeFilter.connect(chop);
+  chop.connect(jakeGain);
+  jakeGain.connect(audio.destination);
+  jakeOsc.start();
+  lfo.start();
+
+  road = { roarGain, roarFilter, jakeGain };
+  return road;
+}
+
+function applyRoadLevels(): void {
+  const audio = getCtx();
+  if (!road || !audio) return;
+  const now = audio.currentTime;
+  const roar = muted ? 0 : roarLevel * (roarWet ? 0.055 : 0.02);
+  road.roarGain.gain.linearRampToValueAtTime(roar, now + 0.25);
+  road.roarFilter.frequency.linearRampToValueAtTime(roarWet ? 1900 : 750, now + 0.6);
+  road.jakeGain.gain.linearRampToValueAtTime(muted ? 0 : jakeLevel * 0.045, now + 0.2);
+}
+
+/** Tyre roar near the listener: `level` 0-1 from how many vehicles are close, `wet` for rain-slick asphalt. */
+export function setRoadRoar(level: number, wet: boolean): void {
+  roarLevel = Math.min(1, Math.max(0, level));
+  roarWet = wet;
+  if (roarLevel === 0 && !road) return;
+  if (!ensureRoad()) return;
+  applyRoadLevels();
+}
+
+/** The engine brake of a heavy truck slowing on a grade, `level` 0-1 by how near the loudest one is. */
+export function setJakeBrake(level: number): void {
+  jakeLevel = Math.min(1, Math.max(0, level));
+  if (jakeLevel === 0 && !road) return;
+  if (!ensureRoad()) return;
+  applyRoadLevels();
+}
+
+/** Silences every road layer (leaving the game page). */
+export function stopRoadSounds(): void {
+  roarLevel = 0;
+  jakeLevel = 0;
+  if (road) applyRoadLevels();
 }

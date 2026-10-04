@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useEditorStore } from "@/state/editorStore";
 import { pushToast } from "@/lib/toast";
 
-const ROAD_TOOLS = new Set(["lanes", "speed", "street", "inspect", "transit"]);
+const ROAD_TOOLS = new Set(["lanes", "speed", "street", "inspect", "transit", "gantry"]);
 
 /**
  * Keyboard access to the road tools: N steps to the next road, Shift+N to the previous one, centring the camera on it

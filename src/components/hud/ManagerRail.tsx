@@ -2,13 +2,14 @@
 
 import { useEffect, type ComponentType, type SVGProps } from "react";
 import { useEditorStore, type EditorTool } from "@/state/editorStore";
-import { IconBus, IconInspect, IconJunction, IconLanes, IconRoad, IconSpeedSign } from "./icons";
+import { IconBus, IconInspect, IconGantry, IconJunction, IconLanes, IconRoad, IconSpeedSign } from "./icons";
 
 const TOOLS: { id: EditorTool; icon: ComponentType<SVGProps<SVGSVGElement>>; label: string; hint: string; key: string }[] = [
   { id: "inspect", icon: IconInspect, label: "Select", hint: "Look at a road or junction", key: "V" },
   { id: "lanes", icon: IconLanes, label: "Lane arrows", hint: "Choose where each lane can go", key: "L" },
   { id: "speed", icon: IconSpeedSign, label: "Speed limits", hint: "Set the limit on a road", key: "P" },
   { id: "junction", icon: IconJunction, label: "Junctions", hint: "Signals, priority, timing", key: "J" },
+  { id: "gantry", icon: IconGantry, label: "Gantries", hint: "Freeway speed advisories and lane closures", key: "G" },
   { id: "transit", icon: IconBus, label: "Bus lines", hint: "Draw routes that buses run on", key: "R" },
   { id: "street", icon: IconRoad, label: "Streets", hint: "Bus and bike lanes, one-way, crossings", key: "K" },
 ];

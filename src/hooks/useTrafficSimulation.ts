@@ -9,6 +9,7 @@ import type {
   EdgePatch,
   EdgeSpec,
   EdgeSpeedRatio,
+  IncidentView,
   JunctionControl,
   NodeSpec,
   WorkerInMessage,
@@ -29,6 +30,8 @@ export interface VehicleSnapshot {
   pedCrossings: number[][];
   /** World positions of ambulances on the road right now. */
   ambulances: [number, number, number][];
+  /** Where heavy trucks are engine-braking down a grade right now (for the soundscape). */
+  jakeBrakes: [number, number, number][];
   version: number;
 }
 
@@ -54,6 +57,8 @@ export interface SimMetricsState {
   gridlockPenaltyTotal: number;
   gridlockMarkers: [number, number, number][];
   incidentMarkers: [number, number, number][];
+  /** Stalled trucks, debris and crashes on the road, with the state of the wrecker sent to each. */
+  incidents: IncidentView[];
 }
 
 const DEFAULT_METRICS: SimMetricsState = {
@@ -77,6 +82,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   gridlockPenaltyTotal: 0,
   gridlockMarkers: [],
   incidentMarkers: [],
+  incidents: [],
 };
 
 /** Fixed by default so the same network + demand reproduces the same traffic every time you "open to traffic" — lets you test whether a fix actually worked. */
@@ -100,6 +106,13 @@ function postScenarioEvents(worker: Worker) {
   const id = useEditorStore.getState().activeScenarioId;
   const events = id ? getScenarioById(id)?.scriptedEvents : undefined;
   if (events && events.length > 0) worker.postMessage({ type: "scheduleEvents", events } satisfies WorkerInMessage);
+}
+
+/** Run-level switches for the active level: whether left turns give way (continuous-flow levels and free building do; the other levels were tuned without it). */
+function postRunFlags(worker: Worker) {
+  const id = useEditorStore.getState().activeScenarioId;
+  const enabled = id ? getScenarioById(id)?.leftTurnsYield === true : true;
+  worker.postMessage({ type: "setLeftTurnsYield", enabled } satisfies WorkerInMessage);
 }
 
 export function useTrafficSimulation() {
@@ -172,6 +185,7 @@ export function useTrafficSimulation() {
           activeCount: msg.activeCount,
           pedCrossings: msg.pedCrossings,
           ambulances: msg.ambulances,
+          jakeBrakes: msg.jakeBrakes ?? [],
           version: versionCounterRef.current,
         };
 
@@ -200,6 +214,7 @@ export function useTrafficSimulation() {
             gridlockPenaltyTotal: stats.gridlockPenaltyTotal,
             gridlockMarkers: stats.gridlockMarkers,
             incidentMarkers: stats.incidentMarkers,
+            incidents: msg.incidents ?? [],
           });
         }
       }
@@ -258,8 +273,9 @@ export function useTrafficSimulation() {
     worker.postMessage({ type: "reset" } satisfies WorkerInMessage);
     worker.postMessage({ type: "updateNetwork", network: snapshot, seed: DEFAULT_SEED } satisfies WorkerInMessage);
     postScenarioEvents(worker);
+    postRunFlags(worker);
 
-    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${e.crosswalk ? 1 : 0}|${e.busStop ? 1 : 0}|${e.parking ? 1 : 0}`;
+    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${e.crosswalk ? 1 : 0}|${e.busStop ? 1 : 0}|${e.parking ? 1 : 0}|${e.vslMph ?? ""}|${(e.closedLanes ?? []).join(".")}|${e.displacedLeft ? 1 : 0}`;
     const nodeSig = (n: NodeSpec) => JSON.stringify(n.control ?? null);
     let sentEdges = new Map(snapshot.edges.map((e) => [e.id, edgeSig(e)]));
     let sentNodes = new Map(snapshot.nodes.map((n) => [n.id, nodeSig(n)]));
@@ -294,6 +310,9 @@ export function useTrafficSimulation() {
           crosswalk: e.crosswalk ?? false,
           busStop: e.busStop ?? false,
           parking: e.parking ?? false,
+          vslMph: e.vslMph ?? null,
+          closedLanes: e.closedLanes ?? [],
+          displacedLeft: e.displacedLeft ?? false,
         });
       }
       if (edgePatches.length > 0) {
@@ -379,6 +398,17 @@ export function useTrafficSimulation() {
       seed: DEFAULT_SEED,
     } satisfies WorkerInMessage);
     postScenarioEvents(worker);
+    postRunFlags(worker);
+  }, []);
+
+  /** Stalls an 18-wheeler, drops debris, or causes a fender bender somewhere on the open road. */
+  const triggerIncident = useCallback((kind: "stall" | "debris" | "fender") => {
+    workerRef.current?.postMessage({ type: "incident", kind } satisfies WorkerInMessage);
+  }, []);
+
+  /** Sends a wrecker to an incident. */
+  const dispatchWrecker = useCallback((incidentId: number) => {
+    workerRef.current?.postMessage({ type: "dispatchWrecker", incidentId } satisfies WorkerInMessage);
   }, []);
 
   return {
@@ -395,6 +425,8 @@ export function useTrafficSimulation() {
     triggerBreakdown,
     triggerAmbulance,
     triggerCrash,
+    triggerIncident,
+    dispatchWrecker,
   };
 }
 

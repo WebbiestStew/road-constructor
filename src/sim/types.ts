@@ -65,7 +65,13 @@ export type ScriptedEvent =
   /** The weather turns for `durationS` seconds (slower, more cautious drivers), then goes back to what the player set. */
   | { atS: number; kind: "weather"; weather: Exclude<Weather, "clear">; durationS: number }
   /** Every entry's demand is multiplied for `durationS` seconds, then returns to normal. */
-  | { atS: number; kind: "surge"; multiplier: number; durationS: number };
+  | { atS: number; kind: "surge"; multiplier: number; durationS: number }
+  /** A semi breaks down in the middle lane of a freeway and stays there until a wrecker arrives (or a long time passes). */
+  | { atS: number; kind: "stall" }
+  /** Debris falls into a lane and blocks it until a wrecker clears it. */
+  | { atS: number; kind: "debris" }
+  /** A fender bender on an elevated road. Like any crash it blocks a lane, and a wrecker can clear it. */
+  | { atS: number; kind: "fender" };
 
 export type JunctionControl = SignalControl | { type: "priority" };
 
@@ -118,6 +124,18 @@ export interface EdgeSpec {
   parking?: boolean;
   /** People want to cross here whether or not there is a crossing; without one they step out into traffic. Set by levels. */
   jaywalkers?: boolean;
+  /**
+   * Variable speed limit: an advisory shown on this road's overhead gantry, at or below the posted limit. Omitted =
+   * the posted limit applies.
+   */
+  vslMph?: number;
+  /** Lanes (0 = leftmost) closed from the gantry onward: a red X over them. Traffic merges out of them. */
+  closedLanes?: number[];
+  /**
+   * Continuous-flow intersection: left turns from this road cross over to the far side of the road ahead of the
+   * junction, so they run with the through traffic and never yield to oncoming cars.
+   */
+  displacedLeft?: boolean;
 }
 
 export type ReservedLane = "bus" | "bike";
@@ -125,8 +143,8 @@ export type ReservedLane = "bus" | "bike";
 export type Weather = "clear" | "rain" | "fog";
 
 /** The number each kind is sent as in the snapshot (see VehicleRenderer, which turns it back into a shape). */
-export const VEHICLE_KIND_CODE: Record<VehicleKind, number> = { car: 0, truck: 1, bus: 2, bike: 3, ambulance: 4, police: 5 };
-export const VEHICLE_KIND_BY_CODE: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance", "police"];
+export const VEHICLE_KIND_CODE: Record<VehicleKind, number> = { car: 0, truck: 1, bus: 2, bike: 3, ambulance: 4, police: 5, wrecker: 6, debris: 7 };
+export const VEHICLE_KIND_BY_CODE: VehicleKind[] = ["car", "truck", "bus", "bike", "ambulance", "police", "wrecker", "debris"];
 
 /** A bus line the player has drawn: a connected run of roads that buses drive end to end, one every `headwayS` seconds. */
 export interface TransitLine {
@@ -140,7 +158,8 @@ export interface TransitLine {
 }
 
 /** What a simulated road user is. Most are cars; the rest only appear when the level or sandbox asks for mixed traffic. */
-export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance" | "police";
+/** A wrecker (tow truck) comes when sent to an incident; debris is road litter that blocks a lane until it is cleared. */
+export type VehicleKind = "car" | "truck" | "bus" | "bike" | "ambulance" | "police" | "wrecker" | "debris";
 
 /** The editable network as plain, structured-cloneable data. */
 export interface NetworkSnapshot {
@@ -229,6 +248,12 @@ export interface Edge3D {
   jaywalkers: boolean;
   busStop: boolean;
   parking: boolean;
+  /** The advisory speed limit on this road's gantry, or null for the posted limit. */
+  vslMph: number | null;
+  /** Per lane (0 = leftmost): true if the lane is closed from the gantry onward. All false = nothing closed. */
+  closedLanes: boolean[];
+  /** Left turns from this road run as a continuous-flow (displaced) turn. */
+  displacedLeft: boolean;
   /** IDs of edges that this edge may transition into at its terminal node. */
   nextEdgeIds: string[];
   /** Player-set lane arrows copied from the spec (null = automatic). */
@@ -311,6 +336,13 @@ export interface VehicleState {
   bodyColorR: number;
   bodyColorG: number;
   bodyColorB: number;
+  /** A responder stuck in a queue driving up the shoulder instead, ignoring the cars in its lane. */
+  shoulder: boolean;
+  /** Seconds a responder has been held up (it takes to the shoulder after a few). */
+  blockedS: number;
+  /** Seconds spent waiting at the stop line for a gap to turn left; leftMark dedupes within a tick. */
+  leftWaitS: number;
+  leftMark: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +368,12 @@ export type WorkerInMessage =
   | { type: "ambulance" }
   /** Causes a crash now (Chaos mode). */
   | { type: "crash" }
+  /** Starts an incident now: a stalled semi, debris in a lane, or a fender bender on a flyover. */
+  | { type: "incident"; kind: "stall" | "debris" | "fender" }
+  /** Sends a wrecker to an open incident. */
+  | { type: "dispatchWrecker"; incidentId: number }
+  /** Whether left turns at signals give way to oncoming traffic (off for the classic levels, on where realistic left turns matter). */
+  | { type: "setLeftTurnsYield"; enabled: boolean }
   /** The player's bus lines. Buses run on them on a timetable, on top of any bus traffic from the mix. */
   | { type: "setTransit"; lines: TransitLine[] }
   /** The weather the player picked. Scripted weather events override it while they last. */
@@ -356,6 +394,9 @@ export interface EdgePatch {
   crosswalk?: boolean;
   busStop?: boolean;
   parking?: boolean;
+  vslMph?: number | null;
+  closedLanes?: number[];
+  displacedLeft?: boolean;
 }
 
 /** How the run's emergency responses are going. Times are sim-seconds; "ideal" is the route at the ambulance's own free-flow speed. */
@@ -391,6 +432,19 @@ export interface ContractStatus {
 
 /** Per-edge average speed as a fraction of that edge's speed limit (0 = gridlock, 1 = free-flow), for the traffic heatmap. */
 export type EdgeSpeedRatio = [edgeId: string, ratio: number];
+
+/** An open incident as the interface sees it. */
+export interface IncidentView {
+  id: number;
+  kind: "crash" | "stall" | "debris";
+  position: [number, number, number];
+  /** Sim-seconds since it began. */
+  ageS: number;
+  /** "none": nobody sent; "enroute": a wrecker is driving there; "onscene": it is clearing the road. */
+  wrecker: "none" | "enroute" | "onscene";
+  /** True on an elevated road. */
+  elevated: boolean;
+}
 
 export interface TickStats {
   /** World positions of vehicles currently broken down, for the warning marker. */
@@ -428,6 +482,10 @@ export type WorkerOutMessage =
       clockHour: number;
       /** World positions of ambulances on the road right now, for the pins. */
       ambulances: [number, number, number][];
+      /** Open incidents, for their markers and the wrecker button. */
+      incidents: IncidentView[];
+      /** Where semis are braking hard on a downgrade (engine-brake rumble), nearest few. */
+      jakeBrakes: [number, number, number][];
       /** People who have crossed at a crossing or stepped into traffic since the run began. */
       pedServedTotal: number;
       /** Times someone stepped into traffic with cars coming (no marked crossing there). */

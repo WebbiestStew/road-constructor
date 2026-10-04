@@ -45,10 +45,17 @@ import { playDemolish, playPlaceRoad } from "@/lib/sound";
 import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 
 export type EditorMode = "build" | "simulate";
-export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street" | "transit";
+export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street" | "transit" | "gantry";
 
 /** Tools that change how traffic is managed rather than what is built — these work while traffic is running. */
-export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction", "street", "transit"];
+export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction", "street", "transit", "gantry"];
+
+/** A displaced left needs room for the crossover and the bay ahead of the junction. */
+export const MIN_DISPLACED_LEFT_ROAD_FT = 380;
+export const DISPLACED_LEFT_COST = 120_000;
+/** Advisory speeds a gantry can show. */
+export const WRECKER_COST = 3_000;
+export const VSL_CHOICES_MPH = [35, 45, 55, 65];
 
 export const TRANSIT_COLORS = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#a855f7", "#ec4899"];
 export const MAX_TRANSIT_LINES = 6;
@@ -198,6 +205,14 @@ interface EditorState {
   resetLaneMoves: (edgeId: string) => void;
   /** Sets the speed limit on this segment, its opposite direction, and optionally the rest of the road it belongs to. */
   setSpeedLimit: (edgeId: string, mph: number, wholeRoad: boolean) => void;
+  /** Takes `amount` from a budgeted level's money (free in sandbox); false when it can't be afforded. */
+  spendBudget: (amount: number) => boolean;
+  /** Posts a variable speed advisory on a freeway gantry (null clears it). It can only ever be at or below the posted limit. */
+  setVslAdvisory: (edgeId: string, mph: number | null) => void;
+  /** Closes or reopens one lane at a gantry; drivers are warned a quarter mile ahead and move over. At least one lane stays open. */
+  toggleLaneClosed: (edgeId: string, lane: number) => void;
+  /** Builds or removes a continuous-flow (displaced) left turn on an approach: lefts cross over ahead of the junction and run with the through traffic. */
+  setDisplacedLeft: (edgeId: string, on: boolean) => void;
   /** Sets aside the rightmost lane of a road (and its opposite carriageway) for buses or bikes; null gives it back to everyone. */
   setReservedLane: (edgeId: string, kind: ReservedLane | null, wholeRoad: boolean) => void;
   /** Makes a road one-way (in the selected direction) or restores its opposite carriageway. Refuses edits that would strand traffic. */
@@ -1023,6 +1038,103 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (changed.some((e) => limitFor(e) < mph)) pushToast("Posted as fast as this kind of road allows", "info");
   },
 
+  spendBudget: (amount) => {
+    const s = get();
+    if (isSandboxBudget(s.budget)) return true;
+    if (s.budget < amount) {
+      pushToast("Not enough budget for that", "alert");
+      return false;
+    }
+    set({ budget: s.budget - amount });
+    return true;
+  },
+
+  setVslAdvisory: (edgeId, mph) => {
+    const state = get();
+    const target = state.edges.find((e) => e.id === edgeId);
+    if (!target) return;
+    const next = mph === null || mph >= target.speedLimitMph ? undefined : mph;
+    if (next === undefined && mph !== null) pushToast("An advisory has to be below the posted limit", "info");
+    if (target.vslMph === next) return;
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const updated = { ...e };
+        if (next === undefined) delete updated.vslMph;
+        else updated.vslMph = next;
+        return updated;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
+  toggleLaneClosed: (edgeId, lane) => {
+    const state = get();
+    const target = state.edges.find((e) => e.id === edgeId);
+    if (!target || lane < 0 || lane >= target.lanes) return;
+    const closed = new Set(target.closedLanes ?? []);
+    if (closed.has(lane)) closed.delete(lane);
+    else {
+      if (closed.size >= target.lanes - 1) {
+        pushToast("Leave at least one lane open", "info");
+        return;
+      }
+      closed.add(lane);
+    }
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const updated = { ...e };
+        if (closed.size === 0) delete updated.closedLanes;
+        else updated.closedLanes = [...closed].sort((a, b) => a - b);
+        return updated;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
+  setDisplacedLeft: (edgeId, on) => {
+    const state = get();
+    const target = state.edges.find((e) => e.id === edgeId);
+    if (!target || !!target.displacedLeft === on) return;
+    if (on) {
+      const a = state.nodesById.get(target.fromNodeId);
+      const b = state.nodesById.get(target.toNodeId);
+      const lengthFt = a && b ? Math.hypot(b.position[0] - a.position[0], b.position[2] - a.position[2]) : 0;
+      if (target.isRoundaboutRing || target.isTexasTurnaround || target.roadClassId === "motorway") {
+        pushToast("A continuous-flow left belongs on a street or avenue approach", "info");
+        return;
+      }
+      if (lengthFt < MIN_DISPLACED_LEFT_ROAD_FT) {
+        pushToast("That approach is too short for the crossover. It needs about 380 ft", "alert");
+        return;
+      }
+      if (b?.control?.type !== "signal") {
+        pushToast("Put a traffic light at the junction first", "info");
+        return;
+      }
+      const free = isSandboxBudget(state.budget);
+      if (!free && state.budget < DISPLACED_LEFT_COST) {
+        pushToast("Not enough budget for a continuous-flow left", "alert");
+        return;
+      }
+    }
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const updated = { ...e };
+        if (on) updated.displacedLeft = true;
+        else delete updated.displacedLeft;
+        return updated;
+      });
+      const charge = on && !isSandboxBudget(s.budget) ? DISPLACED_LEFT_COST : 0;
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])), budget: s.budget - charge };
+    });
+  },
+
   setRoadOneWay: (edgeId, oneWay, wholeRoad) => {
     const state = get();
     const chain = collectRoadTargets(state, edgeId, wholeRoad, false);
@@ -1599,3 +1711,8 @@ useEditorStore.subscribe((state) => {
     });
   }, 600);
 });
+
+// Dev builds only: lets a person (or a test script) drive the editor from the browser console, e.g. `__rc.getState().loadScenario(...)`.
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+  (window as unknown as { __rc: typeof useEditorStore }).__rc = useEditorStore;
+}

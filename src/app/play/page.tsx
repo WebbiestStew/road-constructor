@@ -15,6 +15,12 @@ import Scenery from "@/components/Scenery";
 import ChallengeLoader from "@/components/ChallengeLoader";
 import TransitLines from "@/components/TransitLines";
 import EmergencyPins from "@/components/EmergencyPins";
+import LightTrails from "@/components/LightTrails";
+import FlyoverDirector from "@/components/FlyoverDirector";
+import { useFlyover } from "@/lib/cinematic";
+import SoundscapeDriver from "@/components/SoundscapeDriver";
+import IncidentPins from "@/components/IncidentPins";
+import ManagementOverlays from "@/components/ManagementOverlays";
 import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulation";
@@ -162,6 +168,11 @@ const CROSSHAIR_TOOLS = new Set<EditorTool>(["draw", "zone", "turnaround"]);
 
 export default function Play() {
   const sim = useTrafficSimulation();
+  const flyover = useFlyover();
+  // Dev builds only: `__sim` lets the browser console read the live simulation state.
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") (window as unknown as { __sim: unknown }).__sim = sim;
+  });
   const scenarioRunner = useScenarioRunner(sim);
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
   const rideAlongActive = useEditorStore((s) => s.rideAlongActive);
@@ -329,6 +340,10 @@ export default function Play() {
         <RoadEditor />
         <VehicleRenderer snapshotRef={sim.snapshotRef} />
         <Pedestrians snapshotRef={sim.snapshotRef} />
+        <ManagementOverlays />
+        {flyover && <LightTrails snapshotRef={sim.snapshotRef} />}
+        <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} />
+        <IncidentPins incidents={sim.metrics.incidents} onDispatch={sim.dispatchWrecker} />
         <EmergencyPins snapshotRef={sim.snapshotRef} />
         {quality !== "low" && <JointClackDetector snapshotRef={sim.snapshotRef} />}
         <ChaseCamera snapshotRef={sim.snapshotRef} />
@@ -388,6 +403,7 @@ export default function Play() {
       </Canvas>
       <WorldLabelLayer />
 
+      <FlyoverDirector sim={sim} />
       <SimControls sim={sim} scenarioRunner={scenarioRunner} />
     </div>
   );
