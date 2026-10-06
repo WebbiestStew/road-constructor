@@ -63,6 +63,14 @@ function singleOtherNeighbor(
   return null;
 }
 
+/** How far back from a roundabout an arm starts easing in to the width of its entry. */
+const RING_FUNNEL_FT = 110;
+/** The share of its width an arm keeps where it meets a roundabout: a one-lane arm stays as it is, wider ones lose a lane (at most). */
+function ringEntryScale(lanes: number): number {
+  if (lanes <= 1) return 1;
+  return Math.max(0.6, (lanes - 1) / lanes);
+}
+
 /** Roads closer than this in heading at a node are one road joining or leaving another, not a crossing. */
 const MERGE_MAX_ANGLE_RAD = (50 * Math.PI) / 180;
 const MERGE_TAPER_FT = 170;
@@ -105,14 +113,18 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
   if (ringNodes.size > 0) {
     for (const e of edges) {
       if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
-      const funnel = Math.min(60, e.length * 0.4);
+      // The arm eases in over a good stretch (not a short, sharp pinch) to the width of the entry: one lane narrower than
+      // a wide arm, never narrower than a lane and a half, so the road reads as flaring into the ring instead of
+      // coming to a point against it.
+      const funnel = Math.min(RING_FUNNEL_FT, e.length * 0.55);
+      const scale = ringEntryScale(e.lanes);
       if (ringNodes.has(e.toNodeId)) {
         e.taperEndFt = Math.max(e.taperEndFt, funnel);
-        e.endScale = 0.35;
+        e.endScale = scale;
       }
       if (ringNodes.has(e.fromNodeId)) {
         e.taperStartFt = Math.max(e.taperStartFt, funnel);
-        e.startScale = 0.35;
+        e.startScale = scale;
       }
     }
   }

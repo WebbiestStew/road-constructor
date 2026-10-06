@@ -795,6 +795,9 @@ const FILL_MAX_ANGLE_RAD = (50 * Math.PI) / 180;
  * the pavement corners of every road in the group at the node.
  */
 export function buildJunctionFills(edges: Edge3D[]): THREE.BufferGeometry | null {
+  // A roundabout's own pavement is the junction: filling the hull of the arms that meet it only drops dark slabs on the ring.
+  const ringNodes = new Set<string>();
+  for (const e of edges) if (e.isRoundaboutRing) (ringNodes.add(e.fromNodeId), ringNodes.add(e.toNodeId));
   const inBy = new Map<string, Edge3D[]>();
   const outBy = new Map<string, Edge3D[]>();
   for (const e of edges) {
@@ -806,6 +809,7 @@ export function buildJunctionFills(edges: Edge3D[]): THREE.BufferGeometry | null
   const tOut = new THREE.Vector3();
   const positions: number[] = [];
   for (const [nodeId, ins] of inBy) {
+    if (ringNodes.has(nodeId)) continue;
     const outs = outBy.get(nodeId);
     if (!outs) continue;
     // Pair up roads that carry on along one line of travel, then group the pairs that share a road.
