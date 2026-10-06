@@ -116,16 +116,20 @@ function smooth01(x: number): number {
 
 /** 1 along most of a road; shrinks toward the node over a merge or diverge taper so pavement and lanes close in together. */
 export function widthScaleAt(edge: Edge3D, distanceFt: number): number {
-  let k = 1;
-  // A ramp merging into or splitting from a through road tapers to a point; a funnel into a roundabout only narrows.
-  if (edge.taperStartFt > 0 && distanceFt < edge.taperStartFt) {
-    k = Math.min(k, edge.startScale + (1 - edge.startScale) * smooth01(distanceFt / edge.taperStartFt));
-  }
+  // A ramp merging into or splitting from a through road tapers to a point, and a road that carries on into a narrower
+  // one eases down to it. A scale above 1 is the other way round: the narrower road flares out to the width of the
+  // wider one it meets, so the two pavements join flush without either pinching in.
+  let narrow = 1;
+  let wide = 1;
+  const apply = (scale: number, t: number) => {
+    const k = scale + (1 - scale) * smooth01(t);
+    if (k < 1) narrow = Math.min(narrow, k);
+    else wide = Math.max(wide, k);
+  };
+  if (edge.taperStartFt > 0 && distanceFt < edge.taperStartFt) apply(edge.startScale, distanceFt / edge.taperStartFt);
   const toEnd = edge.length - distanceFt;
-  if (edge.taperEndFt > 0 && toEnd < edge.taperEndFt) {
-    k = Math.min(k, edge.endScale + (1 - edge.endScale) * smooth01(toEnd / edge.taperEndFt));
-  }
-  return k;
+  if (edge.taperEndFt > 0 && toEnd < edge.taperEndFt) apply(edge.endScale, toEnd / edge.taperEndFt);
+  return narrow * wide;
 }
 
 /** Smooth "keep at least this far out": zero when not needed, then ramps in without a corner. */

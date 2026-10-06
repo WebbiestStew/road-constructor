@@ -70,6 +70,9 @@ const MERGE_TAPER_FT = 170;
 const RAMP_TIP = 0.03;
 /** Where a road continues into a narrower or wider one, its pavement eases between the two widths over this stretch. */
 const WIDTH_BLEND_FT = 130;
+/** A road that meets a wider one at a junction flares out to it over this stretch, up to this many times its own width. */
+const WIDTH_FLARE_FT = 60;
+const MAX_FLARE = 2.5;
 /** How far from the junction a join pad is measured. */
 const JOIN_REACH_FT = 760;
 
@@ -231,7 +234,7 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
     const legs = new Set<string>();
     for (const e of ins) legs.add(e.fromNodeId);
     for (const o of outs) legs.add(o.toNodeId);
-    if (legs.size > 2) continue;
+    const crossing = legs.size > 2;
     for (const e of ins) {
       if (e.taperEndFt > 0 || e.isRoundaboutRing) continue;
       e.spline.getTangentAt(1, tIn);
@@ -247,7 +250,20 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
       const we = e.lanes * e.laneWidthFt;
       const wo = o.lanes * o.laneWidthFt;
       if (Math.abs(we - wo) <= 1) continue;
-      if (we > wo) {
+      if (crossing) {
+        // At a junction with side streets nothing pinches in: the narrower road flares out to meet the wider one, over a
+        // short stretch beside the crossing, and the pavements join flush.
+        const flare = Math.min(WIDTH_FLARE_FT, (we > wo ? o.length : e.length) * 0.4);
+        if (we > wo) {
+          if (o.taperStartFt === 0) {
+            o.taperStartFt = flare;
+            o.startScale = Math.min(MAX_FLARE, we / wo);
+          }
+        } else if (e.taperEndFt === 0) {
+          e.taperEndFt = flare;
+          e.endScale = Math.min(MAX_FLARE, wo / we);
+        }
+      } else if (we > wo) {
         e.taperEndFt = Math.min(WIDTH_BLEND_FT, e.length * 0.45);
         e.endScale = Math.max(0.3, wo / we);
       } else if (o.taperStartFt === 0) {
@@ -409,12 +425,12 @@ function buildSpline(
         v.y = 0;
         return v.lengthSq() > 1e-6 ? v.normalize() : straightDir.clone();
       };
-      const startDir = prevNode
-        ? flatten(toV.clone().sub(new THREE.Vector3(...prevNode.position)))
-        : straightDir;
-      const endDir = nextNode
-        ? flatten(new THREE.Vector3(...nextNode.position).sub(fromV))
-        : straightDir;
+      // A neighbour that turns away sharply is a corner, not a continuation: following it would hook the curve (a short
+      // edge between two roads at right angles bent into an S), so that end stays straight.
+      const MAX_BLEND_TURN = Math.cos((55 * Math.PI) / 180);
+      const blended = (dir: THREE.Vector3) => (dir.dot(straightDir) >= MAX_BLEND_TURN ? dir : straightDir);
+      const startDir = prevNode ? blended(flatten(toV.clone().sub(new THREE.Vector3(...prevNode.position)))) : straightDir;
+      const endDir = nextNode ? blended(flatten(new THREE.Vector3(...nextNode.position).sub(fromV))) : straightDir;
 
       const control1 = fromV.clone().addScaledVector(startDir, chordLength / 3);
       const control2 = toV.clone().addScaledVector(endDir, -chordLength / 3);
