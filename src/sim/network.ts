@@ -63,14 +63,6 @@ function singleOtherNeighbor(
   return null;
 }
 
-/** How far back from a roundabout an arm starts easing in to the width of its entry. */
-const RING_FUNNEL_FT = 110;
-/** The share of its width an arm keeps where it meets a roundabout: a one-lane arm stays as it is, wider ones lose a lane (at most). */
-function ringEntryScale(lanes: number): number {
-  if (lanes <= 1) return 1;
-  return Math.max(0.6, (lanes - 1) / lanes);
-}
-
 /** Roads closer than this in heading at a node are one road joining or leaving another, not a crossing. */
 const MERGE_MAX_ANGLE_RAD = (50 * Math.PI) / 180;
 const MERGE_TAPER_FT = 170;
@@ -101,32 +93,6 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
     if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
     (inByNode.get(e.toNodeId) ?? inByNode.set(e.toNodeId, []).get(e.toNodeId)!).push(e);
     (outByNode.get(e.fromNodeId) ?? outByNode.set(e.fromNodeId, []).get(e.fromNodeId)!).push(e);
-  }
-  // Arms meeting a roundabout funnel in toward the ring instead of ending in a square slab that overlaps it.
-  const ringNodes = new Set<string>();
-  for (const e of edges) {
-    if (e.isRoundaboutRing) {
-      ringNodes.add(e.fromNodeId);
-      ringNodes.add(e.toNodeId);
-    }
-  }
-  if (ringNodes.size > 0) {
-    for (const e of edges) {
-      if (e.isRoundaboutRing || e.isTexasTurnaround) continue;
-      // The arm eases in over a good stretch (not a short, sharp pinch) to the width of the entry: one lane narrower than
-      // a wide arm, never narrower than a lane and a half, so the road reads as flaring into the ring instead of
-      // coming to a point against it.
-      const funnel = Math.min(RING_FUNNEL_FT, e.length * 0.55);
-      const scale = ringEntryScale(e.lanes);
-      if (ringNodes.has(e.toNodeId)) {
-        e.taperEndFt = Math.max(e.taperEndFt, funnel);
-        e.endScale = scale;
-      }
-      if (ringNodes.has(e.fromNodeId)) {
-        e.taperStartFt = Math.max(e.taperStartFt, funnel);
-        e.startScale = scale;
-      }
-    }
   }
   /**
    * Measures how `ramp` sits against `main` at the junction, from the ramp's end (`atEnd`) outward: the lateral
@@ -218,6 +184,9 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
         if (ang <= MERGE_MAX_ANGLE_RAD) group.push({ e: i, ang });
       }
       if (group.length < 2) continue;
+      // Only a freeway has ramps that merge into it. Where ordinary streets meet at a shallow angle it is a junction, and
+      // the smaller road keeps its full width instead of narrowing to a point against the bigger one.
+      if (!out.isFreeway) continue;
       const main = group.reduce((a, b) => (rank(b.e, b.ang) > rank(a.e, a.ang) ? b : a));
       // The through road carries straight on past a merging ramp: its barriers and lines are not cut at this node.
       main.e.endsAtJunction = false;
@@ -240,6 +209,7 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
         if (ang <= MERGE_MAX_ANGLE_RAD) group.push({ e: o, ang });
       }
       if (group.length < 2) continue;
+      if (!i.isFreeway) continue;
       const main = group.reduce((a, b) => (rank(b.e, b.ang) > rank(a.e, a.ang) ? b : a));
       i.endsAtJunction = false;
       main.e.startsAtJunction = false;
@@ -256,6 +226,12 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
   // pavement between the two widths, instead of stepping with a squared-off end.
   for (const [nodeId, ins] of inByNode) {
     const outs = outByNode.get(nodeId) ?? [];
+    // A lane added or dropped is a change along one road. At a junction with side streets the roads just meet, each at
+    // its own width, rather than the approach pinching in before the crossing.
+    const legs = new Set<string>();
+    for (const e of ins) legs.add(e.fromNodeId);
+    for (const o of outs) legs.add(o.toNodeId);
+    if (legs.size > 2) continue;
     for (const e of ins) {
       if (e.taperEndFt > 0 || e.isRoundaboutRing) continue;
       e.spline.getTangentAt(1, tIn);

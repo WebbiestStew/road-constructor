@@ -1413,43 +1413,75 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const maxApproachLanes = Math.max(1, ...connected.map((e) => e.lanes));
     const ringLanes = Math.max(1, Math.min(2, maxApproachLanes));
 
+    // Each leg meets the ring at two places, like a real roundabout: where its inbound road joins the ring and, a little
+    // upstream along the circulation, where its outbound road leaves it. The wedge between the two is the splitter island.
+    // A leg with only one direction (a one-way road) gets a single node.
     let nodeSeq = state.nextNodeSeq;
-    const ringNodes: NodeSpec[] = legs.map((leg) => {
-      const id = `n${nodeSeq++}`;
-      const rx = node.position[0] + Math.cos(leg.angle) * radius;
-      const rz = node.position[2] + Math.sin(leg.angle) * radius;
-      return { id, position: [rx, y, rz] };
-    });
-
-    // Re-point every existing approach edge from the old center node to its dedicated ring node.
-    const repointedById = new Map<string, EdgeSpec>();
+    interface RingContact {
+      angle: number;
+      nodeId: string;
+      /** The edges that end here (the roads coming in) or start here (the roads going out). */
+      edges: EdgeSpec[];
+    }
+    const ringNodes: NodeSpec[] = [];
+    /** Per leg, in increasing angle: its ring contacts (entry, then exit). Traffic circulates the other way round, from exit to entry. */
+    const contacts: RingContact[][] = [];
+    const makeRingNode = (angle: number): NodeSpec => {
+      const n: NodeSpec = { id: `n${nodeSeq++}`, position: [node.position[0] + Math.cos(angle) * radius, y, node.position[2] + Math.sin(angle) * radius] };
+      ringNodes.push(n);
+      return n;
+    };
     legs.forEach((leg, i) => {
-      const ringNodeId = ringNodes[i].id;
-      for (const e of leg.edges) {
-        if (e.toNodeId === nodeId)
-          repointedById.set(e.id, { ...e, toNodeId: ringNodeId });
-        else repointedById.set(e.id, { ...e, fromNodeId: ringNodeId });
+      const inbound = leg.edges.filter((e) => e.toNodeId === nodeId);
+      const outbound = leg.edges.filter((e) => e.fromNodeId === nodeId);
+      if (inbound.length > 0 && outbound.length > 0) {
+        // Half the angle between the two nodes: enough for the carriageways and a splitter island between them, but
+        // never more than a third of the way to the neighbouring leg.
+        const widest = Math.max(...leg.edges.map((e) => (e.lanes * e.laneWidthFt) / 2 + 4));
+        const gapNext = ((legs[(i + 1) % legs.length].angle - leg.angle + Math.PI * 4) % (Math.PI * 2)) || Math.PI * 2;
+        const gapPrev = ((leg.angle - legs[(i - 1 + legs.length) % legs.length].angle + Math.PI * 4) % (Math.PI * 2)) || Math.PI * 2;
+        const half = Math.min((widest + 5) / radius, Math.min(gapNext, gapPrev) / 3);
+        // Traffic keeps right and circulates counter-clockwise (decreasing angle on this map), so the road leaving the ring
+        // sits upstream of the road joining it: at the larger angle.
+        const entry = makeRingNode(leg.angle - half);
+        const exit = makeRingNode(leg.angle + half);
+        contacts.push([
+          { angle: leg.angle - half, nodeId: entry.id, edges: inbound },
+          { angle: leg.angle + half, nodeId: exit.id, edges: outbound },
+        ]);
+      } else {
+        const only = makeRingNode(leg.angle);
+        contacts.push([{ angle: leg.angle, nodeId: only.id, edges: leg.edges }]);
       }
     });
+    const ringOrder = contacts.flat();
+
+    // Re-point every existing approach edge from the old center node to its place on the ring.
+    const repointedById = new Map<string, EdgeSpec>();
+    for (const c of ringOrder) {
+      for (const e of c.edges) {
+        if (e.toNodeId === nodeId) repointedById.set(e.id, { ...e, toNodeId: c.nodeId });
+        else repointedById.set(e.id, { ...e, fromNodeId: c.nodeId });
+      }
+    }
 
     // Ring edges connecting consecutive ring nodes, bowed out through the true arc midpoint so
     // the ring reads as a circle even with only 3-4 legs.
     let edgeSeq = state.nextEdgeSeq;
     let ringCost = 0;
     const ringEdges: EdgeSpec[] = [];
-    for (let i = 0; i < legs.length; i++) {
-      const a = legs[i];
-      const fromNode = ringNodes[i];
-      const toNode = ringNodes[(i + 1) % legs.length];
-      const delta =
-        (((legs[(i + 1) % legs.length].angle - a.angle) % (Math.PI * 2)) +
-          Math.PI * 2) %
-        (Math.PI * 2);
+    for (let i = 0; i < ringOrder.length; i++) {
+      const a = ringOrder[i];
+      const b = ringOrder[(i + 1) % ringOrder.length];
+      // Each ring edge runs from the contact at the larger angle back to the one at the smaller: counter-clockwise.
+      const fromNode = ringNodes.find((n) => n.id === b.nodeId)!;
+      const toNode = ringNodes.find((n) => n.id === a.nodeId)!;
+      const delta = (((b.angle - a.angle) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
       // Several points along the true arc (not one bowed midpoint), so the ring is round with no corner at each leg.
       const arcPoints: [number, number, number][] = [];
-      const ARC_STEPS = 4;
+      const ARC_STEPS = Math.max(2, Math.min(4, Math.round(delta / 0.35)));
       for (let k = 1; k < ARC_STEPS; k++) {
-        const ang = a.angle + (delta * k) / ARC_STEPS;
+        const ang = b.angle - (delta * k) / ARC_STEPS;
         arcPoints.push([node.position[0] + Math.cos(ang) * radius, y, node.position[2] + Math.sin(ang) * radius]);
       }
       const length = edgeLengthFt(fromNode.position, toNode.position, arcPoints);

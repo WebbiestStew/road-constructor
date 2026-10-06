@@ -149,8 +149,13 @@ export function buildRoundaboutDetails(edges: Edge3D[]): { island: THREE.BufferG
       const a = innerEdge(into, into.length - d, new THREE.Vector3());
       const b = innerEdge(out, d, new THREE.Vector3());
       const gap = a.distanceTo(b);
-      if (railIn.length === 0 && gap > MAX_GAP_FT) break;
-      if (gap < MIN_GAP_FT && railIn.length > 0) break;
+      // The carriageways must really be apart, with the outgoing one's edge on the far side of the incoming one's. Where
+      // they overlap (an undivided road, or close to the ring where they ease together) there is no room for an island.
+      edgeRightVectorAt(into, (into.length - d) / into.length, _tan, _right);
+      const across = (b.x - a.x) * _right.x + (b.z - a.z) * _right.z;
+      const apart = across < -MIN_GAP_FT * 0.7;
+      if (railIn.length === 0 && (!apart || gap > MAX_GAP_FT)) continue;
+      if (!apart || gap < MIN_GAP_FT) break;
       railIn.push(a);
       railOut.push(b);
     }
@@ -179,6 +184,9 @@ function RoundaboutDetails() {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const network = useMemo(() => assembleCached(nodes, edges), [nodes, edges]);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") (window as unknown as { __net: unknown }).__net = network;
+  }, [network]);
   const parts = useMemo(() => buildRoundaboutDetails(network.edges), [network]);
   useEffect(
     () => () => {
