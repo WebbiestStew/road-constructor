@@ -17,6 +17,8 @@ const SHOULDER_FT = 4;
 /** The island is drawn from the ring back to where the two carriageways have drawn this close together. */
 const MIN_GAP_FT = 2.4;
 const SAMPLE_FT = 5;
+/** The island starts this far back from the ring's centreline, clear of the ring's own pavement. */
+const RING_CLEARANCE_FT = 13;
 /** Roads into and out of a roundabout that end this close together are the two sides of one arm. */
 const PAIR_MAX_FT = 90;
 /** Past this gap the two carriageways are different roads, not the sides of one island. */
@@ -47,11 +49,18 @@ function innerEdge(edge: Edge3D, distanceFt: number, out: THREE.Vector3): THREE.
   return out;
 }
 
+/** One triangle, wound so it faces up whichever way the points run (a face the wrong way round is lit as if from below). */
+function pushTri(positions: number[], p: THREE.Vector3, q: THREE.Vector3, r: THREE.Vector3, lift: number): void {
+  const upward = (q.z - p.z) * (r.x - p.x) - (q.x - p.x) * (r.z - p.z);
+  const [b, c] = upward >= 0 ? [q, r] : [r, q];
+  for (const v of [p, b, c]) positions.push(v.x, v.y + lift, v.z);
+}
+
 /** Pushes a quad strip (two rails of points, joined to the next pair) onto the position list, raised by `lift`. */
 function pushStrip(positions: number[], a: THREE.Vector3[], b: THREE.Vector3[], lift: number): void {
   for (let i = 0; i + 1 < a.length; i++) {
-    const quad = [a[i], b[i], b[i + 1], a[i + 1]];
-    for (const q of [quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]]) positions.push(q.x, q.y + lift, q.z);
+    pushTri(positions, a[i], b[i], b[i + 1], lift);
+    pushTri(positions, a[i], b[i + 1], a[i + 1], lift);
   }
 }
 
@@ -126,7 +135,8 @@ export function buildRoundaboutDetails(edges: Edge3D[]): { island: THREE.BufferG
         const b = base.clone().addScaledVector(right, centre + x + YIELD_DASH_FT);
         const a2 = a.clone().addScaledVector(fwd, YIELD_DEPTH_FT);
         const b2 = b.clone().addScaledVector(fwd, YIELD_DEPTH_FT);
-        for (const q of [a, b, b2, a, b2, a2]) lines.push(q.x, q.y + LINE_LIFT_FT, q.z);
+        pushTri(lines, a, b, b2, LINE_LIFT_FT);
+        pushTri(lines, a, b2, a2, LINE_LIFT_FT);
       }
     }
     if (!out || out.length < 40) continue;
@@ -135,12 +145,12 @@ export function buildRoundaboutDetails(edges: Edge3D[]): { island: THREE.BufferG
     const railIn: THREE.Vector3[] = [];
     const railOut: THREE.Vector3[] = [];
     const limit = Math.min(MAX_LENGTH_FT, into.length * 0.6, out.length * 0.6);
-    for (let d = 0; d <= limit; d += SAMPLE_FT) {
+    for (let d = RING_CLEARANCE_FT; d <= limit; d += SAMPLE_FT) {
       const a = innerEdge(into, into.length - d, new THREE.Vector3());
       const b = innerEdge(out, d, new THREE.Vector3());
       const gap = a.distanceTo(b);
-      if (d === 0 && gap > MAX_GAP_FT) break;
-      if (gap < MIN_GAP_FT && d > 0) break;
+      if (railIn.length === 0 && gap > MAX_GAP_FT) break;
+      if (gap < MIN_GAP_FT && railIn.length > 0) break;
       railIn.push(a);
       railOut.push(b);
     }
@@ -159,9 +169,6 @@ export function buildRoundaboutDetails(edges: Edge3D[]): { island: THREE.BufferG
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     g.computeVertexNormals();
-    // Wound either way depending on the side; make every face point up.
-    const n = g.getAttribute("normal") as THREE.BufferAttribute;
-    for (let i = 0; i < n.count; i++) if (n.getY(i) < 0) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
     g.computeBoundingSphere();
     return g;
   };
