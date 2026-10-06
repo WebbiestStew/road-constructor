@@ -757,7 +757,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Everything here comes in from New Jersey: the Route 495 helix, the Lincoln Tunnel under the Hudson, and the Weehawken streets beside it. It comes out at 39th Street in Midtown, crosses Manhattan on the real avenues, and leaves by the Queens-Midtown Tunnel and the Queensboro Bridge for Queens, or down the east side for Brooklyn. It is a long haul, so the clock runs fifteen minutes. Find the avenue that chokes the tunnel mouth and fix it.",
     budget: 14_000_000,
-    baseline: 224,
+    baseline: 244,
     durationS: 1800,
   },
   {

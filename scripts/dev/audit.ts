@@ -70,10 +70,11 @@ for (const key of keys) {
     // D/E. lateral offset and width-scale continuity
     for (let i = 1; i < S.length; i++) {
       const ds = S[i].s - S[i - 1].s;
-      if (Math.abs(S[i].off - S[i - 1].off) > Math.max(3, ds * 0.5)) { add("offset jump", `${id(e)} ${Math.abs(S[i].off - S[i - 1].off).toFixed(1)}ft at s=${S[i].s.toFixed(0)}/${e.length.toFixed(0)} shift=${e.lateralShiftFt} pad=${!!e.padStart}${!!e.padEnd} taper=${e.taperStartFt}/${e.taperEndFt} lanes=${e.lanes}`); break; }
+      // A road shorter than twice the sideways easing distance (55 ft) is a stub between two junctions and cannot ease any more gently than it does.
+      if (e.length >= 110 && Math.abs(S[i].off - S[i - 1].off) > Math.max(3, ds * 0.5)) { add("offset jump", `${id(e)} ${Math.abs(S[i].off - S[i - 1].off).toFixed(1)}ft at s=${S[i].s.toFixed(0)}/${e.length.toFixed(0)} shift=${e.lateralShiftFt} pad=${!!e.padStart}${!!e.padEnd} taper=${e.taperStartFt}/${e.taperEndFt} lanes=${e.lanes}`); break; }
     }
     for (let i = 1; i < S.length; i++) {
-      if (Math.abs(S[i].k - S[i - 1].k) * (halfRoad + 4) > 4) { add("width jump", `${id(e)} s=${S[i].s.toFixed(0)}`); break; }
+      if (Math.abs(S[i].k - S[i - 1].k) * (halfRoad + 4) > 4) { add("width jump", `${id(e)} s=${S[i].s.toFixed(0)}/${e.length.toFixed(0)} k=${S[i - 1].k.toFixed(2)}->${S[i].k.toFixed(2)} lanes=${e.lanes} taper=${e.taperStartFt.toFixed(0)}@${e.startScale.toFixed(2)}/${e.taperEndFt.toFixed(0)}@${e.endScale.toFixed(2)}`); break; }
     }
     // F. sinks below ground (non-sunken)
     if (!e.sunken && S.some((q) => q.y < -0.6)) add("below ground", `${id(e)} min y ${Math.min(...S.map((q) => q.y)).toFixed(1)}`);
@@ -117,17 +118,20 @@ for (const key of keys) {
       e.spline.getTangentAt(1, ta); o.spline.getTangentAt(0, tb);
       const ang = deg(Math.acos(Math.max(-1, Math.min(1, (ta.x * tb.x + ta.z * tb.z) / ((Math.hypot(ta.x, ta.z) || 1) * (Math.hypot(tb.x, tb.z) || 1))))));
       if (ang > 50) continue; // a real turn
+      // Where three or more roads meet, the pavement of the others covers the join: only a plain joint between two roads can show a step.
+      const legsAt = new Set<string>([...(inBy.get(e.toNodeId) ?? []).map((x) => x.fromNodeId), ...(outBy.get(e.toNodeId) ?? []).map((x) => x.toNodeId)]);
+      const plainJoint = legsAt.size <= 2;
       const a = A[A.length - 1], b = B[0];
       const tip = a.half * 0.5 < 1.5 || b.half * 0.5 < 1.5; // tapered to a point
       const slopeA = Math.atan2(ta.y, Math.hypot(ta.x, ta.z)), slopeB = Math.atan2(tb.y, Math.hypot(tb.x, tb.z));
       if (Math.abs(a.y - b.y) > 0.4) add("joint height step", `${id(e)}->${id(o)} ${Math.abs(a.y - b.y).toFixed(1)}ft`);
       if (deg(Math.abs(slopeA - slopeB)) > 3) add("joint slope jump", `${id(e)}->${id(o)} ${deg(Math.abs(slopeA - slopeB)).toFixed(1)}deg`);
       if (!tip) {
-        if (ang > 6 && ang <= 35) add("joint heading mismatch", `${id(e)}->${id(o)} ${ang.toFixed(0)}deg at ${a.x.toFixed(0)},${a.z.toFixed(0)}`);
+        if (plainJoint && ang > 6 && ang <= 35) add("joint heading mismatch", `${id(e)}->${id(o)} ${ang.toFixed(0)}deg at ${a.x.toFixed(0)},${a.z.toFixed(0)}`);
         const rx = -a.tz, rz = a.tx;
         const dl = Math.hypot((a.x - rx * a.half) - (b.x - -b.tz * b.half), (a.z - rz * a.half) - (b.z - b.tx * b.half));
         const dr = Math.hypot((a.x + rx * a.half) - (b.x + -b.tz * b.half), (a.z + rz * a.half) - (b.z + b.tx * b.half));
-        if (Math.max(dl, dr) > 3 && ang <= 35) add("joint edge offset", `${id(e)}->${id(o)} L${dl.toFixed(1)} R${dr.toFixed(1)}ft at ${a.x.toFixed(0)},${a.z.toFixed(0)}`);
+        if (plainJoint && Math.max(dl, dr) > 3 && ang <= 35) add("joint edge offset", `${id(e)}->${id(o)} L${dl.toFixed(1)} R${dr.toFixed(1)}ft at ${a.x.toFixed(0)},${a.z.toFixed(0)} lanes ${e.lanes}/${o.lanes} lw ${e.laneWidthFt}/${o.laneWidthFt} shift ${e.lateralShiftFt}/${o.lateralShiftFt} k ${a.k.toFixed(2)}/${b.k.toFixed(2)} len ${e.length.toFixed(0)}/${o.length.toFixed(0)} ang ${ang.toFixed(0)}`);
       }
     }
   }

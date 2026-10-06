@@ -174,6 +174,16 @@ function padPush(pad: JoinPad, distance: number, k: number, hr: number): number 
  */
 export function joinShiftAt(edge: Edge3D, distanceFt: number, k: number): number {
   if (!edge.padStart && !edge.padEnd) return 0;
+  // The push is worked out from samples of the through road, so it can change quickly; averaged over a short stretch
+  // either side, a ramp slides across in a smooth line instead of stepping.
+  let sum = 0;
+  for (const off of JOIN_SMOOTH_TAPS_FT) sum += rawJoinShiftAt(edge, Math.min(edge.length, Math.max(0, distanceFt + off)), k);
+  return sum / JOIN_SMOOTH_TAPS_FT.length;
+}
+
+const JOIN_SMOOTH_TAPS_FT = [-27, -18, -9, 0, 9, 18, 27];
+
+function rawJoinShiftAt(edge: Edge3D, distanceFt: number, k: number): number {
   const hr = (edge.lanes * edge.laneWidthFt) / 2;
   let a = 0;
   let b = 0;
@@ -193,12 +203,19 @@ export function carriagewayOffsetAt(edge: Edge3D, distanceFt: number, k: number)
 
 /** Where a vehicle at `distanceFt` along the edge really sits laterally: the carriageway shift, eased to zero into junctions. */
 export function lateralShiftAt(edge: Edge3D, distanceFt: number): number {
-  if (edge.lateralShiftFt === 0) return 0;
+  if (edge.lateralShiftFt === 0 && !edge.shiftBlendStart && !edge.shiftBlendEnd) return 0;
   const taper = Math.min(SHIFT_TAPER_FT, edge.length / 2);
   let k = 1;
   if (edge.shiftTaperStart) k = Math.min(k, smooth01(distanceFt / taper));
   if (edge.shiftTaperEnd) k = Math.min(k, smooth01((edge.length - distanceFt) / taper));
-  return edge.lateralShiftFt * k;
+  let shift = edge.lateralShiftFt * k;
+  // Carrying on into a road with a different carriageway shift: slide to its line over the stretch where the width eases.
+  const a = edge.shiftBlendStart;
+  if (a && distanceFt < a.len) shift = a.to + (shift - a.to) * smooth01(distanceFt / a.len);
+  const b = edge.shiftBlendEnd;
+  const toEnd = edge.length - distanceFt;
+  if (b && toEnd < b.len) shift = b.to + (shift - b.to) * smooth01(toEnd / b.len);
+  return shift;
 }
 
 /** Writes the normalized "right" direction (perpendicular to travel, in the horizontal plane) into `out`. */

@@ -73,6 +73,20 @@ const WIDTH_BLEND_FT = 130;
 /** A road that meets a wider one at a junction flares out to it over this stretch, up to this many times its own width. */
 const WIDTH_FLARE_FT = 60;
 const MAX_FLARE = 2.5;
+/** Steepest a pavement edge may close in or open out, in feet sideways per foot along the road (about 12 degrees). */
+const MAX_EDGE_SLOPE = 0.22;
+/** A road shorter than this isn't flared; it just meets the wider one. */
+const MIN_FLARE_ROAD_FT = 70;
+/** The most a pavement may close in over `taperFt`, so a short ramp stub tapers to a narrow tip, not a needle. */
+function limitNarrowing(scale: number, taperFt: number, e: Edge3D): number {
+  const half = (e.lanes * e.laneWidthFt) / 2 + 4;
+  return Math.max(scale, 1 - (MAX_EDGE_SLOPE * taperFt) / half);
+}
+/** The most a pavement may open out over `taperFt`. */
+function limitFlare(scale: number, taperFt: number, e: Edge3D): number {
+  const half = (e.lanes * e.laneWidthFt) / 2 + 4;
+  return Math.min(scale, 1 + (MAX_EDGE_SLOPE * taperFt) / half);
+}
 /** How far from the junction a join pad is measured. */
 const JOIN_REACH_FT = 760;
 
@@ -197,7 +211,7 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
       for (const g of group) {
         if (g.e === main.e) continue;
         g.e.taperEndFt = Math.max(g.e.taperEndFt, taperFor(g.e));
-        g.e.endScale = RAMP_TIP;
+        g.e.endScale = limitNarrowing(RAMP_TIP, g.e.taperEndFt, g.e);
         g.e.padEnd = buildPad(g.e, main.e, true);
       }
     }
@@ -219,7 +233,7 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
       for (const g of group) {
         if (g.e === main.e) continue;
         g.e.taperStartFt = Math.max(g.e.taperStartFt, taperFor(g.e));
-        g.e.startScale = RAMP_TIP;
+        g.e.startScale = limitNarrowing(RAMP_TIP, g.e.taperStartFt, g.e);
         g.e.padStart = buildPad(g.e, main.e, false);
       }
     }
@@ -247,28 +261,42 @@ function classifyMergesAndDiverges(edges: Edge3D[]): void {
       });
       if (cont.length !== 1) continue;
       const o = cont[0];
-      const we = e.lanes * e.laneWidthFt;
-      const wo = o.lanes * o.laneWidthFt;
+      // Full pavement width, shoulders included, since the whole pavement scales with the taper.
+      const we = e.lanes * e.laneWidthFt + 8;
+      const wo = o.lanes * o.laneWidthFt + 8;
       if (Math.abs(we - wo) <= 1) continue;
       if (crossing) {
         // At a junction with side streets nothing pinches in: the narrower road flares out to meet the wider one, over a
         // short stretch beside the crossing, and the pavements join flush.
-        const flare = Math.min(WIDTH_FLARE_FT, (we > wo ? o.length : e.length) * 0.4);
-        if (we > wo) {
-          if (o.taperStartFt === 0) {
-            o.taperStartFt = flare;
-            o.startScale = Math.min(MAX_FLARE, we / wo);
+        const narrower = we > wo ? o : e;
+        // (the carriageways also slide sideways to meet: see below)
+        if (narrower.length >= MIN_FLARE_ROAD_FT) {
+          const flare = Math.min(WIDTH_FLARE_FT, narrower.length * 0.4);
+          // A flare on a bend would push the inside edge of the pavement across itself, so only a straight stretch flares.
+          const atStart = narrower === o;
+          const ta = narrower.spline.getTangentAt(atStart ? 0 : 1 - flare / narrower.length);
+          const tb = narrower.spline.getTangentAt(atStart ? flare / narrower.length : 1);
+          if (angleBetween(ta, tb) > (6 * Math.PI) / 180) continue;
+          if (we > wo) {
+            if (o.taperStartFt === 0) {
+              o.taperStartFt = flare;
+              o.startScale = limitFlare(Math.min(MAX_FLARE, we / wo), flare, o);
+              o.shiftBlendStart = { to: e.lateralShiftFt, len: flare };
+            }
+          } else if (e.taperEndFt === 0) {
+            e.taperEndFt = flare;
+            e.endScale = limitFlare(Math.min(MAX_FLARE, wo / we), flare, e);
+            e.shiftBlendEnd = { to: o.lateralShiftFt, len: flare };
           }
-        } else if (e.taperEndFt === 0) {
-          e.taperEndFt = flare;
-          e.endScale = Math.min(MAX_FLARE, wo / we);
         }
       } else if (we > wo) {
         e.taperEndFt = Math.min(WIDTH_BLEND_FT, e.length * 0.45);
-        e.endScale = Math.max(0.3, wo / we);
+        e.endScale = limitNarrowing(Math.max(0.3, wo / we), e.taperEndFt, e);
+        e.shiftBlendEnd = { to: o.lateralShiftFt, len: e.taperEndFt };
       } else if (o.taperStartFt === 0) {
         o.taperStartFt = Math.min(WIDTH_BLEND_FT, o.length * 0.45);
-        o.startScale = Math.max(0.3, we / wo);
+        o.startScale = limitNarrowing(Math.max(0.3, we / wo), o.taperStartFt, o);
+        o.shiftBlendStart = { to: e.lateralShiftFt, len: o.taperStartFt };
       }
     }
   }
@@ -344,7 +372,7 @@ function computeJointTangents(specs: EdgeSpec[], nodesById: Map<string, NodeSpec
         const prev = bestInFor.get(n.id);
         if (!prev || ang < prev.ang) bestInFor.set(n.id, { e, ang });
       }
-      if (best && best.ang <= JOINT_MAX_ANGLE_RAD && e.interiorPoints.length > 0) {
+      if (best && best.ang <= JOINT_MAX_ANGLE_RAD) {
         const dn = dirs.get(best.n.id)!;
         set(e.id, "end", de.end.clone().add(dn.start).normalize());
       }
@@ -352,11 +380,28 @@ function computeJointTangents(specs: EdgeSpec[], nodesById: Map<string, NodeSpec
     for (const [outId, { e, ang }] of bestInFor) {
       if (ang > JOINT_MAX_ANGLE_RAD) continue;
       const spec = specs.find((s) => s.id === outId);
-      if (!spec || spec.interiorPoints.length === 0) continue;
+      if (!spec) continue;
       set(outId, "start", dirs.get(e.id)!.end.clone().add(dirs.get(outId)!.start).normalize());
     }
   }
   return result;
+}
+
+/** The slope a joint's helper point may carry into a road's end: matching the neighbour's grade, but never a steeper local one than this. */
+const HELPER_MAX_GRADE = 0.06;
+const clampAbs = (v: number, limit: number) => Math.max(-limit, Math.min(limit, v));
+/** How much of the neighbouring road's slope the joint helper carries (the rest follows this road's own profile). */
+const HELPER_SLOPE_SHARE = 0.4;
+
+/**
+ * Height of a joint's helper point `h` feet in from `end`. On the road's own profile (the straight line from the end to
+ * the next control point) it adds no steepness; shifted toward the neighbour's slope it keeps the two roads' slopes
+ * close at the joint. Mostly the first, a little of the second.
+ */
+function blendedHelperY(end: THREE.Vector3, next: THREE.Vector3, slopeY: number, h: number): number {
+  const own = end.y + (next.y - end.y) * Math.min(1, h / Math.max(1e-3, end.distanceTo(next)));
+  const shared = end.y + clampAbs(slopeY - end.y, HELPER_MAX_GRADE * h);
+  return own + (shared - own) * HELPER_SLOPE_SHARE;
 }
 
 function buildSpline(
@@ -410,7 +455,7 @@ function buildSpline(
     const prevNode = prevNeighborId ? nodesById.get(prevNeighborId) : undefined;
     const nextNode = nextNeighborId ? nodesById.get(nextNeighborId) : undefined;
 
-    if (prevNode || nextNode) {
+    if (prevNode || nextNode || joint) {
       const chordLength = toV.distanceTo(fromV);
       const straightDir = toV.clone().sub(fromV).normalize();
       // Tangent direction follows the neighboring segment (Catmull-Rom
@@ -429,8 +474,11 @@ function buildSpline(
       // edge between two roads at right angles bent into an S), so that end stays straight.
       const MAX_BLEND_TURN = Math.cos((55 * Math.PI) / 180);
       const blended = (dir: THREE.Vector3) => (dir.dot(straightDir) >= MAX_BLEND_TURN ? dir : straightDir);
-      const startDir = prevNode ? blended(flatten(toV.clone().sub(new THREE.Vector3(...prevNode.position)))) : straightDir;
-      const endDir = nextNode ? blended(flatten(new THREE.Vector3(...nextNode.position).sub(fromV))) : straightDir;
+      // Where the neighbouring road has a shape of its own, the heading it really arrives with (shared with this road in
+      // `joint`) beats the straight line to its far node, so the two leave and arrive on exactly the same line.
+      const shared = (dir: THREE.Vector3 | undefined) => (dir ? blended(flatten(dir.clone())) : undefined);
+      const startDir = shared(joint?.start) ?? (prevNode ? blended(flatten(toV.clone().sub(new THREE.Vector3(...prevNode.position)))) : straightDir);
+      const endDir = shared(joint?.end) ?? (nextNode ? blended(flatten(new THREE.Vector3(...nextNode.position).sub(fromV))) : straightDir);
 
       const control1 = fromV.clone().addScaledVector(startDir, chordLength / 3);
       const control2 = toV.clone().addScaledVector(endDir, -chordLength / 3);
@@ -439,12 +487,13 @@ function buildSpline(
       // Resample as a CatmullRomCurve3 (rather than returning the Bezier
       // directly) so every downstream consumer of Edge3D.spline keeps
       // working against the exact same curve type unchanged.
-      const sampleCount = 12;
+      // Samples are packed close together at both ends, so the resampled curve leaves and arrives along the Bezier's own
+      // end tangents (with evenly spaced samples the end direction is the last chord's, which is off by a few degrees on
+      // a long edge and shows as a kink where two roads meet).
       const sampled: THREE.Vector3[] = [];
-      for (let i = 0; i <= sampleCount; i++) {
-        sampled.push(bezier.getPoint(i / sampleCount));
-      }
-      return new THREE.CatmullRomCurve3(sampled, false, "catmullrom", 0.5);
+      const ts = [0, 0.008, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.992, 1];
+      for (const t of ts) sampled.push(bezier.getPoint(t));
+      return new THREE.CatmullRomCurve3(sampled, false, "centripetal", 0.5);
     }
   }
 
@@ -455,22 +504,110 @@ function buildSpline(
   // heading, pins the curve's end tangent to it.
   let helped = false;
   if (joint && points.length >= 3) {
-    helped = !!(joint.start || joint.end);
-    if (joint.end) {
+    // A shared heading only helps if it roughly agrees with how this road really arrives there; one that points well
+    // away from the road's own last stretch would put the helper off to the side and hook the curve into a spike.
+    const agrees = (dir: THREE.Vector3, along: THREE.Vector3) => {
+      const flat = new THREE.Vector3(along.x, 0, along.z);
+      const d = new THREE.Vector3(dir.x, 0, dir.z);
+      if (flat.lengthSq() < 1e-6 || d.lengthSq() < 1e-6) return false;
+      return flat.normalize().dot(d.normalize()) > Math.cos((50 * Math.PI) / 180);
+    };
+    const endOk = !!joint.end && agrees(joint.end, points[points.length - 1].clone().sub(points[points.length - 2]));
+    const startOk = !!joint.start && agrees(joint.start, points[1].clone().sub(points[0]));
+    helped = endOk || startOk;
+    if (endOk && joint.end) {
       const last = points[points.length - 1];
       const h = Math.min(JOINT_HELPER_FT, last.distanceTo(points[points.length - 2]) * 0.4);
-      points.splice(points.length - 1, 0, last.clone().addScaledVector(joint.end, -h));
+      const helper = last.clone().addScaledVector(joint.end, -h);
+      // It carries the shared slope too, but not below ground: at the foot of a ramp that would dip the road under the grass.
+      const before = points[points.length - 2];
+      helper.y = blendedHelperY(last, before, helper.y, h);
+      if (last.y >= 0 && before.y >= 0) helper.y = Math.max(0, helper.y);
+      points.splice(points.length - 1, 0, helper);
     }
-    if (joint.start) {
+    if (startOk && joint.start) {
       const first = points[0];
       const h = Math.min(JOINT_HELPER_FT, first.distanceTo(points[1]) * 0.4);
-      points.splice(1, 0, first.clone().addScaledVector(joint.start, h));
+      const helper = first.clone().addScaledVector(joint.start, h);
+      helper.y = blendedHelperY(first, points[1], helper.y, h);
+      if (first.y >= 0 && points[1].y >= 0) helper.y = Math.max(0, helper.y);
+      points.splice(1, 0, helper);
     }
   }
   // The helper sits a few feet from the end while the next control point can be hundreds of feet away. A uniform
   // Catmull-Rom curve overshoots across such uneven spacing and doubles back on itself at the end (a hairpin spur that
   // folds the pavement); the centripetal form does not.
-  return new THREE.CatmullRomCurve3(points, false, helped ? "centripetal" : "catmullrom", 0.5);
+  // Uneven spacing (a long stretch then a short one) makes the uniform form overshoot and loop at the short end.
+  let shortest = Infinity;
+  let longest = 0;
+  for (let i = 1; i < points.length; i++) {
+    const d = points[i].distanceTo(points[i - 1]);
+    shortest = Math.min(shortest, d);
+    longest = Math.max(longest, d);
+  }
+  const uneven = points.length >= 3 && longest > shortest * 3;
+  return new THREE.CatmullRomCurve3(points, false, helped || uneven ? "centripetal" : "catmullrom", 0.5);
+}
+
+/**
+ * A curve through control points that are all at or above ground can still dip a foot below it between them (the
+ * overshoot at the base of a ramp). That buries the pavement and the vehicles on it, so such a curve is traced again at
+ * short intervals with the dip taken out. A road meant to go underground (a control point below ground) is left alone.
+ */
+function keepAboveGround(curve: THREE.CatmullRomCurve3): THREE.CatmullRomCurve3 {
+  if (curve.points.some((p) => p.y < -0.05)) return curve;
+  const probe = new THREE.Vector3();
+  let low = 0;
+  for (let i = 0; i <= 40; i++) low = Math.min(low, curve.getPointAt(i / 40, probe).y);
+  if (low > -0.15) return curve;
+  return traceProfile(curve, (y) => Math.max(0, y));
+}
+
+/** Traces a curve again at short intervals, passing each height through `shape`. */
+function traceProfile(curve: THREE.CatmullRomCurve3, shape: (y: number, s: number, length: number) => number): THREE.CatmullRomCurve3 {
+  const length = curve.getLength();
+  const steps = Math.max(8, Math.ceil(length / 8));
+  const traced: THREE.Vector3[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const p = curve.getPointAt(i / steps);
+    p.y = shape(p.y, (length * i) / steps, length);
+    traced.push(p);
+  }
+  return new THREE.CatmullRomCurve3(traced, false, "centripetal", 0.5);
+}
+
+/** The steepest a road's deck may be anywhere along it (the game's design limit is 6%; the curve through the control points overshoots it a little). */
+const MAX_LOCAL_GRADE = 0.075;
+
+/**
+ * A short bridge whose crest was set from the end heights can come out steeper than that in the middle, where the curve
+ * overshoots. The crest is shaved to what a climb at the limit from either end allows, so no stretch is steeper than the
+ * limit (the ends are untouched, so it still meets the roads it joins).
+ */
+function limitGrade(curve: THREE.CatmullRomCurve3): THREE.CatmullRomCurve3 {
+  const length = curve.getLength();
+  if (length < 30) return curve;
+  const probe = new THREE.Vector3();
+  const steps = Math.max(8, Math.ceil(length / 10));
+  let steepest = 0;
+  let prevY = curve.getPointAt(0, probe).y;
+  for (let i = 1; i <= steps; i++) {
+    const y = curve.getPointAt(i / steps, probe).y;
+    steepest = Math.max(steepest, Math.abs(y - prevY) / (length / steps));
+    prevY = y;
+  }
+  if (steepest <= MAX_LOCAL_GRADE + 0.005) return curve;
+  const y0 = curve.getPointAt(0).y;
+  const y1 = curve.getPointAt(1).y;
+  // If the ends themselves are further apart than the limit allows over this length, there is nothing the middle can do.
+  if (Math.abs(y1 - y0) > MAX_LOCAL_GRADE * length * 0.95) return curve;
+  return traceProfile(curve, (y, s) => {
+    const fromStart = s;
+    const fromEnd = length - s;
+    const ceiling = Math.min(y0 + MAX_LOCAL_GRADE * fromStart, y1 + MAX_LOCAL_GRADE * fromEnd);
+    const floor = Math.max(y0 - MAX_LOCAL_GRADE * fromStart, y1 - MAX_LOCAL_GRADE * fromEnd);
+    return Math.min(ceiling, Math.max(floor, y));
+  });
 }
 
 /** How far below ground a road must dip to count as an underpass or cutting rather than a rounding overshoot at the base of a ramp. */
@@ -507,7 +644,7 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
 
   const jointTangents = computeJointTangents(snapshot.edges, nodesById);
   const edges: Edge3D[] = snapshot.edges.map((spec) => {
-    const spline = buildSpline(spec, nodesById, neighborsByNode, jointTangents.get(spec.id));
+    const spline = keepAboveGround(limitGrade(buildSpline(spec, nodesById, neighborsByNode, jointTangents.get(spec.id))));
     const length = spline.getLength();
     const roadClass = ROAD_CLASSES[spec.roadClassId];
     return {
@@ -534,6 +671,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       lateralShiftFt: 0,
       shiftTaperStart: false,
       shiftTaperEnd: false,
+      shiftBlendStart: null,
+      shiftBlendEnd: null,
       startsAtJunction: (neighborsByNode.get(spec.fromNodeId)?.size ?? 0) >= 3,
       endsAtJunction: (neighborsByNode.get(spec.toNodeId)?.size ?? 0) >= 3,
       taperStartFt: 0,

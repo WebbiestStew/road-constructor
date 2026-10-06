@@ -235,6 +235,9 @@ export interface Edge3D {
   /** Vehicles drift toward the centerline over the last/first stretch of an end that meets a junction or dead end, instead of snapping sideways. */
   shiftTaperStart: boolean;
   shiftTaperEnd: boolean;
+  /** Where this road carries on into one with a different carriageway shift (more or fewer lanes), its shift eases to that road's over `len` feet, so the pavements meet on one line. */
+  shiftBlendStart: { to: number; len: number } | null;
+  shiftBlendEnd: { to: number; len: number } | null;
   /** This end meets three or more roads (a merge, diverge or crossing), where barriers and edge lines must stop short. */
   startsAtJunction: boolean;
   endsAtJunction: boolean;

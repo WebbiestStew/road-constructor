@@ -76,6 +76,8 @@ function RoadEditor() {
       lateralShiftFt: 0,
       shiftTaperStart: false,
       shiftTaperEnd: false,
+      shiftBlendStart: null,
+      shiftBlendEnd: null,
       startsAtJunction: false,
       endsAtJunction: false,
       taperStartFt: 0,

@@ -573,7 +573,7 @@ export function visibleRanges(edge: Edge3D, lateralOffsetFt: number): [number, n
 
 /** Cell size (ft) of the lookup grid used to find roads running underneath a bridge. */
 const PIER_GRID_CELL_FT = 60;
-const PIER_SAMPLE_STEP_FT = 24;
+const PIER_SAMPLE_STEP_FT = 10;
 
 /**
  * A bridge's piers are spaced evenly along it, which is fine over grass but puts a column in the middle of the lanes
@@ -620,7 +620,7 @@ export function indexPierConflicts(edges: Edge3D[]): void {
         const arr = grid.get(`${cx + dx},${cz + dz}`);
         if (!arr) continue;
         for (const s of arr) {
-          if (s.edge === self || s.y > deckY - 3) continue; // only roads clearly below the deck count
+          if (s.edge === self || s.y > deckY - 4.5) continue; // only roads clearly below the deck count
           if (Math.hypot(s.x - x, s.z - z) < s.half + 1.5) return true;
         }
       }
