@@ -70,4 +70,5 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Conditions, rules, transit, driving and replays
-        run: npm run test:sim -- --test-name-pattern="conditions:|carpool and express|turn bans:|transit: stops|driving: a car|replays: a recorded"
+        run: |
+          npm run test:sim -- --test-name-pattern="conditions:|carpool and express|turn bans:|transit: stops|driving: a car|replays: a recorded"
