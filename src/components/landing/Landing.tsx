@@ -269,7 +269,10 @@ const FEATURES = [
   { icon: IconHeatmap, title: "Heatmap & jam markers", body: "See where traffic flows and where it dies, in colorblind-safe colors." },
   { icon: IconGauge, title: "Real traffic models", body: "IDM car-following and MOBIL lane changes, the models real traffic engineers use." },
   { icon: IconRoad, title: "Unlimited sandbox", body: "Want to build? An empty map with no money limit: draw roads, bridges, viaducts and roundabouts from scratch." },
-  { icon: IconRoad, title: "Bus & bike lanes", body: "A bus carries forty people, a car carries one. Reserve a lane, make streets one-way, add crossings, and watch who it helps." },
+  { icon: IconRoad, title: "Lanes, turns & rules", body: "A bus carries forty people, a car carries one. Reserve a lane for buses, bikes, carpools or a toll express, ban a turn, reverse a lane, and watch who it helps." },
+  { icon: IconGauge, title: "Take the wheel", body: "Ride along, then drive the car yourself. Feel the queue you built from the driver's seat, in the rain, with a score for how you drove." },
+  { icon: IconWarning, title: "Weather & night", body: "Rain lengthens stopping, fog and the dark hide people at crossings. A marked crossing and a lower limit are the fix, not just paint." },
+  { icon: IconPlay, title: "Replays & your own levels", body: "Every run can be saved and replayed exactly. Publish your city as a level: its star lines are measured from what it does untouched." },
   { icon: IconWarning, title: "A living city", body: "Ambulances race through, people cross the road, rain slows everyone down and rush hour comes around on a 24-hour clock." },
   { icon: IconPlay, title: "Play anywhere", body: "Search any place on Earth and play on its real roads, or play on your phone: drag to pan, pinch to zoom, tap to build." },
 ] as const;

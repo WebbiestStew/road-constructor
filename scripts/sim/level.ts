@@ -81,6 +81,7 @@ async function main() {
   if (variants.has("fog")) sim.send({ type: "setWeather", weather: "fog" });
   if (variants.has("night")) sim.send({ type: "setDarkness", level: 1 });
   if (variants.has("dusk")) sim.send({ type: "setDarkness", level: 0.5 });
+  sim.send({ type: "setLeftTurnsYield", enabled: scenario.leftTurnsYield === true });
   if (lines.length > 0) sim.send({ type: "setTransit", lines });
   sim.send({ type: "setTrafficMix", bus: scenario.trafficMix?.bus ?? 0, bike: scenario.trafficMix?.bike ?? 0 });
   sim.load(network, Number(seed), HARNESS_SPEED);

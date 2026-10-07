@@ -562,12 +562,12 @@ function createRealCityEvaluator(baseline: number, durationS: number, threeStarR
 }
 
 /** Targets for the levels that score something other than vehicles moved, measured in the headless sim (see scripts/sim/level.ts). */
-/** People the unchanged street moves in 300 s with 16% buses. Reserving bus lanes on every avenue moves about 18% more. */
-const TRANSIT_BASELINE_PEOPLE = 2625;
+/** People the unchanged street moves in 300 s with 16% buses (mean of eight seeds, which range from 2564 to 3140). Reserving bus lanes on every avenue moves about 12% more, two bus lines with stops about 8%. */
+const TRANSIT_BASELINE_PEOPLE = 2783;
 /** Unchanged, ambulances take about 2x an empty road; a reserved bus lane as a fast lane gets them to about 1.4x. */
 const CODE_THREE_RATIO = { three: 1.6, two: 1.85 };
-/** Vehicles moved by a fully fixed Harbor Drive in the rain. The unchanged street moves about 85% of this. */
-const RAINY_PAR = 239;
+/** Vehicles moved by a fully fixed Harbor Drive in the rain (mean of four seeds; wet pavement costs about 7% against the dry street). The unchanged street moves about 85% of this. */
+const RAINY_PAR = 222;
 /** Vehicles moved by a fully fixed street with crossings on both school blocks. */
 const SCHOOL_PAR = 226;
 
@@ -575,9 +575,9 @@ const SCHOOL_PAR = 226;
  * Transit Street: the score is people moved, not vehicles, so a lane for buses (which carry a couple of dozen riders
  * each) can win even while it costs cars some road. Stars are relative to what the unchanged street carries.
  */
-function createPeopleEvaluator(baseline: number, durationS: number): () => ScenarioEvaluator {
-  const two = Math.ceil(baseline * 1.05);
-  const three = Math.ceil(baseline * 1.14);
+function createPeopleEvaluator(baseline: number, durationS: number, twoRatio = 1.05, threeRatio = 1.14): () => ScenarioEvaluator {
+  const two = Math.ceil(baseline * twoRatio);
+  const three = Math.ceil(baseline * threeRatio);
   return () => (ctx) => {
     const people = Math.round(ctx.peopleMovedTotal);
     const stars: 1 | 2 | 3 = people >= three ? 3 : people >= two ? 2 : 1;
@@ -693,7 +693,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Downtown LA, where US-101 meets the Harbor Freeway on four stacked levels. These are the real roads, ramps and lane counts. Rush hour is jamming it. Widen the right lanes, retime the lights and tune the limits, but you can't afford to fix everything.",
     budget: 9_000_000,
-    baseline: 787,
+    baseline: 788,
+    service: { delayShare: 0.694, queueFt: 454 },
   },
   {
     key: "new-york",
@@ -702,7 +703,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Midtown Manhattan around Times Square: real one-way avenues and streets with a traffic light at nearly every block. There's no room to widen, so it's all about timing: green lengths, offsets for a green wave, and which corners need a light at all.",
     budget: 4_000_000,
-    baseline: 555,
+    baseline: 528,
+    service: { delayShare: 1.051, queueFt: 273 },
   },
   {
     key: "toronto",
@@ -711,7 +713,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Toronto's waterfront, where the elevated Gardiner Expressway runs over Lake Shore Boulevard and the downtown ramps. Real elevations, real ramps. Find the bottleneck where the ramps meet the street grid.",
     budget: 7_000_000,
-    baseline: 530,
+    baseline: 521,
+    service: { delayShare: 0.551, queueFt: 349 },
   },
   {
     key: "houston",
@@ -720,7 +723,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Where I-45 meets I-10 just north of downtown Houston, a dense tangle of real ramps and flyovers. There are no lights to retime, so widen the ramps and lanes that choke, and spend the budget where it counts.",
     budget: 8_000_000,
-    baseline: 910,
+    baseline: 866,
+    service: { delayShare: 0.483, queueFt: 349 },
   },
   {
     key: "san-antonio",
@@ -729,7 +733,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The freeway knot just north of downtown San Antonio, where I-35, I-10 and US-281 all meet. Real geometry, real flyovers. It's slow because a few ramps carry far more than they were built for. Find them and add capacity.",
     budget: 8_000_000,
-    baseline: 324,
+    baseline: 320,
+    service: { delayShare: 0.752, queueFt: 591 },
   },
   {
     key: "monterrey",
@@ -738,7 +743,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Downtown Monterrey around the Macroplaza: a big grid of real streets, avenues and signals, with far more cars than the grid wants. Retime the lights, fix the limits and widen the worst streets to keep the center moving.",
     budget: 7_000_000,
-    baseline: 476,
+    baseline: 454,
+    service: { delayShare: 0.608, queueFt: 305 },
   },
   {
     key: "dallas",
@@ -747,7 +753,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Where I-635 meets US-75 north of Dallas, on the real stack of flyovers. The ramps and lane counts are the real ones, and the afternoon crowd is on its way home. Add lanes where the weaves choke, retime the limits, and spend the budget where it matters most.",
     budget: 9_000_000,
-    baseline: 736,
+    baseline: 728,
+    service: { delayShare: 0.403, queueFt: 459 },
   },
   {
     key: "chicago",
@@ -756,7 +763,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The Jane Byrne Interchange west of the Loop, where the Kennedy, the Dan Ryan and the Eisenhower meet. Notoriously jammed, and the ramps are tight. Find the lane that's starving the rest and fix it with the money you have.",
     budget: 8_000_000,
-    baseline: 482,
+    baseline: 488,
+    service: { delayShare: 0.574, queueFt: 278 },
   },
   {
     key: "atlanta",
@@ -765,7 +773,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The Tom Moreland Interchange, better known as Spaghetti Junction, rebuilt from the real roads. Dozens of ramps, with the whole metro trying to get through. Widen, retime and re-limit until the knot loosens.",
     budget: 8_000_000,
-    baseline: 994,
+    baseline: 1017,
+    service: { delayShare: 0.251, queueFt: 116 },
     // Trips here are long (a three-mile map), so the 5-minute count is mostly travel time: the best realistic play reaches about +10%.
     threeStarRatio: 1.09,
   },
@@ -776,7 +785,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Everything here comes in from New Jersey: the Route 495 helix, the Lincoln Tunnel under the Hudson, and the Weehawken streets beside it. It comes out at 39th Street in Midtown, crosses Manhattan on the real avenues, and leaves by the Queens-Midtown Tunnel and the Queensboro Bridge for Queens, or down the east side for Brooklyn. It is a long haul, so the clock runs fifteen minutes. Find the avenue that chokes the tunnel mouth and fix it.",
     budget: 14_000_000,
-    baseline: 238,
+    baseline: 235,
+    service: { delayShare: 0.464, queueFt: 806 },
     durationS: 1800,
   },
   {
@@ -786,7 +796,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Avenida Eugenio Garza Sada runs along the Tecnológico de Monterrey campus. The roads, lanes, speed limits and signals here are the real ones from OpenStreetMap, with everyone from the neighbourhood and the campus loaded onto them. Find what holds the avenue up and fix it.",
     budget: 7_000_000,
-    baseline: 233,
+    baseline: 225,
+    service: { delayShare: 0.471, queueFt: 318 },
     twoStarRatio: 1.1,
     threeStarRatio: 1.18,
   },
@@ -797,7 +808,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Valle Oriente, in San Pedro Garza García: Lázaro Cárdenas, Fundadores and the ramps between them, drawn from the real roads. Wide roads, long blocks and few places to turn. Open the bottlenecks without spending the budget on roads that don't need it.",
     budget: 7_000_000,
-    baseline: 175,
+    baseline: 164,
+    service: { delayShare: 0.8, queueFt: 273 },
     twoStarRatio: 1.1,
     threeStarRatio: 1.18,
   },
@@ -808,7 +820,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Ciudad Universitaria of the UANL, where Avenida Universidad, Fidel Velázquez and Nogalar meet around a set of ramps, all taken from the real map. Several flows want the same few intersections. Retime, re-limit and widen until it moves.",
     budget: 7_000_000,
-    baseline: 349,
+    baseline: 332,
+    service: { delayShare: 0.344, queueFt: 239 },
     twoStarRatio: 1.1,
     threeStarRatio: 1.18,
   },
@@ -819,7 +832,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Avenida Gonzalitos by the Hospital Universitario, crossed by Madero and Paseo de los Leones, taken from the real map. A long avenue that meets every cross street. Find where it backs up and fix it.",
     budget: 7_000_000,
-    baseline: 202,
+    baseline: 196,
+    service: { delayShare: 0.612, queueFt: 320 },
     twoStarRatio: 1.1,
     threeStarRatio: 1.18,
   },
@@ -830,7 +844,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The roads around Parque Fundidora: Avenida Fundidora, Cristóbal Colón and the Madero ramps, taken from the real map. A small, tightly wound area where every lane counts. Untangle the ramps and keep traffic moving past the park.",
     budget: 7_000_000,
-    baseline: 270,
+    baseline: 265,
+    service: { delayShare: 0.603, queueFt: 228 },
   },
   {
     key: "monterrey-estadio",
@@ -839,7 +854,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The roads around the Estadio BBVA in Guadalupe: Pablo Livas, Las Torres and Exposición, taken from the real map. Wide avenues, long gaps between signals and only a few ways in. Keep them flowing.",
     budget: 7_000_000,
-    baseline: 158,
+    baseline: 141,
+    service: { delayShare: 0.502, queueFt: 302 },
     twoStarRatio: 1.16,
     threeStarRatio: 1.26,
   },
@@ -850,7 +866,8 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Avenida Universidad at Juan Pablo II and Jorge A. Treviño in the north of the city, taken from the real map: fast avenues and tight ramps. A good place to try a different signal plan and see what the real roads can carry.",
     budget: 7_000_000,
-    baseline: 295,
+    baseline: 284,
+    service: { delayShare: 0.461, queueFt: 286 },
     twoStarRatio: 1.1,
     threeStarRatio: 1.18,
   },
@@ -874,6 +891,8 @@ function realScenario(plan: RealCityPlan): ScenarioDef {
     },
     startingBudget: plan.budget,
     serviceBaseline: plan.service,
+    // Real roads have real left turns: they give way to oncoming traffic, so protected phases and displaced lefts matter.
+    leftTurnsYield: true,
     durationS: plan.durationS ?? 300,
     targetAvgSpeedMph: 25,
     createEvaluator: createRealCityEvaluator(plan.baseline, plan.durationS ?? 300, plan.threeStarRatio, plan.twoStarRatio),
@@ -1412,6 +1431,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "A guided tour of the tools. Harbor Drive has one slow-posted block, one traffic light gone haywire, and a stretch where kids cross without a crossing. Fix the three, and the street flows. A step-by-step guide shows you where to click.",
     startingNetwork: FIRST_SHIFT_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 0.373, queueFt: 98 },
     durationS: 300,
     targetAvgSpeedMph: 20,
     createEvaluator: createSafeStreetsEvaluator(FIRST_SHIFT_PAR, 300),
@@ -1437,6 +1457,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Through traffic and cross-street traffic both fight over one signalized junction, and it gridlocks every rush hour. Widen it, retime it, or bypass it entirely with an elevated mainline — just make sure nothing comes to a dead stop during the peak rush minute at the end of the run.",
     startingNetwork: bypassedTownNetwork,
     startingBudget: 1_400_000,
+    serviceBaseline: { delayShare: 1.846, queueFt: 182 },
     durationS: BT_DURATION_S,
     targetAvgSpeedMph: 30,
     createEvaluator: createBypassedTownEvaluator,
@@ -1510,6 +1531,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "1,800 vehicles an hour on the mainline meet 900 more crossing it, and no signal timing can hold LOS C at this volume without one direction eating the delay. Grade-separate the mainline so it never has to stop for the cross street, then sustain 1,600 veh/h at LOS C or better with zero standstills for a full minute.",
     startingNetwork: overpassOverhaulNetwork,
     startingBudget: 1_800_000,
+    serviceBaseline: { delayShare: 1.58, queueFt: 210 },
     durationS: 180,
     targetAvgSpeedMph: 32,
     createEvaluator: createOverpassOverhaulEvaluator,
@@ -1535,6 +1557,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "This one doesn't give you a peak minute to survive — one dead-stopped vehicle anywhere on the network, at any point in the full three-minute run, spoils it. Build it robust from the first car to the last, and have both destinations still hitting their target speed when time runs out.",
     startingNetwork: gridlockAlleyNetwork,
     startingBudget: 900_000,
+    serviceBaseline: { delayShare: 0.397, queueFt: 14 },
     durationS: GA_DURATION_S,
     targetAvgSpeedMph: 22,
     createEvaluator: createGridlockAlleyEvaluator,
@@ -1571,6 +1594,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Three entries, two destinations, one interchange. 2,200 veh/h come in on the heaviest approach alone. Build it so nothing ever comes to a complete standstill across the full four-minute run, and in the final minute hold the heaviest approach at LOS B or better carrying 2,000 veh/h while both destinations sit at their target speed.",
     startingNetwork: grandInterchangeNetwork,
     startingBudget: 3_200_000,
+    serviceBaseline: { delayShare: 2.416, queueFt: 322 },
     durationS: GI_DURATION_S,
     targetAvgSpeedMph: 38,
     createEvaluator: createGrandInterchangeEvaluator,
@@ -1595,6 +1619,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "A freeway interchange of our own design: the north-south freeway climbs over the east-west one, every left turn is a tight loop and every right turn swings around the outside. Each loop ends where the next one begins, so the cars have only a thousand feet to weave across each other. Add lanes where the weaves choke, lower the loop limits so they merge calmly, or raise the mainlines, and keep the whole thing flowing.",
     startingNetwork: CLOVERLEAF_NETWORK,
     startingBudget: 6_000_000,
+    serviceBaseline: { delayShare: 0.336, queueFt: 497 },
     durationS: 300,
     targetAvgSpeedMph: 40,
     // A semi dies in a freeway lane and a load comes off a truck; a wrecker (tap the pin) clears them far sooner than waiting.
@@ -1612,6 +1637,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Two avenues cross at one big signal. Half the cars turn left, and on a green every left turn gives way to the oncoming traffic, so a few of them hold up everyone behind. Displace the left turns ahead of the junction (the Junctions tool, Continuous flow): they cross over to the far side of the road a little before the light and run with the through traffic, so nobody waits for a gap. It costs money and room, so use it where it pays.",
     startingNetwork: LEFT_TURN_NETWORK,
     startingBudget: 2_500_000,
+    serviceBaseline: { delayShare: 0.989, queueFt: 112 },
     durationS: 300,
     targetAvgSpeedMph: 25,
     leftTurnsYield: true,
@@ -1626,6 +1652,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Four signals, eight ways in, and three things wrong. One avenue is posted at a crawl, one light flips too fast to move anyone, and two approaches waste a lane on left turns. You can't build anything: use lane arrows, speed limits and junction timing while traffic runs.",
     startingNetwork: MIDTOWN_NETWORK,
     startingBudget: 1000000,
+    serviceBaseline: { delayShare: 0.878, queueFt: 315 },
     durationS: 300,
     targetAvgSpeedMph: 24,
     createEvaluator: createSpeedHoldEvaluator({ warmupS: 140, minMph: 17.5, holdS: 30 }),
@@ -1639,6 +1666,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "One long avenue, five signalized cross streets, and traffic that never gets going. A block of the avenue is posted far too slow, two lights flip green-to-red every few seconds, and three approaches waste a lane on left turns. Fix what you find while the cars keep moving.",
     startingNetwork: HARBOR_NETWORK,
     startingBudget: 1000000,
+    serviceBaseline: { delayShare: 0.315, queueFt: 77 },
     durationS: 300,
     targetAvgSpeedMph: 26,
     createEvaluator: createTripsEvaluator(207),
@@ -1652,6 +1680,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Midtown again, but at 90 seconds the game ends and demand surges 80% for over a minute. Fix the city's faults, then keep it flowing through the rush. This is a score challenge: every vehicle that gets through counts, and stars measure you against a fully fixed city.",
     startingNetwork: MIDTOWN_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 1.123, queueFt: 371 },
     durationS: 300,
     targetAvgSpeedMph: 20,
     scriptedEvents: SURGE_NIGHT,
@@ -1666,6 +1695,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Midtown, with three breakdowns that each block a lane for 18 seconds. A good layout recovers fast: spare lanes, sensible limits and signals that keep the queue from locking up. Score challenge: vehicles moved against a fully fixed city.",
     startingNetwork: MIDTOWN_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 0.863, queueFt: 301 },
     durationS: 300,
     targetAvgSpeedMph: 20,
     scriptedEvents: ROUGH_MORNING,
@@ -1680,6 +1710,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Midtown, with four ambulance calls at fixed moments. Ambulances run red lights and everyone pulls over for them, but they cannot drive through a jam. Clear the avenues they use: sensible limits, signals that don't choke the grid, and a reserved bus lane they can use as a fast lane. Scored on how close each trip gets to an empty road.",
     startingNetwork: MIDTOWN_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 0.888, queueFt: 259 },
     durationS: 300,
     targetAvgSpeedMph: 20,
     scriptedEvents: CODE_THREE_EVENTS,
@@ -1694,6 +1725,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Midtown, with four crashes at fixed moments. Each blocks a lane until a police car drives there and clears it, so the worse the traffic, the longer the wreck stays. Get the avenues moving so the police can get through, and keep the queues from locking up. Scored on how fast the crashes are cleared.",
     startingNetwork: MIDTOWN_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 0.853, queueFt: 315 },
     durationS: 330,
     targetAvgSpeedMph: 20,
     scriptedEvents: PILE_UP_EVENTS,
@@ -1708,6 +1740,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Harbor Drive in a downpour. Rain slows every driver and makes them leave more room, then rush hour hits on top. Fix what's broken first: the faults that cost you in the dry cost you double in the wet. Score challenge: vehicles moved against a fully fixed street.",
     startingNetwork: HARBOR_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 0.611, queueFt: 168 },
     durationS: 300,
     targetAvgSpeedMph: 20,
     scriptedEvents: RAINY_EVENTS,
@@ -1719,13 +1752,14 @@ export const SCENARIOS: ScenarioDef[] = [
     name: "Transit Street",
     tagline: "A bus holds forty people. A car holds one.",
     briefing:
-      "Midtown's avenues carry buses and bicycles as well as cars. Reserve a lane for buses and the riders move faster, but cars have less road. Find the balance. This level counts people moved, not vehicles, so a full bus is worth far more than a car.",
+      "Midtown's avenues carry buses and bicycles as well as cars. Reserve a lane for buses and the riders move faster, but cars have less road. Find the balance. Draw your own bus lines too: stops fill with people between buses, so a late bus finds a crowd and the one behind catches up. Hold buses at stops to space them out, and let two lines share a stop so people can change. This level counts people moved, not vehicles, so a full bus is worth far more than a car.",
     startingNetwork: TRANSIT_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 1.09, queueFt: 224 },
     durationS: 300,
     targetAvgSpeedMph: 20,
     trafficMix: { bus: 0.16, bike: 0.04 },
-    createEvaluator: createPeopleEvaluator(TRANSIT_BASELINE_PEOPLE, 300),
+    createEvaluator: createPeopleEvaluator(TRANSIT_BASELINE_PEOPLE, 300, 1.04, 1.1),
   },
   {
     id: "school-run",
@@ -1736,6 +1770,7 @@ export const SCENARIOS: ScenarioDef[] = [
       "Two blocks of Harbor Drive sit by a school, and children cross wherever they please, stepping out in front of cars. Add marked crossings there, then fix the rest of the street so the added stops don't jam it. Score challenge: nobody steps into traffic, and traffic still keeps up.",
     startingNetwork: SCHOOL_NETWORK,
     startingBudget: 1_000_000,
+    serviceBaseline: { delayShare: 0.355, queueFt: 91 },
     durationS: 300,
     targetAvgSpeedMph: 20,
     createEvaluator: createSafeStreetsEvaluator(SCHOOL_PAR, 300),

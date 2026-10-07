@@ -54,6 +54,30 @@ speed limits and signal timing, while every car drives for real. Play it on desk
   the expansion-joint clack on viaducts, all attenuated with distance from the camera or chase view.
 - **Drone flyover.** After winning a level, a dusk-to-night flyover with time-lapsed traffic and light trails. Save a
   clip or copy a link to challenge a friend.
+- **Service report and medals.** Every run is also judged on how well the city served its people: time lost per trip
+  against an empty road, the longest queue, people crossing safely, crashes cleared, buses evenly spaced. Each is a medal
+  (the delay and queue medals ask for a clear improvement on the level's own unchanged city, measured in the headless sim).
+- **A career.** Winning pays city funds (new stars and new medals pay; replays only a trickle), funds and stars set a rank
+  from Intern to Commissioner, and funds can be moved into a free-build city's budget.
+- **Weather and night with consequences.** Rain lengthens braking and slows curves (and wets the pavement), fog and the
+  dark make drivers cautious on unlit lanes and see people at a crossing late, so a marked crossing in the fog needs a
+  lower limit, not just paint. A chip on screen says what the conditions are doing.
+- **Traffic rules as tools.** Set a lane aside for buses, bikes, **carpools** (HOV) or a **toll express lane** (cars pay
+  while they use it, and the money lands in your budget), **ban left or right turns** at the end of a road (drivers route
+  around them, and the lane arrows follow), and **reverse a lane** on a two-way road to move capacity to the busy side.
+- **Transit that bunches.** A bus stop fills with people between buses, so a late bus finds a crowd and stays longer and
+  the one behind catches up. Lines can hold buses at stops to even them out, and a stop on a road two lines share is a
+  transfer stop with bigger crowds.
+- **Take the wheel.** Ride along with a car, then drive it: throttle and brake, lane changes that wait for a gap, a
+  driver's-seat view with rain on the glass, an engine that changes gear, and a score for speeding and hard stops. On a
+  phone the controls are on screen.
+- **Sound mixer.** Master and group volumes (interface, traffic and weather, sirens and warnings) behind a limiter, the
+  ambience ducks under a siren, and a sound check plays each sound so the mix can be balanced by ear.
+- **Publish a level.** The unchanged city is measured in three spare simulations in your browser, the star and medal lines
+  are set from that, and the link carries them: whoever opens it plays your city against its own unchanged score.
+- **Saves and exact replays.** Eight named city slots, and replays of runs. The simulation is deterministic, so a replay is
+  just the actions that shaped the run (each stamped with the sim time) played into a fresh run: bit for bit the same
+  traffic, with a replay bar, a drone flyover over it, and files you can send.
 - **Campaign, daily challenge and sandbox.** Hand-built levels with par-based stars, scripted trouble (a stalled
   car, a stadium letting out), a seeded daily scenario, and a no-money-limit sandbox.
 - **Real merges and exits.** Where a ramp joins or leaves a bigger road, its pavement rides alongside as an added
@@ -114,7 +138,9 @@ src/
   state/      Zustand editor store (network, budget, undo/redo) and persistence
   components/ the R3F scene (roads, vehicles, terrain) and the HUD
   hooks/      worker bridge and scenario runner
+  lib/        sound (with the mixer), career, service report, replays, save slots, level measuring
 scripts/osm/  OpenStreetMap -> game network converter
+scripts/sim/  the headless harness: baselines, behaviour checks, replay and measuring tools
 ```
 
 **The worker protocol is small.** The main thread sends network and edit patches
@@ -141,7 +167,16 @@ Add a city by adding a bounding box to `scripts/osm/cities.ts`, running the scri
 `REAL_PLANS` in `src/sim/scenarios.ts`.
 
 Star targets are relative to each city's own baseline — what the unchanged network moves in five minutes — so
-a level can't be won by doing nothing and can't be failed by an unlucky seed.
+a level can't be won by doing nothing and can't be failed by an unlucky seed. The real-city levels run with left turns
+that give way to oncoming traffic (as real ones do), and their baselines, delay shares and queue lengths were measured
+that way (`scripts/sim/baseline.ts`). That costs 5-10% on a busy grid, and what wins it back is modest: displaced lefts
+where a road is long enough (a few percent), while protected left phases usually give up more green than they save, so
+signal phasing is one lever among several, not the whole answer.
+
+**Replays rely on determinism.** The worker logs every message that changes a run (edits, incidents, settings) with the
+sim clock it was applied at (`LOGGED_TYPES` in `worker.ts`); a replay feeds that script back into a reset run. Anything
+that makes a run depend on wall-clock time or an unlogged message would break it, and `scripts/sim/replay.ts` checks
+that a recorded run and its replay agree trip for trip.
 
 ## Testing the simulation headlessly
 
@@ -149,7 +184,11 @@ Because `src/sim` has no DOM dependencies, the real worker can run in Node. That
 and how regressions are caught: see `scripts/sim/` and run
 
 ```bash
-npm run test:sim
+npm run test:sim                       # the whole suite (about ten minutes)
+npx tsx --test scripts/sim/unit.test.ts  # the fast pure checks
+npx tsx scripts/sim/baseline.ts        # re-measure every real city's baseline (eight seeds, four at once)
+npx tsx scripts/sim/measure-level.ts my-city.json   # what the Publish button does, from a file
+npx tsx scripts/sim/replay.ts record /tmp/r.json && npx tsx scripts/sim/replay.ts play /tmp/r.json
 ```
 
 ## Credits

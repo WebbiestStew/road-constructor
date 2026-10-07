@@ -57,7 +57,7 @@ function IncidentPins({ incidents, onDispatch }: { incidents: IncidentView[]; on
               <button
                 type="button"
                 onClick={() => dispatch(inc)}
-                className="whitespace-nowrap rounded-lg border-2 border-[#2b1c40] bg-gradient-to-br from-amber-300 to-orange-400 px-2 py-1 text-[11px] font-extrabold text-[#2b1c40] shadow-[0_2px_0_#2b1c40] transition active:scale-95"
+                className="whitespace-nowrap rounded-lg border-2 border-[#2b1c40] bg-gradient-to-br from-amber-300 to-orange-400 px-2 py-1 text-[11px] font-extrabold text-[#2b1c40] shadow-[0_2px_0_#2b1c40] transition active:scale-95 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:text-xs"
               >
                 Send wrecker{free ? "" : ` · $${(WRECKER_COST / 1000).toFixed(0)}k`}
               </button>

@@ -2,7 +2,7 @@
 // The worker is a singleton per process, which is why the tests shell out to this instead of running in-process.
 import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import fs from "node:fs";
-import { REAL_PLANS } from "../../src/sim/scenarios";
+import { REAL_PLANS, getScenarioById } from "../../src/sim/scenarios";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 
 const [key, variant = "none", seed = "1337"] = process.argv.slice(2);
@@ -33,7 +33,14 @@ async function main() {
       }
     }
   }
+  // Real-city levels run with left turns that give way (see ScenarioDef.leftTurnsYield); "noyield" turns it off to compare.
+  const yielding = !variant.split(",").includes("noyield") && (variant.split(",").includes("yield") || getScenarioById(`real-${key}`)?.leftTurnsYield === true);
+  for (const v of variant.split(",")) {
+    // Every signal on protected left-turn phases (the signal-phasing fix a player can make everywhere at once).
+    if (v === "prot") for (const n of network.nodes) if (n.control?.type === "signal") n.control = { ...n.control, mode: "protected" };
+  }
   const sim = await createSim();
+  sim.send({ type: "setLeftTurnsYield", enabled: yielding });
   const g = globalThis as unknown as { postMessage: (m: any) => void };
   const prevPost = g.postMessage;
   let lastTick: any = null;

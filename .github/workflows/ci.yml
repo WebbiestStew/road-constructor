@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run lint
+      - name: Pure checks (career, medals, replays, turn bans)
+        run: npx tsx --test scripts/sim/unit.test.ts
       - uses: actions/cache@v4
         with:
           path: .next/cache
@@ -55,3 +57,17 @@ jobs:
       - run: npm ci
       - name: Levels, incidents, gantries and lefts
         run: npm run test:sim -- --test-name-pattern="reach a destination|can be improved|Code Three|School Run|First Shift|Transit Street|Pile-Up|speed limits|Clover Crossing|stalled semi|closing a lane|Continuous Flow|signal phasing"
+
+  # The newer features: weather and night, lane and turn rules, transit, driving a car, and exact replays.
+  sim-features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Conditions, rules, transit, driving and replays
+        run: npm run test:sim -- --test-name-pattern="conditions:|carpool and express|turn bans:|transit: stops|driving: a car|replays: a recorded"

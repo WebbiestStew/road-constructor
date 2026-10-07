@@ -177,3 +177,72 @@ test("signal phasing: a plan lists the phases the mode promises", async () => {
   assert.ok(ped.phases[2].pedestrian && ped.phases[2].allow.size === 0);
   assert.equal(approxCycleS({ ...base, mode: "protected", leftGreenS: 8 }), prot.cycleS);
 });
+
+// ---------------------------------------------------------------------------
+// Conditions, traffic rules, transit, driving and replays.
+// ---------------------------------------------------------------------------
+
+test("conditions: fog and night put people at risk at a crossing, and a lower limit makes it safe again", () => {
+  const clear = runLevel("school-run", "fixed,cross");
+  const fog = runLevel("school-run", "fixed,cross,fog");
+  const night = runLevel("school-run", "fixed,cross,night");
+  const slowFog = runLevel("school-run", "fixed,cross,fog,slow15");
+  assert.equal(clear.incidents, 0, "a marked crossing is safe in clear daylight");
+  assert.ok(fog.incidents >= 3, `fog caused ${fog.incidents} near misses`);
+  assert.ok(night.incidents >= 3, `night caused ${night.incidents} near misses`);
+  assert.equal(slowFog.incidents, 0, "a 15 mph limit at the crossing should stop them");
+});
+
+test("conditions: rain slows the city", () => {
+  const dry = runLevel("first-shift", "fixed,cross");
+  const wet = runLevel("first-shift", "fixed,cross,rain");
+  assert.ok(wet.trips < dry.trips * 0.95, `rain moved ${wet.trips} vs ${dry.trips} dry`);
+});
+
+test("carpool and express lanes: only the right vehicles end up in them, and the express lane earns tolls", () => {
+  const open = feature("lanes-none");
+  const hov = feature("hov");
+  const express = feature("express");
+  assert.equal(hov.notAllowedInLeft, 0, "no lone driver or truck should travel in the carpool lane");
+  assert.ok((hov.inLeftLane as number) > 100, `the carpool lane was used ${hov.inLeftLane} times`);
+  assert.ok((hov.inLeftLane as number) < (open.inLeftLane as number) * 0.5, "far fewer vehicles qualify than for an open lane");
+  const share = (express.notAllowedInLeft as number) / Math.max(1, express.inLeftLane as number);
+  assert.ok(share < 0.06, `${(share * 100).toFixed(1)}% of the express lane was trucks or bikes (those still crossing it to exit)`);
+  assert.ok((express.expressS as number) > 1000, `the express lane logged only ${express.expressS} car-seconds`);
+});
+
+test("turn bans: banning left turns removes every left from the graph, and traffic still flows", () => {
+  const free = feature("ban:none");
+  const banned = feature("ban:left");
+  assert.ok((free.leftExitsInGraph as number) > 0);
+  assert.equal(banned.leftExitsInGraph, 0);
+  assert.ok((banned.trips as number) > (free.trips as number) * 0.4, `${banned.trips} moved with no left turns vs ${free.trips}`);
+});
+
+test("transit: stops fill between buses, two lines make transfer stops, and holding does no harm", () => {
+  const free = feature("transit:free:2");
+  const held = feature("transit:hold:2");
+  assert.ok((free.transfers as number) > 20, `${free.transfers} people changed lines`);
+  assert.ok((free.boarded as number) > 100, `${free.boarded} boarded`);
+  assert.ok((free.headwayCv as number) > 0 && (free.headwayCv as number) < 1.5, `spread ${free.headwayCv}`);
+  assert.ok((held.heldS as number) > 0, "a holding line should hold a bus now and then");
+  assert.ok((held.people as number) > (free.people as number) * 0.9, `holding cost too much: ${held.people} vs ${free.people}`);
+});
+
+test("driving: a car you take the wheel of arrives, and flooring it costs you points", () => {
+  const flat = feature("drive:flat") as unknown as { result: { arrived: boolean; score: number; speedingS: number; laneChanges: number } };
+  assert.ok(flat.result, "the drive should finish");
+  assert.ok(flat.result.arrived);
+  assert.ok(flat.result.speedingS > 5, `only ${flat.result.speedingS}s of speeding`);
+  assert.ok(flat.result.score < 80, `score ${flat.result.score}`);
+  assert.ok(flat.result.laneChanges >= 1, "asked-for lane changes should happen when there is a gap");
+});
+
+test("replays: a recorded run plays back to exactly the same traffic, tick for tick", () => {
+  const file = "/tmp/rc-test-replay.json";
+  execFileSync("npx", ["tsx", "scripts/sim/replay.ts", "record", file], { encoding: "utf8" });
+  const out = execFileSync("npx", ["tsx", "scripts/sim/replay.ts", "play", file], { encoding: "utf8" });
+  const r = JSON.parse(out.trim().split("\n").pop()!);
+  assert.equal(r.differing, 0, `${r.differing} of ${r.samples} samples differed`);
+  assert.equal(r.same, true);
+});
