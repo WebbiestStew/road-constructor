@@ -1,6 +1,6 @@
 import { buildCloverleaf, buildHarborDrive, buildInterchangeSite, buildLeftTurnCrossing, buildMidtown } from "./cities";
 import { getRealCity } from "./real";
-import type { CrashStats, EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
+import type { LoggedAction, CrashStats, EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
 import type { ServiceReport } from "@/lib/serviceReport";
@@ -118,6 +118,8 @@ export interface ScenarioResult {
   report?: ServiceReport;
   /** What the win paid into the career. */
   payout?: RunPayout;
+  /** The actions that shaped the run, for saving a replay of it. */
+  recording?: LoggedAction[];
 }
 
 function node(id: string, x: number, y: number, z: number): NodeSpec {

@@ -37,6 +37,8 @@ import KeyboardRoads from "./KeyboardRoads";
 import ConditionsChip from "./hud/ConditionsChip";
 import DayClock from "./hud/DayClock";
 import DriveHud from "./hud/DriveHud";
+import ReplayBar from "./hud/ReplayBar";
+import SavesMenu from "./hud/SavesMenu";
 import { useEditorStore } from "@/state/editorStore";
 import WindshieldFx from "./hud/WindshieldFx";
 import PhotoOverlay from "./hud/PhotoOverlay";
@@ -55,7 +57,7 @@ export default function SimControls({
   const photo = usePhotoMode();
   const flyover = useFlyover();
   // Behind the wheel the road tools and their hints step aside, so the driving HUD has the screen.
-  const driving = useEditorStore((s) => s.drivingId !== null);
+  const driving = useEditorStore((s) => s.drivingId !== null || s.replay !== null);
   // Photo mode: a clean frame. Toasts stay (for "saved"); everything else steps aside.
   if (photo) {
     return (
@@ -99,6 +101,8 @@ export default function SimControls({
       <ConditionsChip sim={sim} />
       <WindshieldFx sim={sim} />
       <DriveHud sim={sim} />
+      <ReplayBar sim={sim} />
+      <SavesMenu sim={sim} />
       <PlaceCredit />
       <SettingsMenu />
       <KeyboardRoads />

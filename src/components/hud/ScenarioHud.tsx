@@ -17,6 +17,8 @@ import { useCareer } from "@/lib/career";
 import { MEDAL_META } from "@/lib/serviceReport";
 import { makeShareCard, shareOrDownload } from "@/lib/shareCard";
 import { startFlyover } from "@/lib/cinematic";
+import { saveReplay } from "@/lib/replays";
+import { openSaves } from "@/lib/savesMenu";
 import { challengerName, encodeChallenge, setActiveChallenge, useActiveChallenge } from "@/lib/challenge";
 import type { NetworkSnapshot } from "@/sim/types";
 import type { SceneryData } from "@/sim/osm/scenery";
@@ -192,6 +194,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
   const { scenario, results } = runner;
   const { bestToday } = useDaily();
   const challenge = useActiveChallenge();
+  const [replaySaved, setReplaySaved] = useState(false);
 
   useEffect(() => {
     if (!results) return;
@@ -348,6 +351,39 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
             className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br from-indigo-500 to-sky-500 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:brightness-110 active:scale-95"
           >
             🎬 {results.stars === 3 ? "Watch your 3★ flyover" : "Drone flyover at dusk"}
+          </button>
+        )}
+        {results.recording && results.recording.length > 0 && (
+          <button
+            type="button"
+            disabled={replaySaved}
+            onClick={async () => {
+              try {
+                const stars = results.won ? results.stars : 0;
+                await saveReplay({
+                  name: `${scenario.name}${stars > 0 ? ` ${"★".repeat(stars)}` : ""}${results.score !== null ? ` · ${results.score}` : ""}`,
+                  scenarioId: scenario.id.startsWith(CHALLENGE_PREFIX) || scenario.id.startsWith(DAILY_PREFIX) ? null : scenario.id,
+                  scenarioName: scenario.name,
+                  durationS: scenario.durationS,
+                  stars,
+                  score: results.score,
+                  summary: results.summaryLines[0] ?? "",
+                  actions: results.recording ?? [],
+                });
+                setReplaySaved(true);
+                pushToast("🎞️ Replay saved. Watch it from Saves → Replays", "good");
+              } catch (e) {
+                pushToast(e instanceof Error ? e.message : "Couldn't save the replay", "bad");
+              }
+            }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-black/5 px-3 py-2 text-xs font-bold text-zinc-700 transition hover:bg-black/10 active:scale-95 disabled:opacity-60"
+          >
+            {replaySaved ? "🎞️ Replay saved" : "🎞️ Save the replay of this run"}
+          </button>
+        )}
+        {replaySaved && (
+          <button type="button" onClick={() => openSaves("replays")} className="text-[11px] text-violet-700 underline decoration-dotted hover:text-violet-900">
+            Open my replays
           </button>
         )}
         {results.won && (

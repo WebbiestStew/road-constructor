@@ -12,6 +12,7 @@ import type {
   EdgeSpec,
   EdgeSpeedRatio,
   IncidentView,
+  LoggedAction,
   JunctionControl,
   NodeSpec,
   TransitStats,
@@ -58,6 +59,8 @@ export interface SimMetricsState {
   expressVehicleS: number;
   /** How the bus service is running: headways, bunching, transfers. */
   transit: TransitStats;
+  /** True once the worker is running the replay that was last started (the numbers above are not from the run before it). */
+  replayLive: boolean;
   pedServedTotal: number;
   pedIncidentsTotal: number;
   emergency: EmergencyStats;
@@ -97,6 +100,7 @@ const DEFAULT_METRICS: SimMetricsState = {
   queuePeakFt: 0,
   expressVehicleS: 0,
   transit: { services: 0, headwayMeanS: 0, headwayCv: 0, boarded: 0, transfers: 0, heldS: 0 },
+  replayLive: false,
   pedServedTotal: 0,
   pedIncidentsTotal: 0,
   emergency: { dispatched: 0, completed: 0, waiting: 0, active: 0, totalResponseS: 0, totalIdealS: 0, lastResponseS: 0, lastIdealS: 0 },
@@ -159,6 +163,10 @@ export function useTrafficSimulation() {
   } | null>(null);
   const versionCounterRef = useRef(0);
   const lastDriveKeyRef = useRef("");
+  /** The run number the worker was on when a replay was started: the replay is live once it reports a later one. */
+  const replayFloorRef = useRef(Infinity);
+  /** The actions that have shaped the current run, for saving a replay of it (see worker: LOGGED_TYPES). */
+  const recordingRef = useRef<{ runId: number; actions: LoggedAction[] }>({ runId: -1, actions: [] });
 
   const [metrics, setMetrics] = useState<SimMetricsState>(DEFAULT_METRICS);
   const [userPaused, setUserPaused] = useState(false);
@@ -170,6 +178,8 @@ export function useTrafficSimulation() {
 
   const mode = useEditorStore((s) => s.mode);
   const simEpoch = useEditorStore((s) => s.simEpoch);
+  /** A replay drives the worker itself (see playReplay): the live edit sync and the fresh-run preamble below stand aside. */
+  const replaying = useEditorStore((s) => s.replay !== null);
   const running = mode === "simulate" && !userPaused;
 
   // Opening traffic always starts it moving: a pause left over from the last run (a finished level pauses itself) must
@@ -225,6 +235,14 @@ export function useTrafficSimulation() {
           drive: msg.drive ?? null,
           version: versionCounterRef.current,
         };
+        if (msg.runId !== undefined) {
+          const rec = recordingRef.current;
+          if (rec.runId !== msg.runId) {
+            rec.runId = msg.runId;
+            rec.actions = [];
+          }
+          if (msg.actions) for (const a of msg.actions) rec.actions.push(a);
+        }
         // A drive that has just ended: keep its summary (the worker repeats it in every tick until the next drive).
         const result = msg.driveResult ?? null;
         const key = result ? `${result.elapsedS.toFixed(2)}|${result.score}|${result.distanceFt.toFixed(0)}` : "";
@@ -252,6 +270,7 @@ export function useTrafficSimulation() {
             queuePeakFt: msg.queuePeakFt ?? 0,
             expressVehicleS: msg.expressVehicleS ?? 0,
             transit: msg.transit ?? DEFAULT_METRICS.transit,
+            replayLive: msg.runId !== undefined && msg.runId > replayFloorRef.current,
             pedServedTotal: msg.pedServedTotal,
             pedIncidentsTotal: msg.pedIncidentsTotal,
             emergency: msg.emergency,
@@ -325,7 +344,7 @@ export function useTrafficSimulation() {
   // sync with live traffic-management edits (speed limits, lane arrows,
   // junction control) via small patches, so the sim is never restarted.
   useEffect(() => {
-    if (mode !== "simulate") return;
+    if (mode !== "simulate" || replaying) return;
     const worker = workerRef.current;
     if (!worker) return;
     const snapshot = useEditorStore.getState().getSnapshot();
@@ -391,7 +410,7 @@ export function useTrafficSimulation() {
         worker.postMessage({ type: "patchNodes", nodes: nodePatches } satisfies WorkerInMessage);
       }
     });
-  }, [mode, simEpoch]);
+  }, [mode, simEpoch, replaying]);
 
   // `running` is derived (mode === "simulate" && !userPaused); keep the
   // worker's clock in sync with it whenever either input changes.
@@ -484,6 +503,36 @@ export function useTrafficSimulation() {
 
   const clearDriveResult = useCallback(() => setDriveResult(null), []);
 
+  /** The actions that have shaped the current run so far: everything needed to play it back. */
+  const getRecording = useCallback((): LoggedAction[] => recordingRef.current.actions.slice(), []);
+
+  /** Ends a replay: the worker goes back to taking live edits, with the settings (weather, light, bus lines, mix, car cap) the editor holds now. Call after the editor has put its own city back. */
+  const endReplay = useCallback(() => {
+    const worker = workerRef.current;
+    if (!worker) return;
+    const st = useEditorStore.getState();
+    replayFloorRef.current = Infinity;
+    worker.postMessage({ type: "reset" } satisfies WorkerInMessage);
+    worker.postMessage({ type: "setWeather", weather: st.weather } satisfies WorkerInMessage);
+    worker.postMessage({ type: "setDarkness", level: st.timeOfDay === "night" ? 1 : st.timeOfDay === "dusk" ? 0.5 : 0 } satisfies WorkerInMessage);
+    worker.postMessage({ type: "setDayCycle", enabled: st.dayCycle, startHour: 6, dayLengthS: 480 } satisfies WorkerInMessage);
+    worker.postMessage({ type: "setTransit", lines: st.transitLines } satisfies WorkerInMessage);
+    worker.postMessage({ type: "setTrafficMix", bus: st.trafficMix.bus, bike: st.trafficMix.bike } satisfies WorkerInMessage);
+    worker.postMessage({ type: "setMaxVehicles", value: graphics.vehicleCap } satisfies WorkerInMessage);
+    worker.postMessage({ type: "setRunning", running: false } satisfies WorkerInMessage);
+  }, [graphics.vehicleCap]);
+
+  /** Plays a recorded run back from the start, exactly as it happened. The roads shown must already be the replay's. */
+  const playReplay = useCallback((actions: LoggedAction[]) => {
+    const worker = workerRef.current;
+    if (!worker) return;
+    replayFloorRef.current = recordingRef.current.runId;
+    worker.postMessage({ type: "reset" } satisfies WorkerInMessage);
+    worker.postMessage({ type: "replay", actions } satisfies WorkerInMessage);
+    setUserPaused(false);
+    worker.postMessage({ type: "setRunning", running: true } satisfies WorkerInMessage);
+  }, []);
+
   /** Sends a wrecker to an incident. */
   const dispatchWrecker = useCallback((incidentId: number) => {
     workerRef.current?.postMessage({ type: "dispatchWrecker", incidentId } satisfies WorkerInMessage);
@@ -510,6 +559,9 @@ export function useTrafficSimulation() {
     driveInput,
     driveResult,
     clearDriveResult,
+    getRecording,
+    playReplay,
+    endReplay,
   };
 }
 

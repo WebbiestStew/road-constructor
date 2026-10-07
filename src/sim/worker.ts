@@ -37,6 +37,7 @@ import {
   type TransitStats,
   type DriveView,
   type DriveResult,
+  type LoggedAction,
   type VehicleKind,
   type VehicleState,
   type Weather,
@@ -2546,6 +2547,7 @@ function runDueEvents() {
 }
 
 function step(dt: number) {
+  if (replaying) applyDueReplayActions();
   if (!network) return;
   stepCounter++;
   simTime += dt;
@@ -2964,6 +2966,8 @@ function postSnapshot(forceStats: boolean) {
     transit: transitStats(),
     drive: driveView(),
     driveResult,
+    runId,
+    actions: takeNewActions(),
     pedServedTotal,
     pedIncidentsTotal,
     pedCrossings: activeCrossingViews(),
@@ -3019,9 +3023,7 @@ function loopTick() {
 // Message handling
 // ---------------------------------------------------------------------------
 
-ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
-  const msg = event.data;
-  if (msg.type !== "returnBuffers" && msg.type !== "setSpeedMultiplier" && msg.type !== "setMaxVehicles") snapshotDirty = true;
+function handleMessage(msg: WorkerInMessage) {
   switch (msg.type) {
     case "reset":
       resetRun();
@@ -3156,12 +3158,114 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       });
       break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Recording and replay. The sim is deterministic: the same network, seed and the same player actions at the same sim
+// times give the same run. So a run is recorded as the actions that changed it (each stamped with the sim clock it
+// was applied at), and a replay is that script played back into a fresh run, exactly, with no per-vehicle data to
+// store. The log starts, at the moment of a reset, with the settings that persist from run to run.
+// ---------------------------------------------------------------------------
+
+const LOGGED_TYPES = new Set<WorkerInMessage["type"]>([
+  "updateNetwork",
+  "patchEdges",
+  "patchNodes",
+  "setDemand",
+  "breakdown",
+  "ambulance",
+  "crash",
+  "incident",
+  "dispatchWrecker",
+  "setTransit",
+  "setWeather",
+  "setDarkness",
+  "setTrafficMix",
+  "setLeftTurnsYield",
+  "setRageWeaves",
+  "scheduleEvents",
+  "setDayCycle",
+  "setMaxVehicles",
+  "drive",
+  "driveInput",
+]);
+const MAX_LOGGED_ACTIONS = 20000;
+/** Counts runs (resets), so the main thread can tell when the actions it is receiving belong to a new one. */
+let runId = 0;
+let actionLog: LoggedAction[] = [];
+let actionLogSent = 0;
+let replayQueue: LoggedAction[] = [];
+let replaying = false;
+
+function logAction(msg: WorkerInMessage) {
+  if (actionLog.length < MAX_LOGGED_ACTIONS) actionLog.push({ at: simTime, msg });
+}
+
+/** Starts a fresh log, opening it with the settings that carry over from one run to the next. */
+function startActionLog() {
+  actionLog = [];
+  actionLogSent = 0;
+  runId++;
+  logAction({ type: "setMaxVehicles", value: maxVehicles });
+  logAction({ type: "setTransit", lines: transitLines });
+  logAction({ type: "setWeather", weather: manualWeather });
+  logAction({ type: "setDarkness", level: darkness });
+  logAction({ type: "setTrafficMix", bus: busShare, bike: bikeShare });
+  logAction({ type: "setDayCycle", enabled: dayCycleOn, startHour: dayStartHour, dayLengthS });
+}
+
+/** Actions logged since the last snapshot. */
+function takeNewActions(): LoggedAction[] | undefined {
+  if (actionLog.length <= actionLogSent) return undefined;
+  const fresh = actionLog.slice(actionLogSent);
+  actionLogSent = actionLog.length;
+  return fresh;
+}
+
+/** Plays back the replay actions that have come due, in order. Runs at the top of a step, where the original run's messages were handled. */
+function applyDueReplayActions() {
+  while (replayQueue.length > 0 && replayQueue[0].at <= simTime) {
+    const a = replayQueue.shift()!;
+    try {
+      handleMessage(a.msg);
+    } catch {
+      // a damaged action in a replay file must not take the simulator down: skip it
+    }
+  }
+}
+
+ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
+  const msg = event.data;
+  if (msg.type !== "returnBuffers" && msg.type !== "setSpeedMultiplier" && msg.type !== "setMaxVehicles") snapshotDirty = true;
+  if (msg.type === "replay") {
+    // stable by time, so actions logged at the same moment keep their order
+    replayQueue = msg.actions.map((a, i) => ({ a, i })).sort((x, y) => x.a.at - y.a.at || x.i - y.i).map((x) => x.a);
+    replaying = true;
+    return;
+  }
+  if (msg.type === "reset") {
+    replayQueue = [];
+    replaying = false;
+    handleMessage(msg);
+    startActionLog();
+    return;
+  }
+  // During a replay the only changes are the script's.
+  if (replaying && LOGGED_TYPES.has(msg.type)) return;
+  if (LOGGED_TYPES.has(msg.type)) logAction(msg);
+  handleMessage(msg);
 };
 
 // The headless harness sets this before importing the worker to get at the live state when diagnosing jams.
 const debugSlot = (globalThis as { __simDebug?: Record<string, unknown> }).__simDebug;
 if (debugSlot) {
   debugSlot.state = () => ({ vehicles, network, laneOccupancy, signalPhaseState, nodeApproaches, simTime, incidents, leftStats: () => ({ served: leftTurnsServed, waitS: leftTurnWaitTotalS }) });
+  // Steps the sim directly (no timers), for tests that need exactly the same moments from run to run.
+  debugSlot.advance = (untilS: number) => {
+    while (simTime < untilS - 1e-9) step(SIM_DT);
+  };
+  debugSlot.actions = () => actionLog;
+  debugSlot.totals = () => ({ simTime, trips: completedTripsTotal, people: peopleMovedTotal, delayS: tripDelayTotalS, spawned: spawnedTotal, active: vehicles.size });
   debugSlot.stopFor = (v: VehicleState, edge: Edge3D) => ({
     junction: junctionStopDistance(v, edge),
     crossing: crossingStopDistance(v, edge),

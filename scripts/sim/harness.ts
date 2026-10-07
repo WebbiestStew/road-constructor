@@ -19,6 +19,12 @@ export interface Tick {
   combos: number;
 }
 
+/** Completed trips at each tick's sim time, for comparing two runs tick by tick. */
+export const tripSeries = new Map<number, number>();
+
+/** Every action the worker logged (see LoggedAction), collected from the ticks. */
+export const loggedActions: import("../../src/sim/types").LoggedAction[] = [];
+
 export async function createSim() {
   const g = globalThis as unknown as Record<string, unknown> & { onmessage: (e: { data: WorkerInMessage }) => void };
   let last: Tick | null = null;
@@ -28,6 +34,9 @@ export async function createSim() {
   g.postMessage = (m: WorkerOutMessage) => {
     if (m.type !== "tick") return;
     g.__simLast = m;
+    tripSeries.set(Math.round((m as unknown as { simTime: number }).simTime * 1000), (m as unknown as { completedTripsTotal: number }).completedTripsTotal);
+    const acts = (m as unknown as { actions?: import("../../src/sim/types").LoggedAction[] }).actions;
+    if (acts) loggedActions.push(...acts);
     const t = m as unknown as {
       simTime: number;
       activeCount: number;

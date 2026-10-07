@@ -10,6 +10,7 @@ import { requestOpenTutorial } from "@/lib/tutorial";
 import { setChaos, useChaos } from "@/lib/chaos";
 import { useQuality } from "@/lib/quality";
 import { setSettingsOpen } from "@/lib/settingsMenu";
+import { openSaves } from "@/lib/savesMenu";
 import { requestMakeChallenge } from "@/lib/challenge";
 import { toggleTour, togglePhotoMode } from "@/lib/photoMode";
 import { useCompact } from "@/lib/compact";
@@ -118,6 +119,7 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const setMode = useEditorStore((s) => s.setMode);
   const buildLocked = useEditorStore((s) => s.buildLocked);
   const scenarioActive = useEditorStore((s) => s.activeScenarioId !== null);
+  const replaying = useEditorStore((s) => s.replay !== null);
   const quality = useQuality();
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
   const setHeatmapEnabled = useEditorStore((s) => s.setHeatmapEnabled);
@@ -187,7 +189,9 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       </Link>
   );
 
-  const modeBlock = (
+  const modeBlock = replaying ? (
+    <span className="rounded-full bg-gradient-to-br from-violet-50 to-fuchsia-50 px-3 py-1.5 text-xs font-bold text-violet-700 ring-1 ring-inset ring-violet-200">🎞️ Replay</span>
+  ) : (
     <>
       {mode === "build" ? (
         <div className="flex items-center gap-1 rounded-full bg-black/5 p-1">
@@ -376,7 +380,7 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
             <IconRideAlong className="h-3.5 w-3.5" />
             Ride Along
           </button>
-          {!scenarioActive && <EventsMenu sim={sim} />}
+          {!scenarioActive && !replaying && <EventsMenu sim={sim} />}
         </>
       )}
     </>
@@ -414,6 +418,16 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
         className="flex h-7 w-7 items-center justify-center rounded-full text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
       >
         {muted ? <IconSpeakerOff className="h-3.5 w-3.5" /> : <IconSpeakerOn className="h-3.5 w-3.5" />}
+      </button>
+      <button
+        type="button"
+        onClick={() => openSaves()}
+        title="Save slots and replays of your runs"
+        aria-label="Saves and replays"
+        className="flex h-7 items-center justify-center gap-1 rounded-full px-2 text-sm text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+      >
+        💾
+        <span className="text-[10px] font-extrabold uppercase">Saves</span>
       </button>
       <button
         type="button"
@@ -554,7 +568,7 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
         </div>
         {menuOpen && (
           <div className="animate-pop pointer-events-auto absolute left-2 right-2 top-[3.75rem] z-30 flex flex-wrap items-center gap-1.5 rounded-2xl p-2.5 hud-panel [&_.h-6.w-px]:hidden">
-            {mode === "simulate" && (
+            {mode === "simulate" && !replaying && (
               <button
                 type="button"
                 onClick={resetTraffic}

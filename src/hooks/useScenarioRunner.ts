@@ -35,6 +35,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
   // re-run (and set state) after every render without end once a second level began.
   const metrics = sim.metrics;
   const setSimRunning = sim.setRunning;
+  const getRecording = sim.getRecording;
   const activeScenarioId = useEditorStore((s) => s.activeScenarioId);
   const mode = useEditorStore((s) => s.mode);
   const loadScenario = useEditorStore((s) => s.loadScenario);
@@ -114,6 +115,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
         evalProgress.detailLines
       );
       const report = buildServiceReport(metrics, scenario.serviceBaseline);
+      const recording = getRecording();
       const raf = requestAnimationFrame(() => {
         const previousStars = bestStarsFor(scenario.id);
         // Stars (and funds for them) belong to the campaign levels; a daily or a friend's challenge pays only for medals and the replay.
@@ -128,12 +130,12 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
         } else if (result.won && recordStars(scenario.id, result.stars)) {
           pushToast(`⭐ ${"★".repeat(result.stars)} saved for ${scenario.name}`, "good");
         }
-        setResults({ ...result, score: evalProgress.score ?? null, report, payout });
+        setResults({ ...result, score: evalProgress.score ?? null, report, payout, recording });
         setSimRunning(false);
       });
       return () => cancelAnimationFrame(raf);
     }
-  }, [scenario, mode, results, startSimTime, metrics, setSimRunning, network]);
+  }, [scenario, mode, results, startSimTime, metrics, setSimRunning, getRecording, network]);
 
   const startScenario = useCallback(
     (def: ScenarioDef) => {

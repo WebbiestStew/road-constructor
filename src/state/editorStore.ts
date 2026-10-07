@@ -45,6 +45,8 @@ import {
 import { playDemolish, playPlaceRoad } from "@/lib/sound";
 import { DEFAULT_LEFT_GREEN_S, MAX_PED_PHASE_S, approxCycleS, type SignalMode } from "@/sim/signals";
 import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
+import { applyPatchActions, replayStart, visualPatches, type ReplayMeta } from "@/lib/replays";
+import type { LoggedAction } from "@/sim/types";
 
 export type EditorMode = "build" | "simulate";
 export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street" | "transit" | "gantry";
@@ -319,7 +321,36 @@ interface EditorState {
   enterSandboxMode: () => void;
   /** Starts a clean Sandbox: empty map, nothing locked, and no money limit. */
   startSandbox: () => void;
+
+  /** A recorded run being played back (null otherwise). While it plays the roads shown are the replay's, nothing can be edited, and the player's own city is kept to be put back. */
+  replay: ReplaySession | null;
+  /** Switches the screen over to a replay's city, remembering what was open. Returns false if the recording has no roads. `scenery` is the buildings around a real level's roads. */
+  startReplay: (meta: ReplayMeta, actions: LoggedAction[], scenery: SceneryData | null) => boolean;
+  /** Shows the replay's tweaks to roads and signals that have come due by this sim time. */
+  advanceReplay: (simTimeS: number) => void;
+  /** Puts the replay's starting roads back, for playing it from the top. */
+  restartReplay: () => void;
+  /** Leaves the replay and brings back the city that was open. */
+  exitReplay: () => void;
 }
+
+/** A replay in progress: what it is, the script, and the player's own state to restore afterwards. */
+export interface ReplaySession {
+  meta: ReplayMeta;
+  actions: LoggedAction[];
+  /** Road and signal tweaks still to show on the map, in time order. */
+  patches: LoggedAction[];
+  shown: number;
+  start: { nodes: NodeSpec[]; edges: EdgeSpec[] };
+  saved: Partial<EditorState>;
+}
+
+/** The parts of the editor a replay replaces, so they can be put back. */
+const REPLAY_RESTORED_KEYS = [
+  "nodes", "edges", "nodesById", "edgesById", "budget", "nextNodeSeq", "nextEdgeSeq", "activeScenarioId", "buildLocked",
+  "realCityActive", "scenery", "placeName", "economyK", "transitLines", "activeTransitId", "trafficMix", "weather", "dayCycle",
+  "timeOfDay", "mode", "tool", "selection", "drawFromNodeId", "past", "future",
+] as const;
 
 /**
  * Where to point the camera, and how far out, to see a whole network: the middle of its roads and the farthest node
@@ -1833,6 +1864,79 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setTrafficMix: (mix) => set({ trafficMix: mix }),
   simEpoch: 0,
 
+  replay: null,
+  startReplay: (meta, actions, scenery) => {
+    const start = replayStart(actions);
+    if (!start) return false;
+    const s = get();
+    // Replaying while already in a replay: keep the original city to come back to, not the previous replay's.
+    const saved: Partial<EditorState> = s.replay ? s.replay.saved : {};
+    if (!s.replay) for (const key of REPLAY_RESTORED_KEYS) (saved as Record<string, unknown>)[key] = s[key];
+    const net = start.network;
+    set({
+      replay: { meta, actions, patches: visualPatches(actions), shown: 0, start: { nodes: net.nodes, edges: net.edges }, saved },
+      nodes: net.nodes,
+      edges: net.edges,
+      nodesById: new Map(net.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(net.edges.map((e) => [e.id, e])),
+      budget: SANDBOX_BUDGET,
+      activeScenarioId: null,
+      buildLocked: true,
+      realCityActive: scenery !== null,
+      scenery: scenery ?? EMPTY_SCENERY,
+      placeName: null,
+      economyK: null,
+      transitLines: start.transit,
+      activeTransitId: null,
+      trafficMix: start.trafficMix,
+      weather: start.weather,
+      dayCycle: start.dayCycle,
+      timeOfDay: start.darkness >= 0.75 ? "night" : start.darkness >= 0.25 ? "dusk" : "day",
+      mode: "simulate",
+      tool: "inspect",
+      selection: null,
+      drawFromNodeId: null,
+      rideAlongActive: false,
+      drivingId: null,
+      simEpoch: s.simEpoch + 1,
+      pendingCameraFit: framingFor(net.nodes),
+    });
+    return true;
+  },
+  advanceReplay: (simTimeS) => {
+    const s = get();
+    const r = s.replay;
+    if (!r || r.shown >= r.patches.length) return;
+    let n = r.shown;
+    while (n < r.patches.length && r.patches[n].at <= simTimeS) n++;
+    if (n === r.shown) return;
+    const applied = applyPatchActions(s.nodes, s.edges, r.patches.slice(r.shown, n));
+    set({
+      nodes: applied.nodes,
+      edges: applied.edges,
+      nodesById: new Map(applied.nodes.map((x) => [x.id, x])),
+      edgesById: new Map(applied.edges.map((x) => [x.id, x])),
+      replay: { ...r, shown: n },
+    });
+  },
+  restartReplay: () => {
+    const s = get();
+    const r = s.replay;
+    if (!r) return;
+    set({
+      nodes: r.start.nodes,
+      edges: r.start.edges,
+      nodesById: new Map(r.start.nodes.map((n) => [n.id, n])),
+      edgesById: new Map(r.start.edges.map((e) => [e.id, e])),
+      replay: { ...r, shown: 0 },
+    });
+  },
+  exitReplay: () => {
+    const s = get();
+    if (!s.replay) return;
+    set({ ...(s.replay.saved as Partial<EditorState>), replay: null, simEpoch: s.simEpoch + 1, pendingCameraFit: framingFor((s.replay.saved.nodes as NodeSpec[] | undefined) ?? []) });
+  },
+
   loadScenario: (scenario) => {
     set({
       nodes: scenario.startingNetwork.nodes,
@@ -1895,6 +1999,8 @@ let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 useEditorStore.subscribe((state) => {
   if (autosaveTimer) clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
+    // A replay's roads are not the player's: never let them overwrite the autosave.
+    if (useEditorStore.getState().replay) return;
     saveAutosave({
       version: 1,
       network: { nodes: state.nodes, edges: state.edges },

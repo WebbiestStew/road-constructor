@@ -446,6 +446,12 @@ export interface VehicleState {
 // Worker message protocol
 // ---------------------------------------------------------------------------
 
+/** A message that changed a run, stamped with the sim clock it was applied at: the unit a replay is made of. */
+export interface LoggedAction {
+  at: number;
+  msg: WorkerInMessage;
+}
+
 export type WorkerInMessage =
   | { type: "updateNetwork"; network: NetworkSnapshot; seed: number }
   | { type: "setRunning"; running: boolean }
@@ -480,6 +486,8 @@ export type WorkerInMessage =
   | { type: "drive"; action: "take" | "release"; id: number }
   /** Pedals and lane changes while driving: accel -1 brake, 0 coast, 1 throttle; lane -1 left, 1 right (a request, carried out when there is a gap). */
   | { type: "driveInput"; accel?: -1 | 0 | 1; lane?: -1 | 0 | 1 }
+  /** Plays a recorded run back: the actions are applied at their sim times, into a run that was just reset. Live edits are ignored until the next reset. */
+  | { type: "replay"; actions: LoggedAction[] }
   /** How dark it is (0 day, 0.5 dusk, 1 night). Drivers are more careful on unlit roads, and see people late. */
   | { type: "setDarkness"; level: number }
   /** Turns the 24-hour demand cycle on or off: demand follows rush hours and the clock starts at `startHour`, one day lasting `dayLengthS` sim-seconds. */
@@ -619,6 +627,9 @@ export type WorkerOutMessage =
       /** The vehicle the player is driving, if any, and how the last drive ended. */
       drive: DriveView | null;
       driveResult: DriveResult | null;
+      /** Actions that changed the run since the last tick (for recording a replay), and which run they belong to. */
+      actions?: LoggedAction[];
+      runId?: number;
       /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */
       completedTripsTotal: number;
       /** The heavy per-edge statistics. Only present on ticks where they were recomputed (about 5 per second); the main thread keeps the last set. */
