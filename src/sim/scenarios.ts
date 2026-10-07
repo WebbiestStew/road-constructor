@@ -1474,7 +1474,7 @@ const STORY_BASELINES: Record<string, { baseline: number; two?: number; three?: 
   "story-opening-night": { baseline: 459 },
   "story-bridge-out": { baseline: 341 },
   "story-storm-season": { baseline: 396 },
-  "story-grand-opening": { baseline: 331, two: 1.04, three: 1.08 },
+  "story-grand-opening": { baseline: 331, three: 1.1 },
 };
 const storyEvaluator = (id: string) => createRealCityEvaluator(STORY_BASELINES[id].baseline, 300, STORY_BASELINES[id].three, STORY_BASELINES[id].two);
 

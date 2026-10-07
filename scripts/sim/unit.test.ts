@@ -168,3 +168,36 @@ test("land use: homes become entries, jobs and shops destinations, and the playe
   assert.equal(cleared.find((e) => e.id === "ab")!.zone, undefined, "removing the zones takes their markers away");
   assert.deepEqual(cleared.find((e) => e.id === "cd")!.zone, { type: "entry", demandVehPerHour: 500 });
 });
+
+test("device report: frame times are summarised, and the verdict follows the slow frames", async () => {
+  const { summariseFrames, judge } = await import("../../src/lib/deviceReport");
+  const smooth = summariseFrames(Array.from({ length: 300 }, () => 16.7));
+  assert.ok(Math.abs(smooth.avgFps - 60) < 0.5);
+  assert.equal(smooth.hitches, 0);
+  assert.equal(judge(smooth, "medium", 60).verdict, "smooth");
+  assert.equal(judge(smooth, "medium", 60).suggest, "high", "headroom suggests a higher tier");
+  assert.equal(judge(smooth, "high", 60).suggest, "high");
+  const slow = summariseFrames(Array.from({ length: 300 }, (_, i) => (i % 5 === 0 ? 80 : 30)));
+  const verdict = judge(slow, "high", 60);
+  assert.equal(verdict.verdict, "choppy");
+  assert.equal(verdict.suggest, "medium", "a choppy device drops one tier");
+  assert.equal(judge(slow, "low", 30).suggest, "low", "there is nowhere lower to go");
+  assert.equal(judge(summariseFrames([16, 16]), "high", 60).verdict, "playable", "too few frames to judge");
+});
+
+test("sync codes: made of 16 characters, formatted for reading, and parsed back from however they are typed", async () => {
+  const { generateSyncCode, formatSyncCode, parseSyncCode } = await import("../../src/lib/cloudSync");
+  const code = generateSyncCode();
+  assert.match(code, /^[A-Z2-7]{16}$/);
+  assert.match(formatSyncCode(code), /^[A-Z2-7]{4}(-[A-Z2-7]{4}){3}$/);
+  assert.equal(parseSyncCode(formatSyncCode(code).toLowerCase()), code);
+  assert.equal(parseSyncCode(` ${formatSyncCode(code)} `), code);
+  assert.equal(parseSyncCode("short"), null);
+});
+
+test("lo-fi radio: the four chords repeat", async () => {
+  const { lofiChord } = await import("../../src/lib/sound");
+  assert.deepEqual(lofiChord(0), lofiChord(4));
+  assert.deepEqual(lofiChord(-1), lofiChord(3));
+  assert.notDeepEqual(lofiChord(0), lofiChord(1));
+});

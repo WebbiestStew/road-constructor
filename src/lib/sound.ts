@@ -66,6 +66,7 @@ const mixListeners = new Set<() => void>();
 
 interface Mixer {
   master: GainNode;
+  limiter: DynamicsCompressorNode;
   groups: Record<SoundGroup, GainNode>;
 }
 let mixer: Mixer | null = null;
@@ -90,7 +91,7 @@ function getMixer(audio: AudioContext): Mixer {
     groups[g] = audio.createGain();
     groups[g].connect(master);
   }
-  mixer = { master, groups };
+  mixer = { master, limiter, groups };
   applyMix();
   return mixer;
 }
@@ -511,8 +512,8 @@ export function setSirenSound(on: boolean): void {
 /** A soft double beep for a pedestrian crossing signal. */
 export function playCrossingBeep(): void {
   if (muted) return;
-  tone(1040, 0, 0.07, 0.035, "square", "alerts");
-  tone(1040, 0.12, 0.07, 0.035, "square", "alerts");
+  tone(1040, 0, 0.07, 0.06, "square", "alerts");
+  tone(1040, 0.12, 0.07, 0.06, "square", "alerts");
 }
 
 // ---------------------------------------------------------------------------
@@ -843,6 +844,9 @@ export function engineRevs(mph: number): { gear: number; revs: number } {
   return { gear: gear + 1, revs: 0.28 + 0.72 * t };
 }
 
+/** Measured with the level probe: the engine came out 5 dB louder than everything else, so it is brought down. */
+const PLAYER_ENGINE_TRIM = 0.56;
+
 /** How each kind of vehicle sounds from the driver's seat: the pitch of its engine, how loud and how muffled it is, and how much wind there is (a bicycle has no engine at all). */
 const ENGINE_VOICES: Record<string, { pitch: number; level: number; muffle: number; wind: number }> = {
   car: { pitch: 1, level: 1, muffle: 1, wind: 1 },
@@ -872,15 +876,15 @@ export function setPlayerEngine(on: boolean, mph = 0, throttle = 0, kind = "car"
   const freq = (36 + revs * 88) * voice.pitch;
   for (const osc of e.oscillators) osc.frequency.linearRampToValueAtTime(freq * (osc.type === "square" ? 0.5 : 1), now + 0.06);
   e.filter.frequency.linearRampToValueAtTime((380 + revs * 420 + load * 900) * voice.muffle, now + 0.1);
-  e.gain.gain.linearRampToValueAtTime((0.035 + revs * 0.02 + load * 0.035) * voice.level, now + 0.1);
+  e.gain.gain.linearRampToValueAtTime((0.035 + revs * 0.02 + load * 0.035) * voice.level * PLAYER_ENGINE_TRIM, now + 0.1);
   // wind and tyre hiss grow with speed on top of the engine's own intake (all there is on a bicycle)
-  e.intakeGain.gain.linearRampToValueAtTime((load * 0.02 * revs * voice.level + Math.min(1, mph / 60) * 0.014 * voice.wind), now + 0.1);
+  e.intakeGain.gain.linearRampToValueAtTime((load * 0.02 * revs * voice.level + Math.min(1, mph / 60) * 0.014 * voice.wind) * PLAYER_ENGINE_TRIM, now + 0.1);
 }
 
 /** Tyres squealing on a hard stop. */
 export function playBrakeSqueal(): void {
   if (muted) return;
-  noiseBurst(0.45, 0.06, 2600, "alerts", "bandpass");
+  noiseBurst(0.45, 0.1, 2600, "alerts", "bandpass");
 }
 
 /** The indicator's tick, while a lane change waits for a gap. */
@@ -1015,6 +1019,8 @@ let radioTimer: ReturnType<typeof setInterval> | null = null;
 let radioBeat = 0;
 let radioNextAt = 0;
 let radioNoise: AudioBuffer | null = null;
+/** Per-station loudness trims from the level probe: lo-fi was 3 dB hot and the dispatch chatter 4 dB quiet against the rest. */
+const RADIO_TRIM: Record<RadioStation, number> = { off: 1, lofi: 0.7, synth: 1, dispatch: 1.6 };
 
 function noiseBuffer(audio: AudioContext): AudioBuffer {
   if (radioNoise) return radioNoise;
@@ -1035,7 +1041,7 @@ function radioNote(audio: AudioContext, at: number, freq: number, dur: number, p
   filter.type = "lowpass";
   filter.frequency.value = cutoff;
   gain.gain.setValueAtTime(0, at);
-  gain.gain.linearRampToValueAtTime(peak, at + attack);
+  gain.gain.linearRampToValueAtTime(peak * RADIO_TRIM[station], at + attack);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
   osc.connect(filter);
   filter.connect(gain);
@@ -1052,7 +1058,7 @@ function radioNoiseHit(audio: AudioContext, at: number, dur: number, peak: numbe
   filter.type = type;
   filter.frequency.value = freq;
   const gain = audio.createGain();
-  gain.gain.setValueAtTime(peak, at);
+  gain.gain.setValueAtTime(peak * RADIO_TRIM[station], at);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
   src.connect(filter);
   filter.connect(gain);
@@ -1158,4 +1164,71 @@ export function setRadioStation(next: RadioStation): void {
 
 export function getRadioStation(): RadioStation {
   return station;
+}
+
+// ---------------------------------------------------------------------------
+// Level probe: measures how loud each sound really is (from the mixer's output), so the mix can be balanced by numbers
+// where nobody is there to listen. Used by the sound check in development and by tests in a browser.
+// ---------------------------------------------------------------------------
+
+export interface LevelReading {
+  /** Loudest sample, dB relative to full scale. */
+  peakDb: number;
+  /** Root-mean-square over the stretch the sound was audible, dBFS. */
+  rmsDb: number;
+  /** Seconds the output stayed above silence. */
+  audibleS: number;
+  /** The audio clock was running (a browser keeps it suspended until the page has been touched). */
+  contextRunning: boolean;
+}
+
+/** Plays a sound check and reads the mixer output while it runs. */
+export async function measureSoundCheck(id: string): Promise<LevelReading> {
+  const audio = getCtx();
+  if (!audio) return { peakDb: -Infinity, rmsDb: -Infinity, audibleS: 0, contextRunning: false };
+  const m = getMixer(audio);
+  const analyser = audio.createAnalyser();
+  analyser.fftSize = 2048;
+  m.limiter.connect(analyser);
+  const data = new Float32Array(analyser.fftSize);
+  let peak = 0;
+  let sumSq = 0;
+  let n = 0;
+  let audible = 0;
+  const ms = playSoundCheck(id);
+  const start = performance.now();
+  await new Promise<void>((resolve) => {
+    const tick = () => {
+      analyser.getFloatTimeDomainData(data);
+      let blockSq = 0;
+      for (const x of data) {
+        blockSq += x * x;
+        if (Math.abs(x) > peak) peak = Math.abs(x);
+      }
+      const blockRms = Math.sqrt(blockSq / data.length);
+      if (blockRms > 0.0005) {
+        sumSq += blockSq;
+        n += data.length;
+        audible += 0.05;
+      }
+      if (performance.now() - start < ms + 250) setTimeout(tick, 50);
+      else resolve();
+    };
+    tick();
+  });
+  m.limiter.disconnect(analyser);
+  const db = (x: number) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+  return { peakDb: db(peak), rmsDb: db(n > 0 ? Math.sqrt(sumSq / n) : 0), audibleS: audible, contextRunning: audio.state === "running" };
+}
+
+// Dev builds only: `await __soundLevels()` in the console prints every sound check's loudness.
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+  (window as unknown as { __soundLevels: () => Promise<Record<string, LevelReading>> }).__soundLevels = async () => {
+    const out: Record<string, LevelReading> = {};
+    for (const c of SOUND_CHECKS) {
+      out[c.id] = await measureSoundCheck(c.id);
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return out;
+  };
 }

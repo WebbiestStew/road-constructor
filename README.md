@@ -78,6 +78,32 @@ speed limits and signal timing, while every car drives for real. Play it on desk
 - **Saves and exact replays.** Eight named city slots, and replays of runs. The simulation is deterministic, so a replay is
   just the actions that shaped the run (each stamped with the sim time) played into a fresh run: bit for bit the same
   traffic, with a replay bar, a drone flyover over it, and files you can send.
+- **Demand that responds.** In free play (and any level that switches it on) a road that flows draws more drivers, up to
+  30% more, and a jammed one loses them, down to 55%, with some of them turning into bus riders: so "just widen it" stops
+  being the whole answer. A chip shows what demand is doing.
+- **Crashes that happen.** With crash risk on, a driver's mistake causes a real rear-end crash that blocks a lane until
+  police arrive. The chance is tiny in calm daylight and grows with speed, rain, fog, darkness on an unlit road and
+  tailgating. Finishing without one earns the Vision Zero medal.
+- **Ramp meters.** Meter a ramp at 3, 5 or 8 seconds a car, or let it pace itself from how freely the freeway ahead is
+  flowing. It trades ramp queues for a freer mainline, and the simulation says plainly when that is a bad trade.
+- **Land use.** Place homes, jobs and shops beside the roads (Land use tool, `U`). Homes send cars out along the nearest road
+  and jobs and shops are where they go, so the player designs the city and the traffic follows. Sandbox becomes a city builder.
+- **People who wait.** At a crossing people wait for a gap or the button, and the waits are scored: the Walkable medal
+  asks for short waits and nobody giving up and stepping out.
+- **Season One.** Four story chapters on Midtown (the arena lets out, a water main closes the west avenue, a storm with
+  real crash risk, and everything at once) with an introduction before and a note after, each a puzzle with fixable
+  faults. Later chapters open with stars from earlier ones.
+- **Any vehicle, with a radio.** Ride along with a car, truck, bus, bike or ambulance (pick the next one, or filter by
+  kind) and drive it: a bus accelerates like a bus and sounds like one, an ambulance runs its siren, and the car radio has
+  three generated stations (lo-fi, synthwave, dispatch chatter).
+- **Community gallery and cloud backup (optional).** With a Redis store configured (the same Upstash variables as the
+  leaderboard) players can post published levels to a shared gallery (browse newest or most liked, play, like, report;
+  three reports hide a level) and back up their saves, stars and career under a sync code with no account. Without the
+  store both are hidden. The gallery can't prove a level's measured baseline is honest: it comes from the author's browser.
+- **Replay highlights.** A run notes its best moments (flow combos, a crash cleared fast, an ambulance getting through, the
+  worst jam); the replay shows them as chips to jump to, each with a button that records an eight-second clip.
+- **Performance test.** Settings has a "Test this device" button that measures the live scene, says which graphics tier
+  fits and can apply it, and copies a plain report (graphics card, screen, frame times, what the frame-rate guard did).
 - **Campaign, daily challenge and sandbox.** Hand-built levels with par-based stars, scripted trouble (a stalled
   car, a stadium letting out), a seeded daily scenario, and a no-money-limit sandbox.
 - **Real merges and exits.** Where a ramp joins or leaves a bigger road, its pavement rides alongside as an added
@@ -117,13 +143,21 @@ npm run build && npm start
 Next.js 16 / React 19 / React Three Fiber / Zustand / Tailwind 4. No backend; progress is stored in
 `localStorage`, and layouts can be shared as a link (`#data=…`, compressed and schema-validated with zod).
 
-## Daily leaderboard (optional)
+## Daily leaderboard, gallery and backup (optional)
 
 The daily challenge can post scores to a public board. It needs a Redis database; the free Upstash tier is plenty.
 Set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (see `.env.example`), or add Upstash from the Vercel
 Marketplace, which sets the equivalent `KV_REST_API_*` variables. Without them the game works exactly the same and
 just hides the board. Scores are reported by the browser, so it is an honour-system board: the API checks that a
 score is plausible and rate-limits posting, but cannot prove a run was played.
+
+The same two variables switch on the **community gallery** (`/api/levels`) and **cloud backup** (`/api/sync`). Posting
+is rate-limited and size-limited (700 KB, 2,500 roads), names are screened, and a level reported by three devices is
+hidden, but that is a small net rather than moderation: someone has to be willing to look at reports. A device is
+identified only by a random id kept in the browser, and a sync code is the whole key to a backup (the server stores it
+only as a hash), so there are no accounts and nothing to sign in to. To try them locally, run
+`npx tsx scripts/dev/mock-redis.ts` and start the dev server with
+`UPSTASH_REDIS_REST_URL=http://localhost:8079 UPSTASH_REDIS_REST_TOKEN=x npm run dev`.
 
 ## How it works
 
@@ -189,6 +223,7 @@ npx tsx --test scripts/sim/unit.test.ts  # the fast pure checks
 npx tsx scripts/sim/baseline.ts        # re-measure every real city's baseline (eight seeds, four at once)
 npx tsx scripts/sim/measure-level.ts my-city.json   # what the Publish button does, from a file
 npx tsx scripts/sim/replay.ts record /tmp/r.json && npx tsx scripts/sim/replay.ts play /tmp/r.json
+npx tsx scripts/dev/mock-redis.ts      # a stand-in for the Redis store, to try the gallery and backup locally
 ```
 
 ## Credits

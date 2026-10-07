@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEditorStore } from "@/state/editorStore";
 import { lowerQuality, setQuality, useQuality } from "@/lib/quality";
 import { getDetailShed, setDetailShed } from "@/lib/perfDetail";
+import { noteGuardEvent } from "@/lib/deviceReport";
 
 const WINDOW_SECONDS = 4;
 const MIN_FPS = 24;
@@ -39,10 +40,14 @@ export default function PerfGuard({ active }: { active: boolean }) {
     const fps = frames.current / elapsed.current;
     elapsed.current = 0;
     frames.current = 0;
-    if (fps < MIN_FPS) setQuality(lowerQuality(quality), true);
+    if (fps < MIN_FPS) {
+      noteGuardEvent(`${fps.toFixed(0)} fps on ${quality}: stepped down to ${lowerQuality(quality)}`);
+      setQuality(lowerQuality(quality), true);
+    }
     // Shed the optional overlays one step at a time before the whole quality tier has to drop, and bring them back slowly.
     const shed = getDetailShed();
     if (fps < SHED_FPS && shed < 2) {
+      noteGuardEvent(`${fps.toFixed(0)} fps: overlays reduced to step ${shed + 1}`);
       setDetailShed((shed + 1) as 1 | 2);
       smooth.current = 0;
     } else if (fps >= SMOOTH_FPS && shed > 0) {

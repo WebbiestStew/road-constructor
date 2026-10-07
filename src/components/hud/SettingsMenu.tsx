@@ -14,6 +14,8 @@ import {
 import { setPref, usePrefs } from "@/lib/prefs";
 import { SOUND_CHECKS, getMixLevels, isMuted, playSoundCheck, resetMix, setMixLevel, subscribeMix, subscribeMuted, toggleMuted, type MixLevels } from "@/lib/sound";
 import { setSettingsOpen, useSettingsOpen } from "@/lib/settingsMenu";
+import { buildReport, gatherDeviceInfo, judge, measureFrames, type FrameResult } from "@/lib/deviceReport";
+import { pushToast } from "@/lib/toast";
 
 const PRESETS: { id: Quality; name: string; blurb: string; emoji: string }[] = [
   { id: "high", name: "High", blurb: "Shadows, bloom and ambient occlusion. For a desktop or a recent Mac.", emoji: "✨" },
@@ -230,6 +232,67 @@ function SoundSection() {
   );
 }
 
+const TEST_MS = 8000;
+const TIER_NAME: Record<Quality, string> = { high: "High", medium: "Medium", low: "Low" };
+
+/** Measures the live scene, says which graphics tier suits this device, and copies a report that can be sent back. */
+function PerformanceSection({ activeCars, speed }: { activeCars: number; speed: number }) {
+  const quality = useQuality();
+  const g = useGraphics();
+  const [progress, setProgress] = useState<number | null>(null);
+  const [result, setResult] = useState<FrameResult | null>(null);
+  const tweaked = Object.keys(getGraphicsOverrides()).length > 0;
+  const verdict = result ? judge(result, quality, g.maxFps) : null;
+
+  const run = async () => {
+    setProgress(0);
+    setResult(null);
+    const r = await measureFrames(TEST_MS, setProgress);
+    setProgress(null);
+    setResult(r);
+  };
+  const copy = async () => {
+    const text = buildReport(gatherDeviceInfo(), quality, tweaked ? "with the player's changes" : "", result, { activeCars, simSpeed: speed });
+    try {
+      await navigator.clipboard.writeText(text);
+      pushToast("📋 Performance report copied", "good");
+    } catch {
+      window.prompt("Copy this report:", text);
+    }
+  };
+
+  return (
+    <Section title="Performance">
+      <div className="flex flex-col gap-2 rounded-2xl bg-black/[0.03] px-3 py-2.5">
+        <p className="text-[11.5px] font-semibold leading-snug text-zinc-600">
+          Measures how smoothly this device draws the scene behind this menu, for {TEST_MS / 1000} seconds. Open a level and press play first, so there is traffic to draw.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => void run()} disabled={progress !== null} className="rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm hover:brightness-110 active:scale-95 disabled:opacity-60">
+            {progress !== null ? `Measuring… ${Math.round(progress * 100)}%` : "Test this device"}
+          </button>
+          <button type="button" onClick={() => void copy()} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 shadow-sm hover:bg-violet-50">
+            📋 Copy a report
+          </button>
+        </div>
+        {result && verdict && (
+          <div className={`flex flex-col gap-1 rounded-xl px-3 py-2 text-[12px] font-semibold ${verdict.verdict === "smooth" ? "bg-emerald-50 text-emerald-900" : verdict.verdict === "playable" ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-900"}`}>
+            <span className="font-extrabold">
+              {verdict.verdict === "smooth" ? "Smooth" : verdict.verdict === "playable" ? "Playable" : "Choppy"}: {result.avgFps.toFixed(0)} fps average, the slowest 5% of frames took {result.p95Ms.toFixed(0)} ms
+            </span>
+            <span>{verdict.reason}</span>
+            {verdict.suggest !== quality && (
+              <button type="button" onClick={() => setQuality(verdict.suggest)} className="mt-1 self-start rounded-full bg-[#241b3d] px-3 py-1 text-[11px] font-bold text-white hover:brightness-125">
+                Switch to {TIER_NAME[verdict.suggest]}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 function AccessibilitySection() {
   const prefs = usePrefs();
   return (
@@ -242,7 +305,7 @@ function AccessibilitySection() {
 }
 
 /** The settings menu: graphics presets with advanced options, sound, and accessibility. Opens from the top bar's gear. */
-export default function SettingsMenu() {
+export default function SettingsMenu({ cars = 0, speed = 1 }: { cars?: number; speed?: number }) {
   const open = useSettingsOpen();
 
   useEffect(() => {
@@ -274,6 +337,7 @@ export default function SettingsMenu() {
           </button>
         </div>
         <GraphicsSection />
+        <PerformanceSection activeCars={cars} speed={speed} />
         <SoundSection />
         <AccessibilitySection />
       </div>

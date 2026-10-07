@@ -246,3 +246,56 @@ test("replays: a recorded run plays back to exactly the same traffic, tick for t
   assert.equal(r.differing, 0, `${r.differing} of ${r.samples} samples differed`);
   assert.equal(r.same, true);
 });
+
+// ---------------------------------------------------------------------------
+// The optional rules, ramp meters and Season One.
+// ---------------------------------------------------------------------------
+
+type LevelOut = { trips: number; incidents: number; demandIndex: number; riskCrashes: number; queueFt: number; pedWait: string };
+function level(id: string, variant: string, seed = 1337): LevelOut {
+  const out = execFileSync("npx", ["tsx", "scripts/sim/level.ts", id, variant, String(seed)], { encoding: "utf8" });
+  return JSON.parse(out.trim().split("\n").pop()!);
+}
+
+test("rules: demand follows the roads (a jam loses drivers, a free road gains them)", () => {
+  const jammed = level("midtown", "elastic");
+  const free = level("harbor-drive", "fixed,elastic");
+  assert.ok(jammed.demandIndex < 0.85, `jammed Midtown kept ${(jammed.demandIndex * 100).toFixed(0)}% of its demand`);
+  assert.ok(free.demandIndex > 1.04, `a fixed Harbor Drive drew ${(free.demandIndex * 100).toFixed(0)}% of its demand`);
+});
+
+test("rules: crash risk is rare in calm conditions and clearly more common in fog and the dark", () => {
+  const seeds = [1337, 1, 2, 3];
+  const total = (variant: string) => seeds.reduce((n, s) => n + level("harbor-drive", variant, s).riskCrashes, 0);
+  const calm = total("fixed,risk");
+  const bad = total("fixed,risk,fog,night");
+  assert.ok(calm <= 2, `${calm} crashes in four calm runs`);
+  assert.ok(bad >= calm + 2, `${bad} crashes in fog and the dark vs ${calm} in calm`);
+});
+
+test("rules: a ramp meter holds ramp traffic back", () => {
+  const open = level("clover-crossing", "none");
+  const metered = level("clover-crossing", "meter8");
+  assert.ok(metered.queueFt > open.queueFt * 1.5, `queue ${metered.queueFt} ft with an 8 s meter vs ${open.queueFt} ft`);
+  assert.ok(metered.trips < open.trips, "holding cars back moves fewer of them in five minutes");
+});
+
+test("rules: people wait for a gap to cross, and the wait is counted", () => {
+  const r = level("school-run", "fixed,cross,waits");
+  const m = /^(\d+) came, avg wait ([\d.]+)s/.exec(r.pedWait);
+  assert.ok(m, `no pedestrian numbers: ${r.pedWait}`);
+  assert.ok(Number(m![1]) >= 10, `only ${m![1]} people came`);
+  assert.ok(Number(m![2]) > 0.5, `average wait ${m![2]} s`);
+});
+
+test("Season One: each chapter is a real puzzle (untouched earns one star, a fixed city three)", async () => {
+  const { getScenarioById } = await import("../../src/sim/scenarios");
+  for (const id of ["story-opening-night", "story-bridge-out", "story-storm-season", "story-grand-opening"]) {
+    const def = getScenarioById(id)!;
+    const stars = (moved: number) => def.createEvaluator()({ elapsedS: 300, completedTripsTotal: moved } as never).stars;
+    const none = level(id, "none");
+    const fixed = level(id, "fixed");
+    assert.equal(stars(none.trips), 1, `${id}: untouched moved ${none.trips}`);
+    assert.equal(stars(fixed.trips), 3, `${id}: fixed moved ${fixed.trips}`);
+  }
+});

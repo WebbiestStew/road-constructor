@@ -119,7 +119,7 @@ export default function SimControls({
       {galleryOpen && <GalleryMenu runner={scenarioRunner} />}
       <PublishLevel sim={sim} runner={scenarioRunner} />
       <PlaceCredit />
-      {settingsOpen && <SettingsMenu />}
+      {settingsOpen && <SettingsMenu cars={sim.metrics.activeCount} speed={sim.speedMultiplier} />}
       <KeyboardRoads />
       <SoundScape sim={sim} />
       <EconomyTicker sim={sim} />
