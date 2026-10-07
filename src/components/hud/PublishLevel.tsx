@@ -8,6 +8,7 @@ import { MEASURE_RUN_S, measureCity, type Measurement, type SeedProgress } from 
 import { buildPublishedScenario } from "@/sim/scenarios";
 import { useEditorStore } from "@/state/editorStore";
 import { pushToast } from "@/lib/toast";
+import { galleryEnabled, publishLevel } from "@/lib/gallery";
 
 type Phase = "closed" | "ready" | "measuring" | "done" | "failed";
 
@@ -31,6 +32,8 @@ export default function PublishLevel({ sim, runner }: { sim: UseTrafficSimulatio
   const [result, setResult] = useState<Measurement | null>(null);
   const [error, setError] = useState("");
   const [linkLength, setLinkLength] = useState(0);
+  const [hasGallery, setHasGallery] = useState(false);
+  const [posted, setPosted] = useState<"idle" | "posting" | "done">("idle");
   const abortRef = useRef<AbortController | null>(null);
   const wasRunning = useRef(false);
   const { running, setRunning } = sim;
@@ -50,6 +53,8 @@ export default function PublishLevel({ sim, runner }: { sim: UseTrafficSimulatio
           return;
         }
         setName((n) => n || `${challengerName()}'s city`);
+        setPosted("idle");
+        void galleryEnabled().then(setHasGallery);
         setResult(null);
         setError("");
         setPhase("ready");
@@ -120,6 +125,29 @@ export default function PublishLevel({ sim, runner }: { sim: UseTrafficSimulatio
     } catch {
       window.prompt("Copy this level link:", url);
     }
+  };
+
+  const postToCommunity = async () => {
+    if (!result || posted !== "idle") return;
+    const s = useEditorStore.getState();
+    setPosted("posting");
+    const r = await publishLevel({
+      name: name.trim().slice(0, 32) || "A city",
+      from: challengerName(),
+      baseline: result.baseline,
+      delayShare: result.delayShare > 0 ? +result.delayShare.toFixed(3) : undefined,
+      queueFt: result.queueFt,
+      bus: s.trafficMix.bus || undefined,
+      bike: s.trafficMix.bike || undefined,
+      network: { nodes: s.nodes, edges: s.edges },
+    });
+    if ("error" in r) {
+      setPosted("idle");
+      pushToast(r.error, "bad");
+      return;
+    }
+    setPosted("done");
+    pushToast("🌐 Posted to the community gallery", "good");
   };
 
   const playIt = () => {
@@ -220,6 +248,16 @@ export default function PublishLevel({ sim, runner }: { sim: UseTrafficSimulatio
                 ▶ Play it
               </button>
             </div>
+            {hasGallery && (
+              <button
+                type="button"
+                disabled={posted !== "idle"}
+                onClick={() => void postToCommunity()}
+                className="rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 py-2.5 text-xs font-bold text-white shadow-sm hover:brightness-110 active:scale-95 disabled:opacity-60"
+              >
+                {posted === "done" ? "🌐 Posted: others can play it now" : posted === "posting" ? "Posting…" : "🌐 Post to the community gallery"}
+              </button>
+            )}
             {linkLength > LONG_LINK && (
               <p className="text-[11px] font-semibold text-amber-700">That link is long ({Math.round(linkLength / 1000)} KB). Some chat apps cut links off: a smaller city travels better.</p>
             )}

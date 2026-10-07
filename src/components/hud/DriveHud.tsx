@@ -4,9 +4,22 @@ import { useEffect, useRef, useState } from "react";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import type { DriveResult, DriveView } from "@/sim/types";
 import { useEditorStore } from "@/state/editorStore";
-import { playBrakeSqueal, playIndicatorTick, setPlayerEngine } from "@/lib/sound";
+import { RADIO_STATIONS, getRadioStation, playBrakeSqueal, playIndicatorTick, setPlayerEngine, setRadioStation, setSirenSound, type RadioStation } from "@/lib/sound";
+import type { VehicleKind } from "@/sim/types";
 import { pushToast } from "@/lib/toast";
 import { useCoarsePointer, useCompact } from "@/lib/compact";
+
+const KIND_LABEL: Record<VehicleKind, { emoji: string; label: string }> = {
+  car: { emoji: "🚗", label: "Car" },
+  truck: { emoji: "🚛", label: "Truck" },
+  bus: { emoji: "🚌", label: "Bus" },
+  bike: { emoji: "🚲", label: "Bike" },
+  ambulance: { emoji: "🚑", label: "Ambulance" },
+  police: { emoji: "🚓", label: "Police" },
+  wrecker: { emoji: "🛻", label: "Wrecker" },
+  debris: { emoji: "🧱", label: "Debris" },
+};
+const PICKER_KINDS: (VehicleKind | "any")[] = ["any", "car", "truck", "bus", "bike", "ambulance"];
 
 const MOVE_ICON: Record<DriveView["nextMove"], string> = { left: "↰", straight: "↑", right: "↱", end: "🏁" };
 
@@ -41,6 +54,11 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
   const setDrivingId = useEditorStore((s) => s.setDrivingId);
   const setDriveCam = useEditorStore((s) => s.setDriveCam);
   const [view, setView] = useState<DriveView | null>(null);
+  const [radio, setRadio] = useState<RadioStation>(() => getRadioStation());
+  const kind = useEditorStore((s) => s.rideAlongVehicleKind);
+  const filter = useEditorStore((s) => s.rideAlongFilter);
+  const setFilter = useEditorStore((s) => s.setRideAlongFilter);
+  const stepRideAlong = useEditorStore((s) => s.stepRideAlong);
   const [result, setResult] = useState<DriveResult | null>(null);
   const viewRef = useRef<DriveView | null>(null);
   const lastBrakes = useRef(0);
@@ -73,7 +91,7 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
       viewRef.current = v;
       if (v) {
         missing = 0;
-        setPlayerEngine(true, v.speedMph, v.thrusting);
+        setPlayerEngine(true, v.speedMph, v.thrusting, v.kind);
         if (v.hardBrakes > lastBrakes.current) playBrakeSqueal();
         lastBrakes.current = v.hardBrakes;
       } else if (++missing > 90) {
@@ -92,6 +110,23 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
       setPlayerEngine(false);
     };
   }, [drivingId, snapshotRef, setDrivingId]);
+
+  // The radio plays only while you are behind the wheel; an ambulance runs its siren.
+  const driving = drivingId !== null;
+  useEffect(() => {
+    if (!driving) {
+      setRadioStation("off");
+      return;
+    }
+    setRadioStation(radio);
+  }, [driving, radio]);
+  const drivenKind = view?.kind ?? null;
+  const emergencyActive = sim.metrics.emergency.active > 0;
+  useEffect(() => {
+    if (!driving || drivenKind !== "ambulance") return;
+    setSirenSound(true);
+    return () => setSirenSound(emergencyActive && sim.running);
+  }, [driving, drivenKind, emergencyActive, sim.running]);
 
   // The indicator ticks while a lane change is waiting for a gap.
   const pending = view?.laneChangePending ?? false;
@@ -150,7 +185,35 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
   if (drivingId === null) {
     return (
       <>
-        <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 -translate-x-1/2">
+        <div className="pointer-events-auto absolute bottom-20 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
+          <div className="hud-panel flex flex-wrap items-center justify-center gap-1.5 rounded-2xl px-2.5 py-1.5">
+            <button type="button" aria-label="Previous vehicle" onClick={() => stepRideAlong(-1)} className="rounded-full bg-black/5 px-2.5 py-1 text-xs font-bold text-zinc-700 hover:bg-black/10 active:scale-95">
+              ◀
+            </button>
+            <span className="min-w-24 text-center text-xs font-extrabold text-[#241b3d]">
+              {kind ? `${KIND_LABEL[kind].emoji} ${KIND_LABEL[kind].label}${riding !== null ? ` #${riding}` : ""}` : "Finding a vehicle…"}
+            </span>
+            <button type="button" aria-label="Next vehicle" onClick={() => stepRideAlong(1)} className="rounded-full bg-black/5 px-2.5 py-1 text-xs font-bold text-zinc-700 hover:bg-black/10 active:scale-95">
+              ▶
+            </button>
+            <div className="flex gap-0.5">
+              {PICKER_KINDS.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={filter === k}
+                  title={k === "any" ? "Any vehicle" : KIND_LABEL[k].label}
+                  onClick={() => {
+                    setFilter(k);
+                    stepRideAlong(1);
+                  }}
+                  className={`rounded-full px-2 py-1 text-xs transition active:scale-95 ${filter === k ? "bg-[#241b3d] text-white" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+                >
+                  {k === "any" ? "All" : KIND_LABEL[k].emoji}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             type="button"
             onClick={take}
@@ -158,7 +221,7 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
             title={sim.running ? "Drive this car yourself" : "Open the city to traffic first"}
             className="flex items-center gap-2 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 px-5 py-2.5 text-sm font-extrabold text-white shadow-lg transition hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            🚗 Take the wheel
+            {kind ? KIND_LABEL[kind].emoji : "🚗"} Take the wheel
           </button>
         </div>
         {result && <ResultCard result={result} onAgain={take} onClose={() => setResult(null)} />}
@@ -176,6 +239,7 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
             <span className={`font-display text-3xl font-black ${!v.laneOk ? "text-red-600" : "text-[#241b3d]"}`}>{MOVE_ICON[v.nextMove]}</span>
             <span className="text-[10.5px] font-bold text-zinc-500">{v.nextMove === "end" ? "last road" : `${Math.round(v.toJunctionFt / 10) * 10} ft`}</span>
             {v.streetName && <span className="mt-0.5 max-w-[8rem] truncate text-[10px] font-semibold text-zinc-400">{v.streetName}</span>}
+            <span className="mt-0.5 text-[10px] font-bold text-zinc-400">{KIND_LABEL[v.kind].emoji} {KIND_LABEL[v.kind].label}</span>
           </div>
 
           <div className="flex items-center gap-3">
@@ -219,6 +283,17 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
             <kbd className="ml-0.5 rounded bg-white/20 px-1">D</kbd> lane
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => {
+            const i = RADIO_STATIONS.findIndex((r) => r.id === radio);
+            setRadio(RADIO_STATIONS[(i + 1) % RADIO_STATIONS.length].id);
+          }}
+          className="rounded-full bg-white/15 px-2.5 py-0.5 hover:bg-white/25"
+          title="Change the radio station"
+        >
+          {RADIO_STATIONS.find((r) => r.id === radio)?.emoji} {RADIO_STATIONS.find((r) => r.id === radio)?.label}
+        </button>
         <button type="button" onClick={() => setDriveCam(cam === "chase" ? "hood" : "chase")} className="rounded-full bg-white/15 px-2.5 py-0.5 hover:bg-white/25">
           📷 {cam === "chase" ? "Driver's seat" : "Chase view"}{touch ? "" : " (C)"}
         </button>

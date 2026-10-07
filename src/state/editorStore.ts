@@ -33,6 +33,7 @@ import type {
   NodeSpec,
   ReservedLane,
   SignalControl,
+  VehicleKind,
   TransitLine,
   Weather,
   ZoneSpec,
@@ -136,6 +137,13 @@ interface EditorState {
   /** The vehicle the ride-along camera is locked to (null when not riding), and the one the player is driving (null when not driving). */
   rideAlongVehicleId: number | null;
   drivingId: number | null;
+  /** What the ride-along camera is following (kind), a filter for the next vehicle to pick, and a counter the camera watches for a request to move on. */
+  rideAlongVehicleKind: VehicleKind | null;
+  rideAlongFilter: VehicleKind | "any";
+  rideAlongStep: { n: number; dir: 1 | -1 };
+  setRideAlongFilter: (kind: VehicleKind | "any") => void;
+  /** Asks the camera to follow the next (or previous) vehicle that passes the filter. */
+  stepRideAlong: (dir: 1 | -1) => void;
   /** Chase camera behind the car, or from the driver's seat. */
   driveCam: "chase" | "hood";
   setDrivingId: (id: number | null) => void;
@@ -467,6 +475,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   rideAlongActive: false,
   rideAlongVehicleId: null,
   drivingId: null,
+  rideAlongVehicleKind: null,
+  rideAlongFilter: "any",
+  rideAlongStep: { n: 0, dir: 1 },
+  setRideAlongFilter: (kind) => set({ rideAlongFilter: kind }),
+  stepRideAlong: (dir) => set((s) => ({ rideAlongStep: { n: s.rideAlongStep.n + 1, dir } })),
   driveCam: "chase",
   setDrivingId: (id) => set({ drivingId: id }),
   setDriveCam: (cam) => set({ driveCam: cam }),

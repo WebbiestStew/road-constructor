@@ -167,6 +167,7 @@ const MIX_CONTROLS: { key: keyof MixLevels; label: string; hint: string }[] = [
   { key: "effects", label: "Interface and music cues", hint: "Placing and demolishing roads, goals, fanfares, combos." },
   { key: "ambience", label: "Traffic and weather", hint: "Engines, tyre roar, rain, concrete, horns, your own engine. It dips when a siren sounds." },
   { key: "alerts", label: "Sirens and warnings", hint: "Ambulances, warning banners, crossing beeps, tyre squeal." },
+  { key: "radio", label: "Car radio", hint: "The stations that play while you drive." },
 ];
 
 function SoundSection() {

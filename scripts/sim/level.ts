@@ -10,7 +10,7 @@ const [levelId, variantArg = "none", seed = "1337"] = process.argv.slice(2);
 const variants = new Set(variantArg.split(","));
 
 function fixedNetwork(id: string): NetworkSnapshot | null {
-  if (id === "code-three" || id === "transit-street" || id === "pile-up") return buildMidtown(false);
+  if (id === "code-three" || id === "transit-street" || id === "pile-up" || id.startsWith("story-")) return buildMidtown(false);
   if (id === "rainy-rush" || id === "school-run" || id === "first-shift") return buildHarborDrive(false);
   return null;
 }
@@ -88,6 +88,9 @@ async function main() {
   if (variants.has("night")) sim.send({ type: "setDarkness", level: 1 });
   if (variants.has("dusk")) sim.send({ type: "setDarkness", level: 0.5 });
   sim.send({ type: "setLeftTurnsYield", enabled: scenario.leftTurnsYield === true });
+  if (scenario.crashRisk) sim.send({ type: "setCrashRisk", enabled: true });
+  if (scenario.elasticDemand) sim.send({ type: "setElasticDemand", enabled: true });
+  if (scenario.pedWaits) sim.send({ type: "setPedWaits", enabled: true });
   if (lines.length > 0) sim.send({ type: "setTransit", lines });
   sim.send({ type: "setTrafficMix", bus: scenario.trafficMix?.bus ?? 0, bike: scenario.trafficMix?.bike ?? 0 });
   sim.load(network, Number(seed), HARNESS_SPEED);

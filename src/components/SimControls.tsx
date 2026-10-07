@@ -41,6 +41,7 @@ import PublishLevel from "./hud/PublishLevel";
 import { useEditorStore } from "@/state/editorStore";
 import { useSettingsOpen } from "@/lib/settingsMenu";
 import { useSavesMenu } from "@/lib/savesMenu";
+import { useGalleryOpen } from "@/lib/galleryMenu";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import CinematicOverlay from "./hud/CinematicOverlay";
 import { useFlyover } from "@/lib/cinematic";
@@ -50,6 +51,7 @@ import Tutorial from "./hud/Tutorial";
 // Panels most sessions never open load the first time they are needed, not with the page.
 const SettingsMenu = dynamic(() => import("./hud/SettingsMenu"), { ssr: false });
 const SavesMenu = dynamic(() => import("./hud/SavesMenu"), { ssr: false });
+const GalleryMenu = dynamic(() => import("./hud/GalleryMenu"), { ssr: false });
 const ReplayBar = dynamic(() => import("./hud/ReplayBar"), { ssr: false });
 const WindshieldFx = dynamic(() => import("./hud/WindshieldFx"), { ssr: false });
 
@@ -68,6 +70,7 @@ export default function SimControls({
   const hoodView = useEditorStore((s) => s.drivingId !== null && s.driveCam === "hood");
   const settingsOpen = useSettingsOpen();
   const savesOpen = useSavesMenu().open;
+  const galleryOpen = useGalleryOpen();
   // Photo mode: a clean frame. Toasts stay (for "saved"); everything else steps aside.
   if (photo) {
     return (
@@ -113,6 +116,7 @@ export default function SimControls({
       <DriveHud sim={sim} />
       {replaying && <ReplayBar sim={sim} />}
       {savesOpen && <SavesMenu sim={sim} />}
+      {galleryOpen && <GalleryMenu runner={scenarioRunner} />}
       <PublishLevel sim={sim} runner={scenarioRunner} />
       <PlaceCredit />
       {settingsOpen && <SettingsMenu />}

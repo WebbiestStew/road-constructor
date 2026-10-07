@@ -10,6 +10,7 @@ import { useEditorStore } from "@/state/editorStore";
 import { getScenarioById } from "@/sim/scenarios";
 import { isRealCityLoaded, loadRealCity } from "@/sim/real";
 import { pushToast } from "@/lib/toast";
+import { backUp, formatSyncCode, generateSyncCode, loadSyncCode, parseSyncCode, restore, saveSyncCode, syncEnabled } from "@/lib/cloudSync";
 
 function when(ts: number): string {
   const d = new Date(ts);
@@ -38,6 +39,10 @@ export default function SavesMenu({ sim }: { sim: UseTrafficSimulationReturn }) 
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [cloudOn, setCloudOn] = useState<boolean | null>(null);
+  const [code, setCode] = useState("");
+  const [codeInput, setCodeInput] = useState("");
+  const [cloudNote, setCloudNote] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -53,7 +58,11 @@ export default function SavesMenu({ sim }: { sim: UseTrafficSimulationReturn }) 
 
   useEffect(() => {
     if (!open) return;
-    const raf = requestAnimationFrame(() => void refresh());
+    const raf = requestAnimationFrame(() => {
+      void refresh();
+      setCode(loadSyncCode());
+      void syncEnabled().then(setCloudOn);
+    });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -181,7 +190,7 @@ export default function SavesMenu({ sim }: { sim: UseTrafficSimulationReturn }) 
         </div>
 
         <div className="flex gap-1 rounded-xl bg-black/5 p-1">
-          {(["saves", "replays"] as const).map((t) => (
+          {(["saves", "replays", ...(cloudOn ? (["cloud"] as const) : [])] as const).map((t) => (
             <button
               key={t}
               type="button"
@@ -189,14 +198,101 @@ export default function SavesMenu({ sim }: { sim: UseTrafficSimulationReturn }) 
               onClick={() => setSavesTab(t)}
               className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-bold ${tab === t ? "bg-white text-[#241b3d] shadow" : "text-zinc-500 hover:text-zinc-800"}`}
             >
-              {t === "saves" ? `Cities (${slots?.length ?? 0}/${MAX_SLOTS})` : `Replays (${replays?.length ?? 0}/${MAX_REPLAYS})`}
+              {t === "saves" ? `Cities (${slots?.length ?? 0}/${MAX_SLOTS})` : t === "replays" ? `Replays (${replays?.length ?? 0}/${MAX_REPLAYS})` : "☁️ Cloud"}
             </button>
           ))}
         </div>
 
         {replaying && <p className="rounded-xl bg-violet-50 px-3 py-2 text-[12px] font-semibold text-violet-800">A replay is open. Exit it to save or open a city.</p>}
 
-        {tab === "saves" ? (
+        {tab === "cloud" ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-[12px] font-semibold leading-snug text-zinc-600">
+              Carry your saves, stars and career to another device with no account. Your <b>sync code</b> is the key: anyone with it can read and replace the backup, so keep it to yourself. Replays stay on this device; send those as files.
+            </p>
+            {code ? (
+              <div className="flex flex-col gap-1 rounded-2xl bg-black/[0.04] p-3">
+                <span className="text-[10.5px] font-extrabold uppercase tracking-wide text-zinc-400">Your sync code</span>
+                <span className="font-display text-xl font-extrabold tracking-wider text-[#241b3d]">{formatSyncCode(code)}</span>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      const r = await backUp(code);
+                      setCloudNote(r.ok ? `Backed up ${r.slots} save${r.slots === 1 ? "" : "s"}, your stars and your career, ${new Date(r.at).toLocaleTimeString()}` : r.error);
+                      setBusy(false);
+                    }}
+                    className={btnMain}
+                  >
+                    ⬆ Back up now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(formatSyncCode(code));
+                        pushToast("Sync code copied", "good");
+                      } catch {
+                        window.prompt("Your sync code:", formatSyncCode(code));
+                      }
+                    }}
+                    className={btnPlain}
+                  >
+                    Copy the code
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  const c = generateSyncCode();
+                  saveSyncCode(c);
+                  setCode(c);
+                }}
+                className={`${btnMain} self-start`}
+              >
+                Make a sync code
+              </button>
+            )}
+            <div className="flex flex-col gap-1.5 rounded-2xl bg-black/[0.04] p-3">
+              <span className="text-[10.5px] font-extrabold uppercase tracking-wide text-zinc-400">Get a backup onto this device</span>
+              <div className="flex gap-2">
+                <input
+                  value={codeInput}
+                  onChange={(e) => setCodeInput(e.target.value.slice(0, 24))}
+                  placeholder="ABCD-EFGH-IJKL-MNOP"
+                  className="min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 py-1.5 text-sm font-semibold uppercase text-[#241b3d] outline-none focus:border-violet-400"
+                />
+                <button
+                  type="button"
+                  disabled={busy || !parseSyncCode(codeInput)}
+                  onClick={async () => {
+                    const c = parseSyncCode(codeInput);
+                    if (!c) return;
+                    setBusy(true);
+                    const r = await restore(c);
+                    if (r.ok) {
+                      saveSyncCode(c);
+                      setCode(c);
+                      setCodeInput("");
+                      setCloudNote(`Restored ${r.slots} save${r.slots === 1 ? "" : "s"}, with your stars and career merged in`);
+                      await refresh();
+                    } else setCloudNote(r.error);
+                    setBusy(false);
+                  }}
+                  className={btnMain}
+                >
+                  ⬇ Restore
+                </button>
+              </div>
+              <span className="text-[11px] font-semibold text-zinc-500">Saves are added, stars keep the better rating, and the career keeps whichever has earned more.</span>
+            </div>
+            {cloudNote && <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[12px] font-semibold text-emerald-800">{cloudNote}</p>}
+          </div>
+        ) : tab === "saves" ? (
           <>
             <div className="flex flex-col gap-2 rounded-2xl bg-black/[0.03] p-3">
               <span className="text-[10.5px] font-extrabold uppercase tracking-wide text-zinc-400">Save the city on screen</span>

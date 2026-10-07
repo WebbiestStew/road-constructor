@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CHALLENGE_PREFIX, DAILY_PREFIX, SCENARIOS, buildDailyScenario, getScenarioById, type ScenarioDef } from "@/sim/scenarios";
+import { CHALLENGE_PREFIX, DAILY_PREFIX, SCENARIOS, STORY_ARC, buildDailyScenario, getScenarioById, type ScenarioDef } from "@/sim/scenarios";
 import { dateKey, useDaily } from "@/lib/daily";
 import { isSandboxBudget, useEditorStore } from "@/state/editorStore";
 import { totalStars, useProgress } from "@/lib/progress";
@@ -30,15 +30,31 @@ function formatMMSS(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+/** Stars earned in the story chapters before this one (they open the later chapters). */
+function storyStarsBefore(chapter: number, progress: Record<string, number>): number {
+  return SCENARIOS.filter((d) => d.story && d.story.chapter < chapter).reduce((n, d) => n + (progress[d.id] ?? 0), 0);
+}
+
 function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) => void }) {
-  const stars = useProgress()[s.id] ?? 0;
+  const progress = useProgress();
+  const stars = progress[s.id] ?? 0;
   const medals = useCareer().medals[s.id] ?? [];
+  const need = s.story?.requiresStars ?? 0;
+  const have = s.story ? storyStarsBefore(s.story.chapter, progress) : 0;
+  const locked = need > have;
   return (
     <button
       type="button"
+      disabled={locked}
       onClick={() => onStart(s.id)}
-      className="flex flex-col gap-1 rounded-xl border-2 border-transparent bg-black/[0.03] p-3 text-left transition hover:border-violet-400 hover:bg-violet-50 active:scale-[0.99]"
+      className="flex flex-col gap-1 rounded-xl border-2 border-transparent bg-black/[0.03] p-3 text-left transition enabled:hover:border-violet-400 enabled:hover:bg-violet-50 enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55"
     >
+      {s.story && (
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-fuchsia-600">
+          📖 Chapter {s.story.chapter} of {s.story.of}
+          {locked ? ` · 🔒 earn ${need - have} more ★ in earlier chapters` : ""}
+        </span>
+      )}
       <span className="flex items-center justify-between gap-2">
         <span className="font-display text-sm font-bold text-[#241b3d]">{s.name}</span>
         <span
@@ -135,16 +151,20 @@ function ScenarioPicker({
         <DailyCard onStart={onStart} />
         <SandboxCard onSandbox={onSandbox} />
         <PlaceSearch onPlace={onPlace} />
-        <h3 className="text-[10.5px] font-extrabold uppercase tracking-wide text-emerald-600">
+        <h3 className="text-[10.5px] font-extrabold uppercase tracking-wide text-fuchsia-600">📖 {STORY_ARC}</h3>
+        {SCENARIOS.filter((s) => s.story).map((s) => (
+          <ScenarioCard key={s.id} s={s} onStart={onStart} />
+        ))}
+        <h3 className="mt-1 text-[10.5px] font-extrabold uppercase tracking-wide text-emerald-600">
           Traffic Manager — the city is built, fix the flow
         </h3>
-        {SCENARIOS.filter((s) => s.kind === "manage").map((s) => (
+        {SCENARIOS.filter((s) => s.kind === "manage" && !s.story).map((s) => (
           <ScenarioCard key={s.id} s={s} onStart={onStart} />
         ))}
         <h3 className="mt-1 text-[10.5px] font-extrabold uppercase tracking-wide text-violet-600">
           Build &amp; fix — design your own solution
         </h3>
-        {SCENARIOS.filter((s) => s.kind !== "manage" && !s.real).map((s) => (
+        {SCENARIOS.filter((s) => s.kind !== "manage" && !s.real && !s.story).map((s) => (
           <ScenarioCard key={s.id} s={s} onStart={onStart} />
         ))}
         <h3 className="mt-1 text-[10.5px] font-extrabold uppercase tracking-wide text-sky-600">
@@ -236,6 +256,10 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
             <StatRow label="Budget left" value={`$${Math.max(0, results.budgetRemaining).toLocaleString()}`} />
           )}
         </div>
+
+        {results.won && scenario.story && (
+          <p className="w-full rounded-xl bg-fuchsia-500/10 px-3 py-2.5 text-left text-[12px] font-semibold italic leading-snug text-fuchsia-900">📖 {scenario.story.outro}</p>
+        )}
 
         {results.report && <ServiceReportCard report={results.report} payout={results.payout} />}
 
@@ -451,6 +475,7 @@ function StartMenu({ onStart, onSandbox, onPlace }: { onStart: (id: string) => v
 
 export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerReturn }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [introFor, setIntroFor] = useState<ScenarioDef | null>(null);
   const [startDismissed, setStartDismissed] = useState(false);
   const isEmptyMap = useEditorStore((s) => s.nodes.length === 0);
   const startSandbox = useEditorStore((s) => s.startSandbox);
@@ -521,8 +546,10 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
           onStart={(id) => {
             const def = getScenarioById(id);
             setActiveChallenge(null);
-            if (def) runner.startScenario(def);
             setPickerOpen(false);
+            // A story chapter opens with its introduction; everything else starts straight away.
+            if (def?.story) setIntroFor(def);
+            else if (def) runner.startScenario(def);
           }}
           onClose={() => setPickerOpen(false)}
           onFreeBuild={() => {
@@ -540,6 +567,34 @@ export default function ScenarioHud({ runner }: { runner: UseScenarioRunnerRetur
         />
       )}
 
+      {introFor && (
+        <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4">
+          <div className="hud-panel flex w-full max-w-sm flex-col gap-3 rounded-2xl p-6 text-center">
+            <span className="text-[11px] font-extrabold uppercase tracking-wide text-fuchsia-600">
+              📖 {introFor.story?.arc} · Chapter {introFor.story?.chapter} of {introFor.story?.of}
+            </span>
+            <h2 className="font-display text-2xl font-extrabold text-[#241b3d]">{introFor.name}</h2>
+            <p className="text-[13px] font-semibold italic leading-relaxed text-zinc-700">{introFor.story?.intro}</p>
+            <p className="rounded-xl bg-black/[0.04] px-3 py-2 text-left text-[11.5px] leading-snug text-zinc-600">{introFor.briefing}</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setIntroFor(null)} className="flex-1 rounded-xl bg-black/5 py-2 text-xs font-bold text-zinc-700 hover:bg-black/10">
+                Not yet
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const def = introFor;
+                  setIntroFor(null);
+                  runner.startScenario(def);
+                }}
+                className="flex-1 rounded-xl bg-gradient-to-br from-fuchsia-500 to-violet-600 py-2 text-xs font-bold text-white shadow-sm hover:brightness-110 active:scale-95"
+              >
+                Begin the chapter ▶
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {runner.results && <ResultsModal runner={runner} />}
     </>
   );

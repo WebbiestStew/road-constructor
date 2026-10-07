@@ -68,6 +68,21 @@ export interface ScenarioProgress {
 /** A stateful per-run evaluator closure — each call to `createEvaluator()` gets its own private sustained-timer state, reset on every retry. */
 export type ScenarioEvaluator = (ctx: ScenarioEvalContext) => ScenarioProgress;
 
+/** The chapters of Season One and how the story reads. */
+export interface StoryInfo {
+  arc: string;
+  chapter: number;
+  of: number;
+  /** Shown as the level opens. */
+  intro: string;
+  /** Shown on the results card after a win. */
+  outro: string;
+  /** Stars needed across the arc's earlier chapters before this one opens. */
+  requiresStars?: number;
+}
+
+export const STORY_ARC = "Season One: The Midtown Year";
+
 export interface ScenarioDef {
   id: string;
   name: string;
@@ -94,6 +109,8 @@ export interface ScenarioDef {
    * empty-road time, and the longest queue in feet. The service medals ask for a clear improvement on these.
    */
   serviceBaseline?: { delayShare: number; queueFt: number };
+  /** A level that belongs to a story arc: where it sits, what the player is told before it, and after a win. */
+  story?: StoryInfo;
   /** Demand follows how well the roads work in this level (a free road draws more drivers). Off in the levels measured without it. */
   elasticDemand?: boolean;
   /** Crashes happen on their own from speeding, weather, darkness and tailgating. */
@@ -1427,6 +1444,37 @@ function createGrandInterchangeEvaluator(): ScenarioEvaluator {
 
 // ---------------------------------------------------------------------------
 
+
+/** Season One's scripted trouble (see the story levels in SCENARIOS). */
+const OPENING_NIGHT_EVENTS: ScriptedEvent[] = [
+  { atS: 90, kind: "surge", multiplier: 1.9, durationS: 90 },
+  { atS: 100, kind: "ambulance" },
+  { atS: 130, kind: "ambulance" },
+];
+const BRIDGE_OUT_EVENTS: ScriptedEvent[] = [
+  { atS: 40, kind: "roadClosure", edgeIds: ["r2f", "r2b"], durationS: 230 },
+  { atS: 100, kind: "surge", multiplier: 1.5, durationS: 90 },
+];
+const STORM_SEASON_EVENTS: ScriptedEvent[] = [
+  { atS: 20, kind: "weather", weather: "rain", durationS: 250 },
+  { atS: 110, kind: "surge", multiplier: 1.4, durationS: 80 },
+];
+const GRAND_OPENING_EVENTS: ScriptedEvent[] = [
+  { atS: 20, kind: "weather", weather: "rain", durationS: 250 },
+  { atS: 60, kind: "roadClosure", edgeIds: ["r2f", "r2b"], durationS: 170 },
+  { atS: 100, kind: "surge", multiplier: 1.7, durationS: 90 },
+  { atS: 110, kind: "ambulance" },
+  { atS: 150, kind: "ambulance" },
+];
+/** What each Season One level moves untouched (mean of four seeds, scripts/sim/level.ts), and the star lines where the default 1.07 / 1.12 is out of reach of a real fix. */
+const STORY_BASELINES: Record<string, { baseline: number; two?: number; three?: number }> = {
+  "story-opening-night": { baseline: 459 },
+  "story-bridge-out": { baseline: 341 },
+  "story-storm-season": { baseline: 396 },
+  "story-grand-opening": { baseline: 331, two: 1.04, three: 1.08 },
+};
+const storyEvaluator = (id: string) => createRealCityEvaluator(STORY_BASELINES[id].baseline, 300, STORY_BASELINES[id].three, STORY_BASELINES[id].two);
+
 export const SCENARIOS: ScenarioDef[] = [
   {
     id: "first-shift",
@@ -1781,8 +1829,104 @@ export const SCENARIOS: ScenarioDef[] = [
     targetAvgSpeedMph: 20,
     createEvaluator: createSafeStreetsEvaluator(SCHOOL_PAR, 300),
   },
+  {
+    id: "story-opening-night",
+    kind: "manage",
+    name: "Opening Night",
+    tagline: "Season One, chapter 1: the stadium lets out.",
+    briefing:
+      "The new arena opens tonight and the crowd leaves all at once, ninety seconds of nearly double traffic, with two ambulances called to the gates. Midtown still has its three faults. Fix them first, then ride out the surge. The unchanged city moves BASELINE vehicles; two stars at TWO, three at THREE.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 22,
+    scriptedEvents: OPENING_NIGHT_EVENTS,
+    story: {
+      arc: STORY_ARC,
+      chapter: 1,
+      of: 4,
+      intro: "Chapter 1. The mayor cut the ribbon on the arena this afternoon. At nine the doors open and everyone leaves at once. You have been the city's traffic engineer for a week.",
+      outro: "The arena emptied without a gridlock. The mayor sends a note: \"Keep an eye on the west avenue. The mains work starts Monday.\"",
+    },
+    createEvaluator: storyEvaluator("story-opening-night"),
+  },
+  {
+    id: "story-bridge-out",
+    kind: "manage",
+    name: "Bridge Out",
+    tagline: "Season One, chapter 2: the west avenue is closed.",
+    briefing:
+      "A burst main shuts the middle block of the west avenue for almost four minutes, starting early, and a rush of extra traffic arrives while it is closed. Everything that used it has to find another way, through the same four signals. Retime them, fix the limits, and move the arrows. The unchanged city moves BASELINE; two stars at TWO, three at THREE.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 22,
+    scriptedEvents: BRIDGE_OUT_EVENTS,
+    story: {
+      arc: STORY_ARC,
+      chapter: 2,
+      of: 4,
+      intro: "Chapter 2. Monday: the water main under the west avenue lets go. The road is closed from a minute in. The detour is every other street in Midtown.",
+      outro: "The detour held. The council wants a report on how few cars were stranded. You hand it in with a coffee stain on the corner.",
+      requiresStars: 1,
+    },
+    createEvaluator: storyEvaluator("story-bridge-out"),
+  },
+  {
+    id: "story-storm-season",
+    kind: "manage",
+    name: "Storm Season",
+    tagline: "Season One, chapter 3: rain, and drivers who make mistakes.",
+    briefing:
+      "A storm sits over Midtown for most of the run, and in the wet drivers make mistakes: tailgating and speeding cause real crashes that block a lane until police arrive. Slower limits cost throughput but save lanes. Earn the Vision Zero medal by finishing without one. The unchanged city moves BASELINE; two stars at TWO, three at THREE.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: STORM_SEASON_EVENTS,
+    crashRisk: true,
+    story: {
+      arc: STORY_ARC,
+      chapter: 3,
+      of: 4,
+      intro: "Chapter 3. Forecast: rain until morning. Last year this storm put eleven cars in the barrier. The mayor would like that number to be smaller.",
+      outro: "The wettest night of the year and the lanes stayed open. The mayor has stopped checking the weather.",
+      requiresStars: 2,
+    },
+    createEvaluator: storyEvaluator("story-storm-season"),
+  },
+  {
+    id: "story-grand-opening",
+    kind: "manage",
+    name: "Grand Opening",
+    tagline: "Season One, finale: everything at once.",
+    briefing:
+      "The arena, the closed avenue, the rain and the ambulances, together, on the biggest night of the year, with crashes possible. Nothing here is new: it is everything you have already fixed, at the same time. The unchanged city moves BASELINE; two stars at TWO, three at THREE.",
+    startingNetwork: MIDTOWN_NETWORK,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    scriptedEvents: GRAND_OPENING_EVENTS,
+    crashRisk: true,
+    story: {
+      arc: STORY_ARC,
+      chapter: 4,
+      of: 4,
+      intro: "Chapter 4. Opening weekend of the whole waterfront. Tonight the arena, the avenue works and the storm all land on the same hour. The mayor is on live television.",
+      outro: "The live broadcast cut to the weather halfway through because nothing was going wrong. Season One is yours.",
+      requiresStars: 6,
+    },
+    createEvaluator: storyEvaluator("story-grand-opening"),
+  },
   ...REAL_SCENARIOS,
 ];
+
+// Story levels quote their own numbers in the briefing: filled in from the baselines above.
+for (const def of SCENARIOS) {
+  if (!def.story) continue;
+  const { baseline, two = 1.07, three = 1.12 } = STORY_BASELINES[def.id];
+  def.briefing = def.briefing.replace("BASELINE", String(baseline)).replace("TWO", String(Math.ceil(baseline * two))).replace("THREE", String(Math.ceil(baseline * three)));
+}
 
 // ---------------------------------------------------------------------------
 // Custom challenges: a city someone built (and a score to beat) that arrives in a link, or that the player has just

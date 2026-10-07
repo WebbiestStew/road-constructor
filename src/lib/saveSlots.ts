@@ -71,3 +71,9 @@ export async function renameSlot(id: string, name: string): Promise<void> {
 export async function deleteSlot(id: string): Promise<void> {
   await Promise.all([idbDelete("slotMeta", id), idbDelete("slotData", id)]);
 }
+
+/** Puts a save from a backup back in, under its own id (replacing the one with that id, if any). */
+export async function importSlot(meta: SlotMeta, payload: PersistedPayload): Promise<void> {
+  await idbPut<SlotData>("slotData", { id: meta.id, payload });
+  await idbPut("slotMeta", meta);
+}

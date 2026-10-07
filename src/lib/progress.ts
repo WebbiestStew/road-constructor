@@ -56,6 +56,26 @@ function subscribe(cb: () => void) {
   };
 }
 
+/** The whole star map, for backing up. */
+export function exportProgress(): StarMap {
+  return { ...read() };
+}
+
+/** Merges a backed-up star map in, keeping the better rating on each level. */
+export function mergeProgress(incoming: Record<string, unknown>): void {
+  const map = { ...read() };
+  for (const [id, v] of Object.entries(incoming)) {
+    if ((v === 1 || v === 2 || v === 3) && v > (map[id] ?? 0)) map[id] = v;
+  }
+  cache = map;
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(cache));
+  } catch {
+    // ignore: progress just won't persist
+  }
+  listeners.forEach((l) => l());
+}
+
 const EMPTY: StarMap = {};
 
 export function useProgress(): StarMap {

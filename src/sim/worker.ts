@@ -2364,11 +2364,21 @@ const CRAWL_SPEED_FTPS = mphToFtps(10);
 // on, so the lane they need for the next turn is the lane arrows' business. Nothing here touches the random stream.
 // ---------------------------------------------------------------------------
 
-/** How hard the throttle and the brake move the target speed, ft/s per second. */
-const DRIVE_THROTTLE_FTPS2 = 9;
-const DRIVE_BRAKE_FTPS2 = 20;
-/** The fastest a driver may ask for: a third over the limit (and never above the car's own top speed). */
-const DRIVE_OVER_LIMIT = 1.35;
+/**
+ * How each kind of vehicle drives: how hard the throttle and the brake move the target speed (ft/s per second) and the
+ * fastest a driver may ask for as a multiple of the limit (never above the vehicle's own top speed). The vehicle's own
+ * acceleration and braking still apply on top, so a bus feels like a bus.
+ */
+const DRIVE_FEEL: Record<VehicleKind, { throttle: number; brake: number; over: number }> = {
+  car: { throttle: 9, brake: 20, over: 1.35 },
+  truck: { throttle: 5, brake: 15, over: 1.2 },
+  bus: { throttle: 4.5, brake: 14, over: 1.15 },
+  bike: { throttle: 3, brake: 10, over: 1.0 },
+  ambulance: { throttle: 10, brake: 22, over: 1.5 },
+  police: { throttle: 10, brake: 22, over: 1.5 },
+  wrecker: { throttle: 6, brake: 16, over: 1.2 },
+  debris: { throttle: 0, brake: 0, over: 1 },
+};
 /** A lane change that cannot happen for this long is dropped. */
 const DRIVE_LANE_PATIENCE_S = 2.5;
 const DRIVE_BLOCKED_SHOW_S = 1.2;
@@ -2412,7 +2422,7 @@ function routeTimeAtLimitS(v: VehicleState): number {
 
 function takeWheel(id: number): boolean {
   const v = vehicles.get(id);
-  if (!v || v.kind === "debris" || v.kind === "wrecker" || v.kind === "police" || v.frozenUntil > simTime) return false;
+  if (!v || v.kind === "debris" || v.frozenUntil > simTime) return false;
   drive = {
     id,
     targetFtps: v.speed,
@@ -2442,9 +2452,10 @@ function updateDriveTarget(dt: number) {
   }
   const edge = network?.edgesById.get(v.edgeId);
   const limit = edge ? mphToFtps(effectiveSpeedLimitMph(edge)) : mphToFtps(30);
-  const ceiling = Math.min(limit * DRIVE_OVER_LIMIT, v.maxSpeedFtps, MAX_SPEED_FTPS);
-  if (drive.accel > 0) drive.targetFtps = Math.min(ceiling, drive.targetFtps + DRIVE_THROTTLE_FTPS2 * dt);
-  else if (drive.accel < 0) drive.targetFtps = Math.max(0, drive.targetFtps - DRIVE_BRAKE_FTPS2 * dt);
+  const feel = DRIVE_FEEL[v.kind] ?? DRIVE_FEEL.car;
+  const ceiling = Math.min(limit * feel.over, v.maxSpeedFtps, MAX_SPEED_FTPS);
+  if (drive.accel > 0) drive.targetFtps = Math.min(ceiling, drive.targetFtps + feel.throttle * dt);
+  else if (drive.accel < 0) drive.targetFtps = Math.max(0, drive.targetFtps - feel.brake * dt);
   else if (drive.targetFtps > v.speed + 6) drive.targetFtps = v.speed + 6; // lifting off: don't keep a stale target the car is far from
   drive.targetFtps = Math.min(drive.targetFtps, ceiling);
 }

@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 
 /** Whether the Saves & replays menu is open, and which tab. A tiny store so any button can open it. */
-type Tab = "saves" | "replays";
+type Tab = "saves" | "replays" | "cloud";
 let state: { open: boolean; tab: Tab } = { open: false, tab: "saves" };
 const listeners = new Set<() => void>();
 

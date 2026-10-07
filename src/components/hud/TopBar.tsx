@@ -11,6 +11,8 @@ import { setChaos, useChaos } from "@/lib/chaos";
 import { useQuality } from "@/lib/quality";
 import { setSettingsOpen } from "@/lib/settingsMenu";
 import { openSaves } from "@/lib/savesMenu";
+import { setGalleryOpen } from "@/lib/galleryMenu";
+import { galleryEnabled } from "@/lib/gallery";
 import { requestMakeChallenge, requestPublish } from "@/lib/challenge";
 import { toggleTour, togglePhotoMode } from "@/lib/photoMode";
 import { useCompact } from "@/lib/compact";
@@ -143,6 +145,15 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
   const timeOfDay = useEditorStore((s) => s.timeOfDay);
   const setTimeOfDay = useEditorStore((s) => s.setTimeOfDay);
   const [muted, setMutedState] = useState(false);
+  // The community gallery needs a store on the server; without one the button is hidden.
+  const [hasGallery, setHasGallery] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void galleryEnabled().then((on) => alive && setHasGallery(on));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMutedState(isMuted()));
@@ -442,6 +453,18 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
       >
         {muted ? <IconSpeakerOff className="h-3.5 w-3.5" /> : <IconSpeakerOn className="h-3.5 w-3.5" />}
       </button>
+      {hasGallery && (
+        <button
+          type="button"
+          onClick={() => setGalleryOpen(true)}
+          title="Levels other players published"
+          aria-label="Community levels"
+          className="flex h-7 items-center justify-center gap-1 rounded-full px-2 text-sm text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+        >
+          🌐
+          <span className="text-[10px] font-extrabold uppercase">Community</span>
+        </button>
+      )}
       <button
         type="button"
         onClick={() => openSaves()}

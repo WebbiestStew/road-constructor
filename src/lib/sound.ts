@@ -37,11 +37,11 @@ function getCtx(): AudioContext | null {
 // layering many loops never clips and the player can balance the groups. Levels are remembered in this browser.
 // ---------------------------------------------------------------------------
 
-export type SoundGroup = "effects" | "ambience" | "alerts";
+export type SoundGroup = "effects" | "ambience" | "alerts" | "radio";
 export type MixLevels = Record<SoundGroup | "master", number>;
 
 const MIX_KEY = "road-constructor:mix:v1";
-const DEFAULT_MIX: MixLevels = { master: 1, effects: 1, ambience: 1, alerts: 1 };
+const DEFAULT_MIX: MixLevels = { master: 1, effects: 1, ambience: 1, alerts: 1, radio: 0.8 };
 
 function loadMix(): MixLevels {
   const mix = { ...DEFAULT_MIX };
@@ -86,7 +86,7 @@ function getMixer(audio: AudioContext): Mixer {
   master.connect(limiter);
   limiter.connect(audio.destination);
   const groups = {} as Record<SoundGroup, GainNode>;
-  for (const g of ["effects", "ambience", "alerts"] as SoundGroup[]) {
+  for (const g of ["effects", "ambience", "alerts", "radio"] as SoundGroup[]) {
     groups[g] = audio.createGain();
     groups[g].connect(master);
   }
@@ -107,6 +107,7 @@ function applyMix(): void {
   mixer.groups.effects.gain.setTargetAtTime(mix.effects, now, 0.05);
   mixer.groups.ambience.gain.setTargetAtTime(mix.ambience * ambienceDuck, now, 0.12);
   mixer.groups.alerts.gain.setTargetAtTime(mix.alerts, now, 0.05);
+  mixer.groups.radio.gain.setTargetAtTime(mix.radio, now, 0.08);
 }
 
 export function getMixLevels(): MixLevels {
@@ -675,6 +676,7 @@ export function stopRoadSounds(): void {
   concreteRoad = false;
   if (road) applyRoadLevels();
   setPlayerEngine(false);
+  setRadioStation("off");
 }
 
 // ---------------------------------------------------------------------------
@@ -841,8 +843,19 @@ export function engineRevs(mph: number): { gear: number; revs: number } {
   return { gear: gear + 1, revs: 0.28 + 0.72 * t };
 }
 
-/** The player's engine: on while driving, at `mph`, with `throttle` -1 (braking) to 1. Call every frame; `on: false` fades it out. */
-export function setPlayerEngine(on: boolean, mph = 0, throttle = 0): void {
+/** How each kind of vehicle sounds from the driver's seat: the pitch of its engine, how loud and how muffled it is, and how much wind there is (a bicycle has no engine at all). */
+const ENGINE_VOICES: Record<string, { pitch: number; level: number; muffle: number; wind: number }> = {
+  car: { pitch: 1, level: 1, muffle: 1, wind: 1 },
+  truck: { pitch: 0.62, level: 1.35, muffle: 0.7, wind: 1.1 },
+  bus: { pitch: 0.58, level: 1.3, muffle: 0.65, wind: 1.1 },
+  bike: { pitch: 1, level: 0, muffle: 1, wind: 2.2 },
+  ambulance: { pitch: 0.9, level: 1.15, muffle: 1.1, wind: 1 },
+  police: { pitch: 1.05, level: 1.1, muffle: 1.1, wind: 1 },
+  wrecker: { pitch: 0.7, level: 1.25, muffle: 0.75, wind: 1 },
+};
+
+/** The player's engine: on while driving, at `mph`, with `throttle` -1 (braking) to 1, in the voice of `kind`. Call every frame; `on: false` fades it out. */
+export function setPlayerEngine(on: boolean, mph = 0, throttle = 0, kind = "car"): void {
   if (!on && !playerEngine) return;
   const e = ensurePlayerEngine();
   const audio = getCtx();
@@ -853,13 +866,15 @@ export function setPlayerEngine(on: boolean, mph = 0, throttle = 0): void {
     e.intakeGain.gain.linearRampToValueAtTime(0, now + 0.25);
     return;
   }
+  const voice = ENGINE_VOICES[kind] ?? ENGINE_VOICES.car;
   const { revs } = engineRevs(mph);
   const load = Math.max(0, throttle);
-  const freq = 36 + revs * 88;
+  const freq = (36 + revs * 88) * voice.pitch;
   for (const osc of e.oscillators) osc.frequency.linearRampToValueAtTime(freq * (osc.type === "square" ? 0.5 : 1), now + 0.06);
-  e.filter.frequency.linearRampToValueAtTime(380 + revs * 420 + load * 900, now + 0.1);
-  e.gain.gain.linearRampToValueAtTime(0.035 + revs * 0.02 + load * 0.035, now + 0.1);
-  e.intakeGain.gain.linearRampToValueAtTime(load * 0.02 * revs, now + 0.1);
+  e.filter.frequency.linearRampToValueAtTime((380 + revs * 420 + load * 900) * voice.muffle, now + 0.1);
+  e.gain.gain.linearRampToValueAtTime((0.035 + revs * 0.02 + load * 0.035) * voice.level, now + 0.1);
+  // wind and tyre hiss grow with speed on top of the engine's own intake (all there is on a bicycle)
+  e.intakeGain.gain.linearRampToValueAtTime((load * 0.02 * revs * voice.level + Math.min(1, mph / 60) * 0.014 * voice.wind), now + 0.1);
 }
 
 /** Tyres squealing on a hard stop. */
@@ -889,6 +904,9 @@ export const SOUND_CHECKS: { id: string; label: string; group: SoundGroup }[] = 
   { id: "concrete", label: "Concrete slabs", group: "ambience" },
   { id: "horns", label: "Horns", group: "ambience" },
   { id: "drive", label: "Your engine", group: "ambience" },
+  { id: "radio-lofi", label: "Radio: lo-fi", group: "radio" },
+  { id: "radio-synth", label: "Radio: synthwave", group: "radio" },
+  { id: "radio-dispatch", label: "Radio: dispatch", group: "radio" },
   { id: "siren", label: "Alert siren", group: "alerts" },
   { id: "ambulance", label: "Ambulance", group: "alerts" },
   { id: "crossing", label: "Crossing beeps", group: "alerts" },
@@ -955,6 +973,13 @@ export function playSoundCheck(id: string): number {
         setPlayerEngine(false);
       });
     }
+    case "radio-lofi":
+    case "radio-synth":
+    case "radio-dispatch": {
+      const was = station;
+      setRadioStation(id === "radio-lofi" ? "lofi" : id === "radio-synth" ? "synth" : "dispatch");
+      return stopAfter(4500, () => setRadioStation(was));
+    }
     case "siren":
       playAlertSiren();
       return 2000;
@@ -970,4 +995,167 @@ export function playSoundCheck(id: string): number {
     default:
       return 0;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The car radio: three generated stations that play while you drive. Nothing is recorded; each is a few oscillators and
+// some noise on a clock, scheduled a little ahead of the audio time.
+// ---------------------------------------------------------------------------
+
+export type RadioStation = "off" | "lofi" | "synth" | "dispatch";
+export const RADIO_STATIONS: { id: RadioStation; label: string; emoji: string }[] = [
+  { id: "off", label: "Radio off", emoji: "📻" },
+  { id: "lofi", label: "Lo-fi", emoji: "☕" },
+  { id: "synth", label: "Synthwave", emoji: "🌆" },
+  { id: "dispatch", label: "Dispatch", emoji: "📡" },
+];
+
+let station: RadioStation = "off";
+let radioTimer: ReturnType<typeof setInterval> | null = null;
+let radioBeat = 0;
+let radioNextAt = 0;
+let radioNoise: AudioBuffer | null = null;
+
+function noiseBuffer(audio: AudioContext): AudioBuffer {
+  if (radioNoise) return radioNoise;
+  const buf = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  radioNoise = buf;
+  return buf;
+}
+
+/** One note into the radio bus. */
+function radioNote(audio: AudioContext, at: number, freq: number, dur: number, peak: number, type: OscillatorType, cutoff = 2400, attack = 0.02) {
+  const osc = audio.createOscillator();
+  const filter = audio.createBiquadFilter();
+  const gain = audio.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  filter.type = "lowpass";
+  filter.frequency.value = cutoff;
+  gain.gain.setValueAtTime(0, at);
+  gain.gain.linearRampToValueAtTime(peak, at + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(bus(audio, "radio"));
+  osc.start(at);
+  osc.stop(at + dur + 0.05);
+}
+
+/** A burst of noise (a hat, a snare, a breath of static). */
+function radioNoiseHit(audio: AudioContext, at: number, dur: number, peak: number, freq: number, type: BiquadFilterType = "highpass") {
+  const src = audio.createBufferSource();
+  src.buffer = noiseBuffer(audio);
+  const filter = audio.createBiquadFilter();
+  filter.type = type;
+  filter.frequency.value = freq;
+  const gain = audio.createGain();
+  gain.gain.setValueAtTime(peak, at);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(bus(audio, "radio"));
+  src.start(at, Math.random() * 0.5);
+  src.stop(at + dur + 0.02);
+}
+
+const LOFI_CHORDS = [
+  [261.63, 329.63, 392, 493.88],
+  [220, 261.63, 329.63, 392],
+  [293.66, 349.23, 440, 523.25],
+  [196, 246.94, 293.66, 349.23],
+];
+
+/** Pure: the notes of a chord of the lo-fi loop, so tests can check the progression repeats every four chords. */
+export function lofiChord(index: number): number[] {
+  return LOFI_CHORDS[((index % LOFI_CHORDS.length) + LOFI_CHORDS.length) % LOFI_CHORDS.length];
+}
+
+const SYNTH_BASS = [55, 55, 65.41, 49, 55, 55, 73.42, 65.41];
+const SYNTH_ARP = [220, 261.63, 329.63, 392, 440, 392, 329.63, 261.63];
+
+function scheduleRadio(): void {
+  const audio = getCtx();
+  if (!audio || muted || station === "off") return;
+  // keep about half a second of music scheduled ahead
+  while (radioNextAt < audio.currentTime + 0.5) {
+    const t = Math.max(radioNextAt, audio.currentTime + 0.02);
+    if (station === "lofi") {
+      // 72 bpm: a chord every 4 beats (3.33 s), hats on the off-beats, a crackle now and then
+      const beat = 60 / 72;
+      const step = radioBeat % 8; // eighth notes, 8 per chord
+      const chord = lofiChord(Math.floor(radioBeat / 8));
+      if (step === 0) {
+        chord.forEach((f, i) => radioNote(audio, t + i * 0.035, f, 3.2, 0.05, "sine", 1500, 0.12));
+        radioNote(audio, t, chord[0] / 2, 3.0, 0.09, "sine", 400, 0.05);
+      }
+      if (step % 2 === 1) radioNoiseHit(audio, t, 0.05, 0.07, 6500);
+      if (step === 0 || step === 5) radioNoiseHit(audio, t, 0.12, 0.09, 220, "lowpass");
+      if (Math.random() < 0.18) radioNoiseHit(audio, t + Math.random() * beat, 0.012, 0.05, 3000);
+      radioBeat++;
+      radioNextAt = t + beat / 2;
+    } else if (station === "synth") {
+      const beat = 60 / 108;
+      const step = radioBeat % 8;
+      radioNote(audio, t, SYNTH_BASS[step], beat / 2 * 0.95, 0.09, "sawtooth", 520, 0.005);
+      radioNote(audio, t, SYNTH_ARP[(step * 3 + Math.floor(radioBeat / 16)) % 8] * (step % 4 === 3 ? 2 : 1), beat / 2 * 0.8, 0.035, "square", 2600, 0.004);
+      if (step % 4 === 0) {
+        // a kick: a sine that drops
+        const osc = audio.createOscillator();
+        const g = audio.createGain();
+        osc.frequency.setValueAtTime(130, t);
+        osc.frequency.exponentialRampToValueAtTime(45, t + 0.14);
+        g.gain.setValueAtTime(0.16, t);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+        osc.connect(g);
+        g.connect(bus(audio, "radio"));
+        osc.start(t);
+        osc.stop(t + 0.22);
+      }
+      if (step % 4 === 2) radioNoiseHit(audio, t, 0.14, 0.1, 1800);
+      radioBeat++;
+      radioNextAt = t + beat / 2;
+    } else {
+      // dispatch: static bed, and now and then a short call: a few syllables of band-limited noise, then the roger beep
+      radioNoiseHit(audio, t, 0.5, 0.012, 1800, "bandpass");
+      if (radioBeat % 14 === 0) {
+        const syllables = 3 + Math.floor(Math.random() * 6);
+        let at = t + 0.1;
+        radioNote(audio, at - 0.05, 1500, 0.06, 0.03, "square", 4000, 0.003); // click on
+        for (let i = 0; i < syllables; i++) {
+          const dur = 0.07 + Math.random() * 0.12;
+          radioNoiseHit(audio, at, dur, 0.1, 500 + Math.random() * 900, "bandpass");
+          radioNote(audio, at, 110 + Math.random() * 70, dur, 0.03, "sawtooth", 900, 0.01);
+          at += dur + 0.03 + Math.random() * 0.1;
+        }
+        radioNote(audio, at + 0.05, 1400, 0.08, 0.04, "sine", 5000, 0.003);
+        radioNote(audio, at + 0.16, 1000, 0.1, 0.04, "sine", 5000, 0.003);
+      }
+      radioBeat++;
+      radioNextAt = t + 0.5;
+    }
+  }
+}
+
+/** Tunes the car radio (it plays while you drive). "off" silences it. */
+export function setRadioStation(next: RadioStation): void {
+  station = next;
+  radioBeat = 0;
+  if (radioTimer) {
+    clearInterval(radioTimer);
+    radioTimer = null;
+  }
+  if (next === "off") return;
+  const audio = getCtx();
+  if (!audio) return;
+  getMixer(audio);
+  radioNextAt = audio.currentTime + 0.05;
+  radioTimer = setInterval(scheduleRadio, 120);
+  scheduleRadio();
+}
+
+export function getRadioStation(): RadioStation {
+  return station;
 }

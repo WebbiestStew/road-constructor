@@ -6,6 +6,7 @@ import { PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import type { VehicleSnapshot } from "@/hooks/useTrafficSimulation";
 import { useEditorStore } from "@/state/editorStore";
+import { VEHICLE_KIND_CODE, type VehicleKind } from "@/sim/types";
 
 interface ChaseCameraProps {
   snapshotRef: RefObject<VehicleSnapshot | null>;
@@ -44,6 +45,24 @@ function slotOfId(matrices: Float32Array, count: number, id: number): number {
   return -1;
 }
 
+const KIND_BY_CODE = new Map<number, VehicleKind>((Object.entries(VEHICLE_KIND_CODE) as [VehicleKind, number][]).map(([k, c]) => [c, k]));
+
+/** The id of the next (or previous) vehicle after `fromId`, in id order, that passes the filter; null if none does. */
+function pickVehicle(matrices: Float32Array, count: number, fromId: number | null, dir: 1 | -1, filter: VehicleKind | "any"): number | null {
+  const ids: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const kind = KIND_BY_CODE.get(matrices[i * 16 + 3]);
+    if (filter === "any" ? kind === "debris" : kind !== filter) continue;
+    ids.push(matrices[i * 16 + 11]);
+  }
+  if (ids.length === 0) return null;
+  ids.sort((a, b) => a - b);
+  if (fromId === null) return ids[0];
+  if (dir === 1) return ids.find((id) => id > fromId) ?? ids[0];
+  for (let i = ids.length - 1; i >= 0; i--) if (ids[i] < fromId) return ids[i];
+  return ids[ids.length - 1];
+}
+
 /**
  * Third-person "ride along" camera: locks onto one live vehicle and chases it from behind (or, while the player is
  * driving, from the driver's seat if they chose that view), re-locking onto the nearest active vehicle whenever the
@@ -58,6 +77,7 @@ function ChaseCamera({ snapshotRef }: ChaseCameraProps) {
   const lookAtRef = useRef(new THREE.Vector3());
   const initializedRef = useRef(false);
   const lastCamRef = useRef<"chase" | "hood">("chase");
+  const lastStepRef = useRef(0);
 
   useEffect(() => {
     if (!active) {
@@ -74,6 +94,17 @@ function ChaseCamera({ snapshotRef }: ChaseCameraProps) {
 
     // The car being driven is always the one to follow.
     if (store.drivingId !== null) trackedIdRef.current = store.drivingId;
+    // The player asked for another vehicle.
+    if (store.rideAlongStep.n !== lastStepRef.current) {
+      lastStepRef.current = store.rideAlongStep.n;
+      if (store.drivingId === null) {
+        const next = pickVehicle(snapshot.matrices, snapshot.activeCount, trackedIdRef.current, store.rideAlongStep.dir, store.rideAlongFilter);
+        if (next !== null) {
+          trackedIdRef.current = next;
+          initializedRef.current = false;
+        }
+      }
+    }
 
     let slot = trackedIdRef.current !== null ? slotOfId(snapshot.matrices, snapshot.activeCount, trackedIdRef.current) : -1;
     if (slot < 0) {
@@ -96,7 +127,8 @@ function ChaseCamera({ snapshotRef }: ChaseCameraProps) {
       slot = bestSlot;
       trackedIdRef.current = snapshot.matrices[slot * 16 + 11];
     }
-    if (store.rideAlongVehicleId !== trackedIdRef.current) useEditorStore.setState({ rideAlongVehicleId: trackedIdRef.current });
+    const kind = KIND_BY_CODE.get(snapshot.matrices[slot * 16 + 3]) ?? null;
+    if (store.rideAlongVehicleId !== trackedIdRef.current || store.rideAlongVehicleKind !== kind) useEditorStore.setState({ rideAlongVehicleId: trackedIdRef.current, rideAlongVehicleKind: kind });
 
     readVehicle(snapshot.matrices, slot, _vehiclePos, _forward);
 
