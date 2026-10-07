@@ -21,15 +21,17 @@ function readNetwork(): NetworkSnapshot {
 async function one(seed: number) {
   const sim = await createSim();
   const g = globalThis as unknown as { postMessage: (m: unknown) => void };
-  let last: { completedTripsTotal: number; tripDelayTotalS: number; tripFreeFlowTotalS: number; queuePeakFt: number } | null = null;
+  type Tick = { completedTripsTotal: number; tripDelayTotalS: number; tripFreeFlowTotalS: number; queuePeakFt: number };
+  const seen: { last: Tick | null } = { last: null };
   const prev = g.postMessage;
   g.postMessage = (m: unknown) => {
-    if ((m as { type: string }).type === "tick") last = m as typeof last;
+    if ((m as { type: string }).type === "tick") seen.last = m as Tick;
     prev(m);
   };
   sim.send({ type: "setTrafficMix", bus: mix[0], bike: mix[1] });
   sim.load(cloneNetwork(readNetwork()), seed, HARNESS_SPEED);
   await sim.runUntil(300);
+  const last = seen.last;
   console.log(JSON.stringify({ trips: last?.completedTripsTotal ?? 0, delayShare: last && last.tripFreeFlowTotalS > 0 ? last.tripDelayTotalS / last.tripFreeFlowTotalS : null, queueFt: last?.queuePeakFt ?? 0 }));
   process.exit(0);
 }
