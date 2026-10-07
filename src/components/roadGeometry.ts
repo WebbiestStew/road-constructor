@@ -301,6 +301,37 @@ export function buildLaneArrows(
   return geometry;
 }
 
+/** White diamonds along one lane, as painted on a carpool (HOV) lane. Counted back from the stop line like the lane arrows. */
+export function buildLaneDiamonds(edge: Edge3D, laneIndex: number, spacingFt = 120, lengthFt = 14, widthFt = 5, verticalOffsetFt = 0.04): THREE.BufferGeometry {
+  const totalLen = edge.length;
+  const tangent = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const point = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  const laneOffsetBase = laneOffsetFt(laneIndex, edge.lanes, edge.laneWidthFt);
+  const positions: number[] = [];
+  for (let s = totalLen - lengthFt - 40; s > 20; s -= spacingFt) {
+    const mid = s + lengthFt / 2;
+    const t = clamp01(mid / totalLen);
+    edgePointAt(edge, t, point);
+    edgeRightVectorAt(edge, t, tangent, right);
+    const scale = widthScaleAt(edge, mid);
+    const center = point.clone().addScaledVector(right, laneOffsetBase * scale + carriagewayOffsetAt(edge, mid, scale)).addScaledVector(up, verticalOffsetFt);
+    const front = center.clone().addScaledVector(tangent, lengthFt / 2);
+    const back = center.clone().addScaledVector(tangent, -lengthFt / 2);
+    const left = center.clone().addScaledVector(right, -widthFt / 2);
+    const rightPt = center.clone().addScaledVector(right, widthFt / 2);
+    // Wound to face up, like every other marking.
+    positions.push(front.x, front.y, front.z, left.x, left.y, left.z, rightPt.x, rightPt.y, rightPt.z);
+    positions.push(back.x, back.y, back.z, rightPt.x, rightPt.y, rightPt.z, left.x, left.y, left.z);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
 /** Simplified Jersey barrier cross-section (in feet), traced as a closed loop. */
 const JERSEY_PROFILE: ProfilePoint[] = [
   { x: -1.0, y: 0 },

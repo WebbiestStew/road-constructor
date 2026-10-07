@@ -12,6 +12,7 @@ import type {
   IncidentView,
   JunctionControl,
   NodeSpec,
+  TransitStats,
   WorkerInMessage,
   WorkerOutMessage,
 } from "@/sim/types";
@@ -49,6 +50,10 @@ export interface SimMetricsState {
   tripsTimed: number;
   queueNowFt: number;
   queuePeakFt: number;
+  /** Car-seconds spent in toll express lanes so far this run. */
+  expressVehicleS: number;
+  /** How the bus service is running: headways, bunching, transfers. */
+  transit: TransitStats;
   pedServedTotal: number;
   pedIncidentsTotal: number;
   emergency: EmergencyStats;
@@ -86,6 +91,8 @@ const DEFAULT_METRICS: SimMetricsState = {
   tripsTimed: 0,
   queueNowFt: 0,
   queuePeakFt: 0,
+  expressVehicleS: 0,
+  transit: { services: 0, headwayMeanS: 0, headwayCv: 0, boarded: 0, transfers: 0, heldS: 0 },
   pedServedTotal: 0,
   pedIncidentsTotal: 0,
   emergency: { dispatched: 0, completed: 0, waiting: 0, active: 0, totalResponseS: 0, totalIdealS: 0, lastResponseS: 0, lastIdealS: 0 },
@@ -229,6 +236,8 @@ export function useTrafficSimulation() {
             tripsTimed: msg.tripsTimed ?? 0,
             queueNowFt: msg.queueNowFt ?? 0,
             queuePeakFt: msg.queuePeakFt ?? 0,
+            expressVehicleS: msg.expressVehicleS ?? 0,
+            transit: msg.transit ?? DEFAULT_METRICS.transit,
             pedServedTotal: msg.pedServedTotal,
             pedIncidentsTotal: msg.pedIncidentsTotal,
             emergency: msg.emergency,
@@ -313,7 +322,7 @@ export function useTrafficSimulation() {
     postScenarioEvents(worker);
     postRunFlags(worker);
 
-    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${e.crosswalk ? 1 : 0}|${e.busStop ? 1 : 0}|${e.parking ? 1 : 0}|${e.vslMph ?? ""}|${(e.closedLanes ?? []).join(".")}|${e.displacedLeft ? 1 : 0}`;
+    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${(e.bannedTurns ?? []).join(".")}|${e.crosswalk ? 1 : 0}|${e.busStop ? 1 : 0}|${e.parking ? 1 : 0}|${e.vslMph ?? ""}|${(e.closedLanes ?? []).join(".")}|${e.displacedLeft ? 1 : 0}`;
     const nodeSig = (n: NodeSpec) => JSON.stringify(n.control ?? null);
     let sentEdges = new Map(snapshot.edges.map((e) => [e.id, edgeSig(e)]));
     let sentNodes = new Map(snapshot.nodes.map((n) => [n.id, nodeSig(n)]));
@@ -345,6 +354,7 @@ export function useTrafficSimulation() {
           speedLimitMph: e.speedLimitMph,
           laneMoves: e.laneMoves ?? null,
           reservedLane: e.reservedLane ?? null,
+          bannedTurns: e.bannedTurns ?? [],
           crosswalk: e.crosswalk ?? false,
           busStop: e.busStop ?? false,
           parking: e.parking ?? false,

@@ -22,7 +22,7 @@ export interface ServiceReport {
   medals: Medal[];
 }
 
-export type MedalId = "delay" | "queue" | "peds" | "clear" | "gridlock" | "flow";
+export type MedalId = "delay" | "queue" | "peds" | "clear" | "gridlock" | "flow" | "buses";
 
 export interface Medal {
   id: MedalId;
@@ -40,6 +40,9 @@ export const DELAY_MEDAL_RATIO = 0.9;
 export const QUEUE_MEDAL_RATIO = 0.85;
 export const MIN_PEDS_FOR_MEDAL = 3;
 export const FLOW_COMBOS_FOR_MEDAL = 3;
+/** Line-bus stops served before the spacing means anything, and the most the gaps may vary (spread = standard deviation / mean). */
+export const MIN_BUS_SERVICES = 12;
+export const MAX_BUS_HEADWAY_CV = 0.45;
 
 export const MEDAL_META: Record<MedalId, { icon: string; label: string }> = {
   delay: { icon: "⏱️", label: "Less waiting" },
@@ -48,6 +51,7 @@ export const MEDAL_META: Record<MedalId, { icon: string; label: string }> = {
   clear: { icon: "🚧", label: "Clear roads" },
   gridlock: { icon: "🟢", label: "No gridlock" },
   flow: { icon: "🌊", label: "Green wave" },
+  buses: { icon: "🚌", label: "Even service" },
 };
 
 /** The slice of a run's numbers the report reads: the live metrics, or the final tick of a headless run. */
@@ -62,6 +66,7 @@ export type ServiceInput = Pick<
   | "crashes"
   | "gridlockPenaltyTotal"
   | "combos"
+  | "transit"
 >;
 
 export function buildServiceReport(m: ServiceInput, baseline?: ScenarioDef["serviceBaseline"]): ServiceReport {
@@ -89,6 +94,10 @@ export function buildServiceReport(m: ServiceInput, baseline?: ScenarioDef["serv
   add("gridlock", m.gridlockPenaltyTotal === 0, m.gridlockPenaltyTotal === 0 ? "Nobody was stuck long enough to be towed away" : `${m.gridlockPenaltyTotal} stuck for good`);
   if (m.combos > 0) {
     add("flow", m.combos >= FLOW_COMBOS_FOR_MEDAL, `${m.combos} flow combo${m.combos === 1 ? "" : "s"} (${FLOW_COMBOS_FOR_MEDAL} for the medal)`);
+  }
+
+  if (m.transit.services >= MIN_BUS_SERVICES) {
+    add("buses", m.transit.headwayCv <= MAX_BUS_HEADWAY_CV, `Buses came every ${Math.round(m.transit.headwayMeanS)} s with a spread of ${m.transit.headwayCv.toFixed(2)} (${MAX_BUS_HEADWAY_CV} or less for the medal)${m.transit.transfers > 0 ? `, ${m.transit.transfers} people changed lines` : ""}`);
   }
 
   return {

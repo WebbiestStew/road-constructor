@@ -86,6 +86,8 @@ function RoadEditor() {
       endScale: 1,
       sunken: false,
       reservedLane: null,
+      bannedTurns: [],
+      allNextEdgeIds: [],
       crosswalk: false,
       jaywalkers: false,
       busStop: false,

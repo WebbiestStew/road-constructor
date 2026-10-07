@@ -2,11 +2,12 @@
 import { getScenarioById, REAL_PLANS } from "../../src/sim/scenarios";
 import { REAL_CITY_DATA } from "../../src/sim/real/all";
 import type { ScriptedEvent } from "../../src/sim/types";
-import { assembleNetwork, hasGantry } from "../../src/sim/network";
+import { assembleNetwork, computeRoute, hasGantry } from "../../src/sim/network";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 (globalThis as unknown as { __simDebug: Record<string, unknown> }).__simDebug = {};
 
 const [which = "incidents"] = process.argv.slice(2);
+const g = globalThis as unknown as { __simLast: unknown };
 
 async function incidentCase(kind: "stall" | "debris" | "fender", dispatchAfterS: number | null) {
   const level = getScenarioById("clover-crossing")!;
@@ -113,7 +114,91 @@ async function crossingCase(mode: "off" | "yield" | "cfi" | "cfi2" | "prot" | "s
   process.exit(0);
 }
 
+/** The carpool and express lanes on every freeway road with three lanes or more in the cloverleaf: who ends up in the left lane, and the toll. */
+async function laneCase(kind: "none" | "hov" | "express") {
+  const level = getScenarioById("clover-crossing")!;
+  const network = cloneNetwork(level.startingNetwork);
+  const assembled = assembleNetwork(network);
+  const targets = new Set(assembled.edges.filter((e) => e.isFreeway && e.lanes >= 3 && e.length >= 500).map((e) => e.id));
+  if (kind !== "none") for (const e of network.edges) if (targets.has(e.id)) e.reservedLane = kind;
+  const sim = await createSim();
+  g.__simLast = null;
+  sim.load(network, 1337, HARNESS_SPEED);
+  const dbg = (globalThis as unknown as { __simDebug: { state: () => { vehicles: Map<number, { id: number; kind: string; edgeId: string; laneIndex: number; distanceAlongEdge: number }>; network: { edgesById: Map<string, { length: number }> } } } }).__simDebug;
+  const carpool = (id: number) => id > 0 && (Math.imul(id, 2654435761) >>> 0) % 100 < 20;
+  let inLeft = 0;
+  let wrong = 0;
+  let samples = 0;
+  for (let t = 90; t <= 300; t += 2) {
+    await sim.runUntil(t);
+    const st = dbg.state();
+    for (const v of st.vehicles.values()) {
+      if (!targets.has(v.edgeId)) continue;
+      const len = st.network.edgesById.get(v.edgeId)!.length;
+      // away from the ends, where a driver may cross the lane to make a turn
+      if (v.distanceAlongEdge < 120 || v.distanceAlongEdge > len - 160) continue;
+      samples++;
+      if (v.laneIndex !== 0) continue;
+      inLeft++;
+      const allowed = kind === "hov" ? v.kind === "bus" || (v.kind === "car" && carpool(v.id)) : kind === "express" ? v.kind !== "truck" && v.kind !== "bike" : true;
+      if (!allowed) wrong++;
+    }
+  }
+  const end = await sim.runUntil(300);
+  console.log(JSON.stringify({ lanes: kind, roads: targets.size, samples, inLeftLane: inLeft, notAllowedInLeft: wrong, trips: end.trips, expressS: Math.round((g.__simLast as { expressVehicleS?: number } | null)?.expressVehicleS ?? 0) }));
+  process.exit(0);
+}
+
+/** Two bus lines through Transit Street with stops on every long road: how evenly the buses are spaced, with and without holding at stops. */
+async function transitCase(hold: boolean, lines: 1 | 2 = 1) {
+  const level = getScenarioById("transit-street")!;
+  const network = cloneNetwork(level.startingNetwork);
+  const assembled = assembleNetwork(network);
+  const entries = assembled.edges.filter((e) => e.zone?.type === "entry");
+  const dests = assembled.edges.filter((e) => e.zone?.type === "destination");
+  const routes: string[][] = [];
+  for (const en of entries) {
+    for (const d of dests) {
+      const r = computeRoute(assembled, en.id, d.id);
+      if (r && r.length >= 4) routes.push(r);
+    }
+  }
+  routes.sort((a, b) => b.length - a.length);
+  const picked = [routes[0], routes.find((r) => r.some((id) => !routes[0].includes(id)) && r.some((id) => routes[0].includes(id))) ?? routes[1]].slice(0, lines);
+  const stopEdges = new Set(picked.flat());
+  for (const e of network.edges) {
+    const a = assembled.edgesById.get(e.id)!;
+    if (stopEdges.has(e.id) && a.length >= 160) e.busStop = true;
+  }
+  const sim = await createSim();
+  sim.send({ type: "setTrafficMix", bus: 0.16, bike: 0 });
+  sim.send({ type: "setTransit", lines: picked.map((r, i) => ({ id: `L${i}`, name: `Line ${i + 1}`, edgeIds: r, headwayS: 28, color: "#f00", hold })) });
+  sim.load(network, 1337, HARNESS_SPEED);
+  const end = await sim.runUntil(300);
+  const t = (g.__simLast as { transit?: Record<string, number>; peopleMovedTotal?: number } | null) ?? {};
+  console.log(JSON.stringify({ lines, hold, trips: end.trips, people: Math.round(end.people), ...t.transit, headwayMeanS: Math.round(t.transit?.headwayMeanS ?? 0), headwayCv: +(t.transit?.headwayCv ?? 0).toFixed(2) }));
+  process.exit(0);
+}
+
+/** Left turns banned on every road that ends at a signal in Midtown: nobody turns left, and the city still works. */
+async function banCase(turn: "none" | "left") {
+  const level = getScenarioById("midtown")!;
+  const network = cloneNetwork(level.startingNetwork);
+  if (turn === "left") for (const e of network.edges) e.bannedTurns = ["left"];
+  const assembled = assembleNetwork(network);
+  let leftExits = 0;
+  for (const e of assembled.edges) for (const m of e.nextMoves.values()) if (m === "left") leftExits++;
+  const sim = await createSim();
+  sim.load(network, 1337, HARNESS_SPEED);
+  const end = await sim.runUntil(300);
+  console.log(JSON.stringify({ ban: turn, leftExitsInGraph: leftExits, trips: end.trips }));
+  process.exit(0);
+}
+
 async function main() {
+  if (which === "hov" || which === "express" || which === "lanes-none") return laneCase(which === "lanes-none" ? "none" : which);
+  if (which.startsWith("transit:")) return transitCase(which.split(":")[1] === "hold", which.split(":")[2] === "2" ? 2 : 1);
+  if (which === "ban:left" || which === "ban:none") return banCase(which.split(":")[1] as "left" | "none");
   if (which.startsWith("cross:")) {
     const [, mode, seed] = which.split(":");
     return crossingCase(mode as "off" | "yield" | "cfi" | "cfi2" | "prot" | "split", seed ? Number(seed) : 1337);

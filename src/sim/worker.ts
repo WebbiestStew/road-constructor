@@ -34,6 +34,7 @@ import {
   type IncidentView,
   type TickStats,
   type TransitLine,
+  type TransitStats,
   type VehicleKind,
   type VehicleState,
   type Weather,
@@ -123,6 +124,8 @@ let tripFreeFlowTotalS = 0;
 let tripsTimed = 0;
 let queueNowFt = 0;
 let queuePeakFt = 0;
+/** Car-seconds spent in toll express lanes this run; the main thread turns it into money. */
+let expressVehicleS = 0;
 /** Share of new vehicles that are buses / bikes. Zero keeps the classic mix (and its exact random sequence). */
 let busShare = 0;
 let bikeShare = 0;
@@ -381,6 +384,10 @@ function acquireVehicle(): VehicleState {
     leftMark: -1,
     minSpeed: 1e9,
     comboLegs: 0,
+    lineId: "",
+    boarding: 0,
+    holdS: 0,
+    holdFrom: -1,
   };
 }
 
@@ -468,11 +475,15 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   rebuildCrossings();
 
   for (const [id, v] of vehicles) {
-    if (!network.edgesById.has(v.edgeId)) {
+    const edge = network.edgesById.get(v.edgeId);
+    if (!edge) {
       releaseVehicle(v);
       vehicles.delete(id);
       ambulances.delete(id);
       responders.delete(id);
+    } else if (v.laneIndex >= edge.lanes) {
+      // a lane was taken away (a reversed lane): move over into the last one
+      v.laneIndex = edge.lanes - 1;
     }
   }
 }
@@ -483,6 +494,7 @@ function resetServiceStats() {
   tripsTimed = 0;
   queueNowFt = 0;
   queuePeakFt = 0;
+  expressVehicleS = 0;
 }
 
 /** Records a finished trip for the delay average: its time on the road against the time at the limit all the way. Cars and trucks only (a bus's stops are not delay). */
@@ -541,6 +553,7 @@ function resetRun() {
   combosTotal = 0;
   nextComboAt = 0;
   nextBusAt.clear();
+  resetTransitStats();
   scriptedWeather = null;
   gridlockPenaltyTotal = 0;
   demandScale = 1;
@@ -609,7 +622,7 @@ function trySpawn(entryEdgeId: string) {
   }
 }
 
-function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinationEdgeId: string, forcedKind: VehicleKind | null = null) {
+function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinationEdgeId: string, forcedKind: VehicleKind | null = null): VehicleState {
   const v = acquireVehicle();
   v.id = nextVehicleId++;
   v.edgeId = edge.id;
@@ -666,9 +679,14 @@ function spawnVehicle(edge: Edge3D, laneIndex: number, route: string[], destinat
   v.leftMark = -1;
   v.minSpeed = 1e9;
   v.comboLegs = 0;
+  v.lineId = "";
+  v.boarding = 0;
+  v.holdS = 0;
+  v.holdFrom = -1;
 
   vehicles.set(v.id, v);
   spawnedTotal++;
+  return v;
 }
 
 function updateSpawning() {
@@ -1129,10 +1147,73 @@ function recordAmbulanceArrival(v: VehicleState) {
 // ---------------------------------------------------------------------------
 
 const BUS_STOP_AT = 0.6;
-const BUS_DWELL_S = 7;
+/** Boarding takes a few seconds to open the doors plus a moment per rider. */
+const BUS_DWELL_BASE_S = 3.5;
+const BUS_DWELL_PER_RIDER_S = 0.6;
+const BUS_DWELL_MAX_S = 24;
 const BUS_STOP_APPROACH_FT = 110;
-const BUS_RIDERSHIP_GAIN = 1.12;
 const BUS_MAX_RIDERS = 70;
+/** People arrive at a stop at this rate (per second) and wait for the next bus, up to a crowd of this size. A stop two lines share draws more riders: they change here. */
+const STOP_ARRIVAL_PER_S = 0.2;
+const STOP_CROWD_MAX = 45;
+const TRANSFER_STOP_DEMAND = 1.6;
+/** A holding bus waits at most this long. */
+const BUS_HOLD_MAX_S = 25;
+/** A bus on a holding line keeps at least this share of the timetable's headway behind the one ahead. */
+const BUS_HOLD_HEADWAY_SHARE = 0.85;
+
+interface StopState {
+  /** When a bus last finished boarding here (the crowd builds from then). */
+  lastServedAt: number;
+  /** When the previous bus of each line began boarding here (for headways and holding). */
+  lastBusAt: Map<string, number>;
+}
+const stopState = new Map<string, StopState>();
+/** How many of the player's bus lines run along each road: a stop on a road with two or more is a transfer stop. */
+let linesOnEdge = new Map<string, number>();
+let busServices = 0;
+let busHeadwaySum = 0;
+let busHeadwaySq = 0;
+let busHeadwayN = 0;
+let busHoldTotalS = 0;
+let busBoardedTotal = 0;
+let transferRidersTotal = 0;
+
+function resetTransitStats() {
+  stopState.clear();
+  busServices = 0;
+  busHeadwaySum = 0;
+  busHeadwaySq = 0;
+  busHeadwayN = 0;
+  busHoldTotalS = 0;
+  busBoardedTotal = 0;
+  transferRidersTotal = 0;
+}
+
+function transitStats(): TransitStats {
+  const mean = busHeadwayN > 0 ? busHeadwaySum / busHeadwayN : 0;
+  const variance = busHeadwayN > 1 ? Math.max(0, busHeadwaySq / busHeadwayN - mean * mean) : 0;
+  return {
+    services: busServices,
+    headwayMeanS: mean,
+    headwayCv: mean > 0 ? Math.sqrt(variance) / mean : 0,
+    boarded: busBoardedTotal,
+    transfers: transferRidersTotal,
+    heldS: busHoldTotalS,
+  };
+}
+
+function rebuildLinesOnEdge() {
+  linesOnEdge = new Map();
+  for (const line of transitLines) for (const id of new Set(line.edgeIds)) linesOnEdge.set(id, (linesOnEdge.get(id) ?? 0) + 1);
+}
+
+function stopCrowd(edgeId: string): number {
+  const st = stopState.get(edgeId);
+  const since = simTime - (st?.lastServedAt ?? 0);
+  const demand = (linesOnEdge.get(edgeId) ?? 0) >= 2 ? TRANSFER_STOP_DEMAND : 1;
+  return Math.min(STOP_CROWD_MAX, STOP_ARRIVAL_PER_S * demand * Math.max(0, since));
+}
 
 /** Drivers cruising a street with parking along it slow down looking for a space and watching for opening doors. */
 function parkingSpeedMult(edge: Edge3D, v: VehicleState): number {
@@ -1146,7 +1227,11 @@ function busStopDistance(v: VehicleState, edge: Edge3D): number | null {
   return d > -2 && d <= BUS_STOP_APPROACH_FT ? Math.max(d, 0.1) : null;
 }
 
-/** Runs a bus's boarding timer once it has stopped at its stop, and marks the stop served when the wait is over. */
+/**
+ * Runs a bus's boarding once it has stopped at its stop. The people who have gathered since the last bus board (so a
+ * bus that comes late finds a crowd and stays longer, and the bus behind it, finding few, catches up: that is how
+ * buses end up bunched). A line set to hold makes a bus wait until it is a fair headway behind the one ahead.
+ */
 function updateBusDwell(v: VehicleState, edge: Edge3D) {
   if (v.kind !== "bus" || !edge.busStop || v.stopServedEdge === edge.id) return;
   const d = edge.length * BUS_STOP_AT - v.distanceAlongEdge;
@@ -1156,13 +1241,49 @@ function updateBusDwell(v: VehicleState, edge: Edge3D) {
     return;
   }
   if (v.dwellUntil === 0) {
-    if (d < 16 && v.speed < 1.5) v.dwellUntil = simTime + BUS_DWELL_S;
+    if (d < 16 && v.speed < 1.5) {
+      const crowd = stopCrowd(edge.id);
+      const boarding = Math.min(Math.round(crowd), Math.max(0, BUS_MAX_RIDERS - Math.round(v.passengers)));
+      v.dwellUntil = simTime + Math.min(BUS_DWELL_MAX_S, BUS_DWELL_BASE_S + BUS_DWELL_PER_RIDER_S * boarding);
+      v.boarding = boarding;
+      v.holdS = 0;
+      let st = stopState.get(edge.id);
+      if (!st) {
+        st = { lastServedAt: 0, lastBusAt: new Map() };
+        stopState.set(edge.id, st);
+      }
+      if (v.lineId) {
+        busServices++;
+        const previous = st.lastBusAt.get(v.lineId) ?? -1;
+        if (previous >= 0) {
+          const h = simTime - previous;
+          busHeadwaySum += h;
+          busHeadwaySq += h * h;
+          busHeadwayN++;
+        }
+        v.holdFrom = previous;
+        st.lastBusAt.set(v.lineId, simTime);
+      }
+    }
     return;
   }
   if (simTime >= v.dwellUntil) {
+    const line = v.lineId ? transitLines.find((l) => l.id === v.lineId) : undefined;
+    if (line?.hold && v.holdFrom >= 0 && v.holdS < BUS_HOLD_MAX_S && simTime - v.holdFrom < line.headwayS * BUS_HOLD_HEADWAY_SHARE) {
+      // too close behind the bus ahead: wait a second more, with the doors open (more riders can board)
+      v.dwellUntil = simTime + 1;
+      v.holdS += 1;
+      busHoldTotalS += 1;
+      return;
+    }
+    const st = stopState.get(edge.id);
+    if (st) st.lastServedAt = simTime;
     v.stopServedEdge = edge.id;
     v.dwellUntil = 0;
-    v.passengers = Math.min(BUS_MAX_RIDERS, Math.round(v.passengers * BUS_RIDERSHIP_GAIN));
+    v.passengers = Math.min(BUS_MAX_RIDERS, Math.round(v.passengers) + v.boarding);
+    busBoardedTotal += v.boarding;
+    if ((linesOnEdge.get(edge.id) ?? 0) >= 2) transferRidersTotal += Math.round(v.boarding * 0.4);
+    v.boarding = 0;
   }
 }
 
@@ -1198,7 +1319,8 @@ function updateTransit() {
       for (let lane = first.lanes - 1; lane >= 0 && !spawned; lane--) {
         const head = occupancy[lane].length > 0 ? vehicles.get(occupancy[lane][0])?.distanceAlongEdge ?? Infinity : Infinity;
         if (head < MIN_SPAWN_CLEARANCE_FT) continue;
-        spawnVehicle(first, lane, line.edgeIds, line.edgeIds[line.edgeIds.length - 1], "bus");
+        if (isReservedAgainst(first, lane, "bus")) continue;
+        spawnVehicle(first, lane, line.edgeIds, line.edgeIds[line.edgeIds.length - 1], "bus").lineId = line.id;
         spawned = true;
       }
     }
@@ -1798,19 +1920,52 @@ function cruiseFactor(v: VehicleState): number {
 /** How close to the end of a road a car may slip into a reserved lane if that is the only lane that can make its turn. */
 const RESERVED_LANE_EXIT_FT = 150;
 
-/** True when `kind` may never use `lane` of this edge (the reserved lane belongs to someone else). Ignores the turn exception. */
-function isReservedAgainst(edge: Edge3D, lane: number, kind: VehicleKind): boolean {
-  if (!edge.reservedLane || lane !== edge.lanes - 1) return false;
+/** Which lane is set aside: the right-hand one for buses and bikes, the left-hand one for carpools and the express lane. */
+function reservedLaneIndex(edge: Edge3D): number {
+  return edge.reservedLane === "hov" || edge.reservedLane === "express" ? 0 : edge.lanes - 1;
+}
+
+/** About one car in five has a carpool on board: a fixed share by vehicle id, so it takes nothing from the random stream. */
+const CARPOOL_SHARE_PERCENT = 20;
+function isCarpool(id: number): boolean {
+  return id > 0 && (Math.imul(id, 2654435761) >>> 0) % 100 < CARPOOL_SHARE_PERCENT;
+}
+
+/**
+ * True when this road user may never use `lane` of the edge (the reserved lane belongs to someone else). Ignores the
+ * turn exception. `id` is the vehicle's, to tell a carpool from a lone driver; spawning passes 0 (nobody is let in
+ * to the carpool lane at the entry).
+ */
+function isReservedAgainst(edge: Edge3D, lane: number, kind: VehicleKind, id = 0): boolean {
+  if (!edge.reservedLane || lane !== reservedLaneIndex(edge)) return false;
   if (isEmergencyKind(kind)) return false;
-  return edge.reservedLane === "bus" ? kind !== "bus" : kind !== "bike";
+  switch (edge.reservedLane) {
+    case "bus":
+      return kind !== "bus";
+    case "bike":
+      return kind !== "bike";
+    case "hov":
+      return !(kind === "bus" || (kind === "car" && isCarpool(id)));
+    case "express":
+      return kind === "truck" || kind === "bike";
+  }
+}
+
+/** Whether this vehicle heads for the reserved lane on its own: a bus or a bike for its own lane, a bus for the carpool lane (cars choose it by how free it is). */
+function wantsReservedLane(edge: Edge3D, kind: VehicleKind): boolean {
+  if (edge.reservedLane === "bus") return kind === "bus";
+  if (edge.reservedLane === "bike") return kind === "bike";
+  if (edge.reservedLane === "hov") return kind === "bus";
+  return false;
 }
 
 /** As above, plus the real-world exception: right before a junction, anyone may use the lane if it is the only one that makes their turn. */
 function laneForbidden(v: VehicleState, edge: Edge3D, lane: number): boolean {
-  if (!isReservedAgainst(edge, lane, v.kind)) return false;
+  if (!isReservedAgainst(edge, lane, v.kind, v.id)) return false;
   if (edge.length - v.distanceAlongEdge < RESERVED_LANE_EXIT_FT) {
     const allowed = allowedLanesForNext(v, edge);
-    if (allowed && !allowed.slice(0, edge.lanes - 1).some(Boolean)) return false;
+    const reserved = reservedLaneIndex(edge);
+    if (allowed && !allowed.some((a, i) => a && i !== reserved)) return false;
   }
   return true;
 }
@@ -2012,16 +2167,22 @@ function tryLaneChange(v: VehicleState, edge: Edge3D) {
   }
 
   // A driver sitting in a lane reserved for someone else gets out of it as soon as it is safe.
-  if (requiredDirection === 0 && edge.reservedLane && laneForbidden(v, edge, v.laneIndex) && v.laneIndex > 0) {
-    requiredDirection = -1;
-    mergeUrgency = 1;
+  if (requiredDirection === 0 && edge.reservedLane && laneForbidden(v, edge, v.laneIndex)) {
+    // out of the reserved lane, toward the middle of the road
+    const away = reservedLaneIndex(edge) === 0 ? 1 : -1;
+    if (v.laneIndex + away >= 0 && v.laneIndex + away < edge.lanes) {
+      requiredDirection = away;
+      mergeUrgency = 1;
+    }
   }
   // Buses and bikes head for the lane that was reserved for them, unless a left turn is coming up.
-  if (requiredDirection === 0 && edge.reservedLane && v.laneIndex < edge.lanes - 1 && !isReservedAgainst(edge, edge.lanes - 1, v.kind)) {
+  if (requiredDirection === 0 && edge.reservedLane && wantsReservedLane(edge, v.kind) && v.laneIndex !== reservedLaneIndex(edge) && !isReservedAgainst(edge, reservedLaneIndex(edge), v.kind, v.id)) {
     const nextId = v.routeEdgeIds[v.routeIndex + 1];
-    const turnsLeft = nextId ? edge.nextMoves.get(nextId) === "left" : false;
-    if (!turnsLeft || distanceToNode > 400) {
-      requiredDirection = 1;
+    const move = nextId ? edge.nextMoves.get(nextId) : undefined;
+    // the left lane is the wrong place for a right turn, and the right lane for a left one
+    const turnsAway = edge.reservedLane === "hov" ? move === "right" : move === "left";
+    if (!turnsAway || distanceToNode > 400) {
+      requiredDirection = reservedLaneIndex(edge) > v.laneIndex ? 1 : -1;
       mergeUrgency = 0.7;
     }
   }
@@ -2258,12 +2419,22 @@ function step(dt: number) {
 
     const deltaDist = v.speed * dt;
     v.distanceAlongEdge += deltaDist;
+    if (edge.reservedLane === "express" && v.laneIndex === 0 && v.kind === "car") expressVehicleS += dt;
 
     let currentEdge = edge;
     while (v.distanceAlongEdge >= currentEdge.length) {
       const overflow = v.distanceAlongEdge - currentEdge.length;
       v.routeIndex += 1;
-      const nextEdgeId = v.routeEdgeIds[v.routeIndex];
+      let nextEdgeId = v.routeEdgeIds[v.routeIndex];
+      // A turn the player banned after this driver set out: find another way from here, if there is one.
+      if (nextEdgeId && currentEdge.bannedTurns.length > 0 && !currentEdge.nextEdgeIds.includes(nextEdgeId)) {
+        const detour = computeRoute(network, currentEdge.id, v.destinationEdgeId);
+        if (detour && detour.length > 1) {
+          v.routeEdgeIds = detour;
+          v.routeIndex = 1;
+          nextEdgeId = detour[1];
+        }
+      }
       if (!nextEdgeId) {
         toRemove.push(v.id);
         break;
@@ -2282,7 +2453,10 @@ function step(dt: number) {
       v.edgeId = nextEdgeId;
       v.laneIndex = mapLaneAcross(currentEdge, nextEdge, v.laneIndex);
       v.distanceAlongEdge = overflow;
-      if (nextEdge.reservedLane && isReservedAgainst(nextEdge, v.laneIndex, v.kind) && v.laneIndex > 0) v.laneIndex -= 1;
+      if (nextEdge.reservedLane && isReservedAgainst(nextEdge, v.laneIndex, v.kind, v.id)) {
+        const away = reservedLaneIndex(nextEdge) === 0 ? 1 : -1;
+        v.laneIndex = clamp(v.laneIndex + away, 0, nextEdge.lanes - 1);
+      }
       currentEdge = nextEdge;
     }
   }
@@ -2592,6 +2766,8 @@ function postSnapshot(forceStats: boolean) {
     tripsTimed,
     queueNowFt,
     queuePeakFt,
+    expressVehicleS,
+    transit: transitStats(),
     pedServedTotal,
     pedIncidentsTotal,
     pedCrossings: activeCrossingViews(),
@@ -2718,6 +2894,7 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       break;
     case "setTransit":
       transitLines = msg.lines;
+      rebuildLinesOnEdge();
       for (const id of Array.from(nextBusAt.keys())) if (!transitLines.some((l) => l.id === id)) nextBusAt.delete(id);
       break;
     case "setDarkness":

@@ -2,6 +2,7 @@
 // Variants: none | rain | fog | night | dusk | fixed (the level's planted faults removed) | bus | bike | cross (crosswalks on the jaywalking roads) | oneway
 import { buildHarborDrive, buildMidtown } from "../../src/sim/cities";
 import { getScenarioById } from "../../src/sim/scenarios";
+import { assembleNetwork, computeRoute } from "../../src/sim/network";
 import type { NetworkSnapshot } from "../../src/sim/types";
 import { cloneNetwork, createSim, HARNESS_SPEED } from "./harness";
 
@@ -44,6 +45,30 @@ async function main() {
     if (variants.has("stops") && e.lanes >= 2) e.busStop = true;
     if (variants.has("parking") && e.lanes >= 2) e.parking = true;
   }
+  // Two bus lines that cross, with stops on every long road they use (and a bus lane on the ones that can spare it).
+  let lines: { id: string; name: string; edgeIds: string[]; headwayS: number; color: string; hold: boolean }[] = [];
+  if (variants.has("lines2") || variants.has("lines1")) {
+    const assembled = assembleNetwork(network);
+    const entries = assembled.edges.filter((e) => e.zone?.type === "entry");
+    const dests = assembled.edges.filter((e) => e.zone?.type === "destination");
+    const routes: string[][] = [];
+    for (const en of entries) for (const d of dests) {
+      const r = computeRoute(assembled, en.id, d.id);
+      if (r && r.length >= 4) routes.push(r);
+    }
+    routes.sort((a, b) => b.length - a.length);
+    const first = routes[0];
+    const second = routes.find((r) => r.some((id) => !first.includes(id)) && r.some((id) => first.includes(id))) ?? routes[1];
+    const picked = variants.has("lines2") ? [first, second] : [first];
+    lines = picked.map((r, i) => ({ id: `L${i}`, name: `Line ${i + 1}`, edgeIds: r, headwayS: 30, color: "#f00", hold: true }));
+    const used = new Set(picked.flat());
+    for (const e of network.edges) {
+      if (!used.has(e.id)) continue;
+      const a = assembled.edgesById.get(e.id)!;
+      if (a.length >= 160) e.busStop = true;
+      if (variants.has("buslane") && e.lanes >= 2) e.reservedLane = "bus";
+    }
+  }
   const sim = await createSim();
   const g = globalThis as unknown as { postMessage: (m: any) => void };
   let last: any = null;
@@ -56,6 +81,7 @@ async function main() {
   if (variants.has("fog")) sim.send({ type: "setWeather", weather: "fog" });
   if (variants.has("night")) sim.send({ type: "setDarkness", level: 1 });
   if (variants.has("dusk")) sim.send({ type: "setDarkness", level: 0.5 });
+  if (lines.length > 0) sim.send({ type: "setTransit", lines });
   sim.send({ type: "setTrafficMix", bus: scenario.trafficMix?.bus ?? 0, bike: scenario.trafficMix?.bike ?? 0 });
   sim.load(network, Number(seed), HARNESS_SPEED);
   if (scenario.scriptedEvents) sim.send({ type: "scheduleEvents", events: scenario.scriptedEvents });

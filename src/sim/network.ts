@@ -690,6 +690,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       endScale: 1,
       sunken: isSunken(spline),
       reservedLane: spec.lanes >= 2 ? (spec.reservedLane ?? null) : null,
+      bannedTurns: spec.bannedTurns ?? [],
+      allNextEdgeIds: [],
       crosswalk: spec.crosswalk ?? false,
       jaywalkers: spec.jaywalkers ?? false,
       busStop: spec.busStop ?? false,
@@ -728,9 +730,10 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
   classifyMergesAndDiverges(edges);
 
   for (const edge of edges) {
-    edge.nextEdgeIds = edges
+    edge.allNextEdgeIds = edges
       .filter((e2) => e2.fromNodeId === edge.toNodeId)
       .map((e2) => e2.id);
+    applyTurnBans(edge, edgesById);
   }
 
   for (const edge of edges) {
@@ -780,6 +783,22 @@ function classifyMove(edge: Edge3D, next: Edge3D): { move: LaneMove; score: numb
   // Near-reversals (U-turns) read as left, as they do in real lane signage.
   if (angle > 0 && angle < Math.PI * 0.83) return { move: "right", score };
   return { move: "left", score };
+}
+
+/**
+ * Drops the turns the player banned at the end of this road from where it can lead, so drivers route around them
+ * (and no lane is painted with the banned arrow). A ban that would leave nowhere to go is ignored.
+ */
+export function applyTurnBans(edge: Edge3D, edgesById: Map<string, Edge3D>): void {
+  if (edge.bannedTurns.length === 0) {
+    edge.nextEdgeIds = edge.allNextEdgeIds.slice();
+    return;
+  }
+  const kept = edge.allNextEdgeIds.filter((id) => {
+    const next = edgesById.get(id);
+    return !!next && !edge.bannedTurns.includes(classifyMove(edge, next).move);
+  });
+  edge.nextEdgeIds = kept.length > 0 ? kept : edge.allNextEdgeIds.slice();
 }
 
 function isValidManualMoves(edge: Edge3D, moves: LaneMove[][] | null): moves is LaneMove[][] {
@@ -881,6 +900,10 @@ export function patchEdge(
   edge.speedLimitMph = patch.speedLimitMph;
   edge.manualLaneMoves = patch.laneMoves;
   if (patch.reservedLane !== undefined) edge.reservedLane = edge.lanes >= 2 ? patch.reservedLane : null;
+  if (patch.bannedTurns !== undefined) {
+    edge.bannedTurns = patch.bannedTurns;
+    applyTurnBans(edge, edgesById);
+  }
   if (patch.crosswalk !== undefined) edge.crosswalk = patch.crosswalk;
   if (patch.busStop !== undefined) edge.busStop = patch.busStop;
   if (patch.parking !== undefined) edge.parking = patch.parking;

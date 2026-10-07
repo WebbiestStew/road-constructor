@@ -27,6 +27,7 @@ export async function createSim() {
   g.self = g;
   g.postMessage = (m: WorkerOutMessage) => {
     if (m.type !== "tick") return;
+    g.__simLast = m;
     const t = m as unknown as {
       simTime: number;
       activeCount: number;

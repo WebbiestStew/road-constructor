@@ -913,7 +913,8 @@ function MiniStats({ sim }: { sim: UseTrafficSimulationReturn }) {
 }
 
 /** The lane-arrow, speed-limit and junction tool cards (the Traffic Manager tools); null for every other tool. */
-function ManagerToolCard() {
+function ManagerToolCard({ sim }: { sim: UseTrafficSimulationReturn }) {
+  const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
   const selection = useEditorStore((s) => s.selection);
   const [wholeRoad, setWholeRoad] = useState(true);
@@ -951,7 +952,7 @@ function ManagerToolCard() {
       />
     );
   }
-  if (tool === "transit") return <TransitCard />;
+  if (tool === "transit") return <TransitCard transit={sim.metrics.transit} running={mode === "simulate"} />;
   if (tool === "street") {
     return selection?.kind === "edge" ? (
       <StreetCard wholeRoad={wholeRoad} setWholeRoad={setWholeRoad} />
@@ -959,7 +960,7 @@ function ManagerToolCard() {
       <ToolHintCard
         icon={IconRoad}
         title="Streets"
-        body="Click a road to reserve its right lane for buses or bikes, make it one-way, or add a pedestrian crossing."
+        body="Click a road to set a lane aside (bus, bike, carpool or toll express), make it one-way, ban a turn, reverse a lane, or add a crossing."
       />
     );
   }
@@ -992,7 +993,7 @@ export default function InfoPanel({
       {managing ? (
         <>
           {mode === "simulate" && <MiniStats sim={sim} />}
-          <ManagerToolCard />
+          <ManagerToolCard sim={sim} />
         </>
       ) : mode === "build" ? (
         <BuildInfo />

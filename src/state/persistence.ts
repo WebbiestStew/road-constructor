@@ -65,7 +65,8 @@ const edgeSchema = z.object({
   isTexasTurnaround: z.boolean().optional(),
   /** Player-set lane arrows: per lane, the moves it may make at the end of the road. */
   laneMoves: z.array(z.array(z.enum(["left", "straight", "right"]))).optional(),
-  reservedLane: z.enum(["bus", "bike"]).optional(),
+  reservedLane: z.enum(["bus", "bike", "hov", "express"]).optional(),
+  bannedTurns: z.array(z.enum(["left", "right"])).max(2).optional(),
   crosswalk: z.boolean().optional(),
   jaywalkers: z.boolean().optional(),
   busStop: z.boolean().optional(),
@@ -89,6 +90,7 @@ const transitLineSchema = z.object({
   edgeIds: z.array(z.string()),
   headwayS: z.number(),
   color: z.string(),
+  hold: z.boolean().optional(),
 });
 
 const persistedPayloadSchema = z.object({

@@ -15,6 +15,7 @@ export default function BudgetBar() {
   const nodes = useEditorStore((s) => s.nodes);
   const edges = useEditorStore((s) => s.edges);
   const economyK = useEditorStore((s) => s.economyK);
+  const tollEarned = useEditorStore((s) => s.tollEarned);
   // Net running cost per simulated minute: upkeep out, parking in. Hidden where money doesn't run out.
   const perMinute = useMemo(() => {
     if (economyK === null || edges.length === 0) return null;
@@ -54,6 +55,11 @@ export default function BudgetBar() {
         {perMinute !== null && Math.abs(perMinute) >= 1 && (
           <span className={`text-[10px] font-bold tabular-nums ${perMinute < 0 ? "text-red-600" : "text-emerald-600"}`} title="Upkeep on your roads, less parking income, per minute of traffic">
             {perMinute < 0 ? "−" : "+"}${Math.abs(Math.round(perMinute)).toLocaleString()}/min upkeep
+          </span>
+        )}
+        {tollEarned >= 1 && (
+          <span className="text-[10px] font-bold tabular-nums text-emerald-600" title="Tolls paid by cars in the express lane this run">
+            +${Math.round(tollEarned).toLocaleString()} tolls
           </span>
         )}
         <div className="h-1.5 w-40 max-md:w-28 overflow-hidden rounded-full bg-black/10">

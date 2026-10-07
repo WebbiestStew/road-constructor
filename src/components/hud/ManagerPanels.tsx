@@ -5,7 +5,7 @@ import { assembleCached } from "@/sim/assembleCache";
 import { hasGantry } from "@/sim/network";
 import { DEFAULT_LEFT_GREEN_S, MAX_PED_PHASE_S, approxCycleS, buildSignalPlan, infoFromEdge, modeOf, type SignalMode } from "@/sim/signals";
 import { ROAD_CLASSES, maxSpeedLimitFor } from "@/sim/roadClasses";
-import { LANE_MOVES, type LaneMove, type ReservedLane } from "@/sim/types";
+import { LANE_MOVES, type LaneMove, type ReservedLane, type TransitStats } from "@/sim/types";
 import { CLASSIC_MIX, DISPLACED_LEFT_COST, MIN_BUS_STOP_ROAD_FT, MIN_DISPLACED_LEFT_ROAD_FT, VSL_CHOICES_MPH, isSandboxBudget, MIN_CROSSWALK_ROAD_FT, MIXED_MIX, SPEED_LIMIT_CHOICES_MPH, useEditorStore } from "@/state/editorStore";
 import {
   IconTurnLeft,
@@ -575,6 +575,8 @@ const LANE_USE_CHOICES: { id: ReservedLane | null; emoji: string; label: string;
   { id: null, emoji: "🚗", label: "Open", blurb: "Every lane is for everyone." },
   { id: "bus", emoji: "🚌", label: "Bus lane", blurb: "The right lane is for buses only. Cars use it just to turn right at the corner." },
   { id: "bike", emoji: "🚲", label: "Bike lane", blurb: "The right lane is for bicycles only, so cars stop getting stuck behind them." },
+  { id: "hov", emoji: "👥", label: "Carpool", blurb: "The left lane is for buses and cars carrying a carpool (about one car in five). A free-flowing lane for the people who share a ride." },
+  { id: "express", emoji: "💲", label: "Express", blurb: "The left lane is a toll lane for cars and buses (no trucks or bikes). Every car in it pays: the money goes into your budget." },
 ];
 
 /** Bus and bike lanes, one-way streets and pedestrian crossings: the road-level traffic tools. */
@@ -583,6 +585,8 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
   const edges = useEditorStore((s) => s.edges);
   const setSelection = useEditorStore((s) => s.setSelection);
   const setReservedLane = useEditorStore((s) => s.setReservedLane);
+  const setBannedTurn = useEditorStore((s) => s.setBannedTurn);
+  const reverseLane = useEditorStore((s) => s.reverseLane);
   const setRoadOneWay = useEditorStore((s) => s.setRoadOneWay);
   const setCrosswalk = useEditorStore((s) => s.setCrosswalk);
   const setBusStop = useEditorStore((s) => s.setBusStop);
@@ -605,8 +609,8 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
   return (
     <Shell icon={IconRoad} title="Streets" subtitle={`${spec.name && !spec.ramp ? `${spec.name} · ` : ""}${cls.label} · ${spec.lanes} lane${spec.lanes > 1 ? "s" : ""} · ${twoWay ? "two-way" : "one-way"}`} onClose={() => setSelection(null)}>
       <div className="flex flex-col gap-1.5">
-        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Right-hand lane</span>
-        <div className="grid grid-cols-3 gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Set a lane aside</span>
+        <div className="grid grid-cols-5 gap-1">
           {LANE_USE_CHOICES.map((c) => (
             <button
               key={c.label}
@@ -614,7 +618,7 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
               disabled={c.id !== null && !canReserve}
               aria-pressed={current === c.id}
               onClick={() => setReservedLane(spec.id, c.id, wholeRoad)}
-              className={`flex flex-col items-center gap-0.5 rounded-xl py-2 text-[11px] font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`flex flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 ${
                 current === c.id ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"
               }`}
             >
@@ -652,6 +656,42 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
           One-way keeps the direction you clicked and removes the other side. Pairs of one-way streets move more cars through a grid.
         </p>
       </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Turns at the end of this road</span>
+        <div className="grid grid-cols-2 gap-1.5">
+          {(["left", "right"] as const).map((turn) => {
+            const banned = spec.bannedTurns?.includes(turn) ?? false;
+            return (
+              <button
+                key={turn}
+                type="button"
+                aria-pressed={banned}
+                onClick={() => setBannedTurn(spec.id, turn, !banned)}
+                className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 ${banned ? "bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+              >
+                {banned ? "🚫" : turn === "left" ? "⬅️" : "➡️"} {banned ? `No ${turn} turn` : `${turn === "left" ? "Left" : "Right"} allowed`}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] leading-snug text-zinc-500">A banned turn is gone from the lane arrows and drivers take another way round. Banning left turns at a busy light keeps its green for through traffic.</p>
+      </div>
+
+      {twoWay && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Reversible lane</span>
+          <button
+            type="button"
+            disabled={spec.lanes >= 6 || (edges.find((e) => e.fromNodeId === spec.toNodeId && e.toNodeId === spec.fromNodeId)?.lanes ?? 1) < 2}
+            onClick={() => reverseLane(spec.id)}
+            className="rounded-xl bg-black/5 py-2 text-[11px] font-bold text-zinc-600 transition hover:bg-black/10 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            ↔️ Give this direction a lane from the other side
+          </button>
+          <p className="text-[11px] leading-snug text-zinc-500">The rush-hour trick: when one direction is jammed and the other is empty, move a lane across. Free, and it works while traffic runs.</p>
+        </div>
+      )}
 
       <label className="flex items-center justify-between text-xs font-semibold text-zinc-600">
         <span>Apply to the whole road</span>
@@ -719,14 +759,19 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
 }
 
 /** The player's bus lines: drawn by clicking roads in order, each with its own timetable. */
-export function TransitCard() {
+export function TransitCard({ transit, running }: { transit: TransitStats; running: boolean }) {
   const lines = useEditorStore((s) => s.transitLines);
   const activeId = useEditorStore((s) => s.activeTransitId);
   const finish = useEditorStore((s) => s.finishTransit);
   const remove = useEditorStore((s) => s.removeTransit);
   const setHeadway = useEditorStore((s) => s.setTransitHeadway);
+  const setHold = useEditorStore((s) => s.setTransitHold);
   const edgesById = useEditorStore((s) => s.edgesById);
   const setTool = useEditorStore((s) => s.setTool);
+  // Stops that two or more lines share are transfer stops.
+  const lineCount = new Map<string, number>();
+  for (const l of lines) for (const id of new Set(l.edgeIds)) lineCount.set(id, (lineCount.get(id) ?? 0) + 1);
+  const transferStops = [...lineCount.entries()].filter(([id, n]) => n >= 2 && edgesById.get(id)?.busStop).length;
 
   return (
     <Shell icon={IconBus} title="Bus lines" subtitle={lines.length === 0 ? "None yet" : `${lines.length} line${lines.length > 1 ? "s" : ""}`} onClose={() => setTool("inspect")}>
@@ -761,12 +806,27 @@ export function TransitCard() {
                 <span className="w-24">A bus every {l.headwayS}s</span>
                 <input type="range" min={15} max={120} step={5} value={l.headwayS} onChange={(e) => setHeadway(l.id, Number(e.target.value))} className="flex-1" />
               </label>
+              <label className="flex items-center justify-between text-[11px] font-semibold text-zinc-600" title="A bus waits at a stop until it is a fair gap behind the one ahead">
+                <span>⏸ Hold buses at stops to keep them evenly spaced</span>
+                <input type="checkbox" className="accent-fuchsia-600" checked={!!l.hold} onChange={(e) => setHold(l.id, e.target.checked)} />
+              </label>
             </div>
           );
         })}
       </div>
+      {lines.length > 0 && (
+        <div className="flex flex-col gap-0.5 rounded-xl bg-black/[0.04] p-2.5 text-[11px] font-semibold text-zinc-600">
+          <span>🔁 {transferStops === 0 ? "No transfer stops yet: put a bus stop on a road two lines share" : `${transferStops} transfer stop${transferStops === 1 ? "" : "s"}: people change lines there, so they draw bigger crowds`}</span>
+          {running && transit.services >= 4 && (
+            <span>
+              🚌 Buses come every {Math.round(transit.headwayMeanS)}s on average and bunch {transit.headwayCv <= 0.35 ? "hardly at all" : transit.headwayCv <= 0.6 ? "a little" : "badly"} (spread {transit.headwayCv.toFixed(2)})
+              {transit.heldS > 0 ? ` · held ${Math.round(transit.heldS)}s in all` : ""}
+            </span>
+          )}
+        </div>
+      )}
       <p className="text-[11px] leading-snug text-zinc-500">
-        Buses carry about thirty people each and add about 12% more riders at every stop. More buses mean more people moved, and more vehicles on the road.
+        A bus stop fills with people between buses: the bus that comes late finds a crowd and stays longer, and the one behind catches up. That is how buses bunch. More buses mean more people moved, and more vehicles on the road.
       </p>
     </Shell>
   );

@@ -217,6 +217,10 @@ interface EditorState {
   setSpeedLimit: (edgeId: string, mph: number, wholeRoad: boolean) => void;
   /** Takes `amount` from a budgeted level's money (free in sandbox); false when it can't be afforded. */
   spendBudget: (amount: number) => boolean;
+  /** Toll money collected from express-lane drivers this run (shown on the budget bar). */
+  tollEarned: number;
+  /** Credits toll revenue to the budget (free in sandbox, where money doesn't run out); `reset` starts the run's total over. */
+  creditToll: (amount: number, reset?: boolean) => void;
   /** Adds money to a free-build city's budget (the career treasury paying in). Ignored in levels, where budgets are part of the challenge, and in sandbox, where there is no limit. */
   addFreeBuildBudget: (amount: number) => boolean;
   /** Posts a variable speed advisory on a freeway gantry (null clears it). It can only ever be at or below the posted limit. */
@@ -227,6 +231,10 @@ interface EditorState {
   setDisplacedLeft: (edgeId: string, on: boolean) => void;
   /** Sets aside the rightmost lane of a road (and its opposite carriageway) for buses or bikes; null gives it back to everyone. */
   setReservedLane: (edgeId: string, kind: ReservedLane | null, wholeRoad: boolean) => void;
+  /** Bans (or allows again) left or right turns at the end of this road. Drivers route around a ban; a road can't ban every way out. */
+  setBannedTurn: (edgeId: string, turn: "left" | "right", on: boolean) => void;
+  /** Reversible lane: gives this direction one more lane and takes one from the opposite carriageway. Free, and works while traffic runs. */
+  reverseLane: (edgeId: string) => void;
   /** Makes a road one-way (in the selected direction) or restores its opposite carriageway. Refuses edits that would strand traffic. */
   setRoadOneWay: (edgeId: string, oneWay: boolean, wholeRoad: boolean) => void;
   /** Adds or removes a bus stop on this side of the road. */
@@ -273,6 +281,8 @@ interface EditorState {
   finishTransit: () => void;
   removeTransit: (id: string) => void;
   setTransitHeadway: (id: string, headwayS: number) => void;
+  /** Whether a line's buses hold at stops to keep an even gap behind the bus ahead. */
+  setTransitHold: (id: string, hold: boolean) => void;
   /** Buildings and water drawn around the roads (real cities and loaded places). */
   scenery: SceneryData;
   /** Name of the real-world place loaded with "Load any place", for the map credit; null otherwise. */
@@ -1109,6 +1119,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return true;
   },
 
+  tollEarned: 0,
+  creditToll: (amount, reset) => {
+    const s = get();
+    const base = reset ? 0 : s.tollEarned;
+    if (amount <= 0) {
+      if (reset) set({ tollEarned: 0 });
+      return;
+    }
+    set({ tollEarned: base + amount, budget: isSandboxBudget(s.budget) ? s.budget : s.budget + amount });
+  },
   addFreeBuildBudget: (amount) => {
     const s = get();
     if (s.activeScenarioId || isSandboxBudget(s.budget) || amount <= 0) return false;
@@ -1354,6 +1374,67 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
       return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
     });
+  },
+
+  setBannedTurn: (edgeId, turn, on) => {
+    const state = get();
+    const edge = state.edgesById.get(edgeId);
+    if (!edge) return;
+    const current = edge.bannedTurns ?? [];
+    if (current.includes(turn) === on) return;
+    // At least one way out has to stay open (the sim ignores a ban that would strand everyone, but say so here).
+    get().pushHistoryEntry();
+    const bans = on ? [...current, turn] : current.filter((t) => t !== turn);
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const next = { ...e };
+        if (bans.length > 0) next.bannedTurns = bans;
+        else delete next.bannedTurns;
+        return next;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
+  reverseLane: (edgeId) => {
+    const state = get();
+    const edge = state.edgesById.get(edgeId);
+    if (!edge) return;
+    const back = findCounterpart(state.edges, edge);
+    if (!back) {
+      pushToast("Only a two-way road has a lane to reverse", "alert");
+      return;
+    }
+    if (back.lanes < 2) {
+      pushToast("The other side has only one lane: it has none to give", "alert");
+      return;
+    }
+    if (edge.lanes >= 6) {
+      pushToast("That side already has the most lanes a road can have", "alert");
+      return;
+    }
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (e.id === edge.id) {
+          const next: EdgeSpec = { ...e, lanes: e.lanes + 1 };
+          delete next.laneMoves;
+          delete next.closedLanes;
+          return next;
+        }
+        if (e.id === back.id) {
+          const next: EdgeSpec = { ...e, lanes: e.lanes - 1 };
+          delete next.laneMoves;
+          delete next.closedLanes;
+          if (next.lanes < 2) delete next.reservedLane;
+          return next;
+        }
+        return e;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+    pushToast("↔️ A lane changed direction", "info");
   },
 
   setReservedLane: (edgeId, kind, wholeRoad) => {
@@ -1688,6 +1769,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   finishTransit: () => set({ activeTransitId: null }),
   removeTransit: (id) =>
     set((s) => ({ transitLines: s.transitLines.filter((l) => l.id !== id), activeTransitId: s.activeTransitId === id ? null : s.activeTransitId })),
+  setTransitHold: (id, hold) => set((s) => ({ transitLines: s.transitLines.map((l) => (l.id === id ? { ...l, hold } : l)) })),
   setTransitHeadway: (id, headwayS) => set((s) => ({ transitLines: s.transitLines.map((l) => (l.id === id ? { ...l, headwayS } : l)) })),
   scenery: EMPTY_SCENERY,
   economyK: FREE_BUILD_ECONOMY_K,

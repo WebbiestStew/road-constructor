@@ -122,8 +122,10 @@ export interface EdgeSpec {
   laneMoves?: LaneMove[][];
   /** True for an auto-generated Texas turnaround slip lane — always yields at its merge, below any real road class's priority. */
   isTexasTurnaround?: boolean;
-  /** The rightmost lane is set aside for buses or bikes. Needs 2+ lanes; ignored otherwise. */
+  /** A lane is set aside: the right-hand one for buses or bikes, the left-hand one for carpools (HOV) or a toll express lane. Needs 2+ lanes; ignored otherwise. */
   reservedLane?: ReservedLane;
+  /** Turns banned at the end of this road (drivers route around them). Only left and right: a road can't ban going straight. */
+  bannedTurns?: ("left" | "right")[];
   /** A mid-block pedestrian crossing: traffic stops for people who press the button. */
   crosswalk?: boolean;
   /** A bus stop on this side of the road: buses on a route through here stop, and pick up more riders. */
@@ -152,7 +154,11 @@ export interface EdgeSpec {
   ramp?: boolean;
 }
 
-export type ReservedLane = "bus" | "bike";
+/**
+ * Who a set-aside lane is for. Bus and bike lanes are the right-hand lane; a carpool (HOV) lane and a toll express lane
+ * are the left-hand one: buses, bikes' ban and the tolls are in the sim (see isReservedAgainst).
+ */
+export type ReservedLane = "bus" | "bike" | "hov" | "express";
 
 export type Weather = "clear" | "rain" | "fog";
 
@@ -169,6 +175,22 @@ export interface TransitLine {
   headwayS: number;
   /** Display colour. */
   color: string;
+  /** Buses wait at a stop until they are a fair headway behind the bus ahead, so a bunched pair is pulled apart (at the cost of waiting). */
+  hold?: boolean;
+}
+
+/** How the run's bus service is going. Headways are sim-seconds between consecutive line buses boarding at the same stop. */
+export interface TransitStats {
+  /** Stops served by a bus on one of the player's lines. */
+  services: number;
+  /** Mean gap between line buses at a stop, and its spread (standard deviation / mean: 0 is even spacing, 1 is as bunched as random arrivals). 0 until measured. */
+  headwayMeanS: number;
+  headwayCv: number;
+  /** People who boarded a bus at a stop, and those among them changing lines at a transfer stop. */
+  boarded: number;
+  transfers: number;
+  /** Total seconds buses were held to even out spacing. */
+  heldS: number;
 }
 
 /** What a simulated road user is. Most are cars; the rest only appear when the level or sandbox asks for mixed traffic. */
@@ -259,8 +281,11 @@ export interface Edge3D {
   sunken: boolean;
   /** Distances (ft, rounded) along a bridge where a pier would stand on a road below it and is left out. Set by the renderer. */
   pierSkips?: Set<number>;
-  /** Which kind of road user the rightmost lane is reserved for, or null. */
+  /** Which kind of road user the reserved lane is for (bus and bike: the rightmost lane; carpool and express: the leftmost), or null. */
   reservedLane: ReservedLane | null;
+  /** Turns banned at the end of this road, and every road it could lead into before the bans were applied. */
+  bannedTurns: LaneMove[];
+  allNextEdgeIds: string[];
   crosswalk: boolean;
   jaywalkers: boolean;
   busStop: boolean;
@@ -366,6 +391,11 @@ export interface VehicleState {
   /** Slowest speed (ft/s) since the last signal it passed, and how many signals in a row it has cleared without braking hard. */
   minSpeed: number;
   comboLegs: number;
+  /** The player's bus line this bus runs on ("" for any other vehicle), the riders it is boarding at its stop now, and how long it has been held there (and since when the bus ahead boarded). */
+  lineId: string;
+  boarding: number;
+  holdS: number;
+  holdFrom: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -417,6 +447,7 @@ export interface EdgePatch {
   speedLimitMph: number;
   laneMoves: LaneMove[][] | null;
   reservedLane?: ReservedLane | null;
+  bannedTurns?: LaneMove[];
   crosswalk?: boolean;
   busStop?: boolean;
   parking?: boolean;
@@ -534,6 +565,9 @@ export type WorkerOutMessage =
       tripsTimed: number;
       queueNowFt: number;
       queuePeakFt: number;
+      /** Car-seconds spent in toll express lanes since the run began (each pays a toll). */
+      expressVehicleS: number;
+      transit: TransitStats;
       /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */
       completedTripsTotal: number;
       /** The heavy per-edge statistics. Only present on ticks where they were recomputed (about 5 per second); the main thread keeps the last set. */

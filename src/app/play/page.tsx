@@ -28,6 +28,7 @@ import RagePins from "@/components/RagePins";
 import StreetNames from "@/components/StreetNames";
 import FreewaySigns from "@/components/FreewaySigns";
 import ManagementOverlays from "@/components/ManagementOverlays";
+import TurnBanSigns from "@/components/TurnBanSigns";
 import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulation";
@@ -357,6 +358,7 @@ export default function Play() {
         <Pedestrians snapshotRef={sim.snapshotRef} />
         <ManagementOverlays />
         <FreewaySigns />
+        <TurnBanSigns />
         <StreetNames />
         {flyover && <LightTrails snapshotRef={sim.snapshotRef} />}
         <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} texas={texasMap} avgMph={sim.metrics.avgSpeedMph} rageMarkers={sim.metrics.rageMarkers} rageCount={sim.metrics.rageCount} />

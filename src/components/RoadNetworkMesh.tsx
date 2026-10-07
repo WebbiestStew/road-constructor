@@ -25,6 +25,7 @@ import {
   buildGroundShadowRibbon,
   buildJerseyBarrier,
   buildLaneArrows,
+  buildLaneDiamonds,
   buildParapet,
   buildTexasRail,
   buildSolidStripe,
@@ -51,6 +52,8 @@ const WHITE_COLOR = "#f4f4f5";
 const YELLOW_COLOR = "#eab308";
 const BUS_LANE_COLOR = "#b4432f";
 const BIKE_LANE_COLOR = "#2f9e5b";
+const HOV_LANE_COLOR = "#4b3f8a";
+const EXPRESS_LANE_COLOR = "#a8821f";
 const BARRIER_COLOR = "#9a9aa0";
 /** TxDOT concrete: the light, warm grey of Texas bridge decks, rails and bents. */
 const TX_DECK_COLOR = "#9a9892";
@@ -250,11 +253,14 @@ function buildEdgeGeometries(edge: Edge3D, isTwoWay: boolean, hasStopBar: boolea
 
   // A lane set aside for buses or bikes is painted its own colour, so the player can read it at a glance.
   if (edge.reservedLane && edge.length > 20) {
-    const center = (edge.lanes - 0.5 - edge.lanes / 2) * edge.laneWidthFt;
-    stripes.push({
-      geometry: buildSolidStripe(edge, center, edge.laneWidthFt - 1.4, 0.022),
-      color: edge.reservedLane === "bus" ? BUS_LANE_COLOR : BIKE_LANE_COLOR,
-    });
+    // Bus and bike lanes are the right-hand lane; carpool and express lanes the left-hand one.
+    const leftLane = edge.reservedLane === "hov" || edge.reservedLane === "express";
+    const center = (leftLane ? 0.5 - edge.lanes / 2 : edge.lanes - 0.5 - edge.lanes / 2) * edge.laneWidthFt;
+    const tint = { bus: BUS_LANE_COLOR, bike: BIKE_LANE_COLOR, hov: HOV_LANE_COLOR, express: EXPRESS_LANE_COLOR }[edge.reservedLane];
+    stripes.push({ geometry: buildSolidStripe(edge, center, edge.laneWidthFt - 1.4, 0.022), color: tint });
+    if (leftLane && edge.length > 90) {
+      stripes.push({ geometry: buildLaneDiamonds(edge, 0, edge.reservedLane === "hov" ? 120 : 170), color: WHITE_COLOR });
+    }
   }
 
   if (edge.isFreeway) {
