@@ -692,7 +692,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Toronto's waterfront, where the elevated Gardiner Expressway runs over Lake Shore Boulevard and the downtown ramps. Real elevations, real ramps. Find the bottleneck where the ramps meet the street grid.",
     budget: 7_000_000,
-    baseline: 545,
+    baseline: 530,
   },
   {
     key: "houston",
@@ -719,7 +719,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Downtown Monterrey around the Macroplaza: a big grid of real streets, avenues and signals, with far more cars than the grid wants. Retime the lights, fix the limits and widen the worst streets to keep the center moving.",
     budget: 7_000_000,
-    baseline: 495,
+    baseline: 476,
   },
   {
     key: "dallas",
@@ -757,7 +757,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Everything here comes in from New Jersey: the Route 495 helix, the Lincoln Tunnel under the Hudson, and the Weehawken streets beside it. It comes out at 39th Street in Midtown, crosses Manhattan on the real avenues, and leaves by the Queens-Midtown Tunnel and the Queensboro Bridge for Queens, or down the east side for Brooklyn. It is a long haul, so the clock runs fifteen minutes. Find the avenue that chokes the tunnel mouth and fix it.",
     budget: 14_000_000,
-    baseline: 244,
+    baseline: 238,
     durationS: 1800,
   },
   {
@@ -767,7 +767,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "Avenida Eugenio Garza Sada runs along the Tecnológico de Monterrey campus. The roads, lanes, speed limits and signals here are the real ones from OpenStreetMap, with everyone from the neighbourhood and the campus loaded onto them. Find what holds the avenue up and fix it.",
     budget: 7_000_000,
-    baseline: 242,
+    baseline: 233,
     twoStarRatio: 1.1,
     threeStarRatio: 1.18,
   },
@@ -820,7 +820,7 @@ export const REAL_PLANS: RealCityPlan[] = [
     briefing:
       "The roads around the Estadio BBVA in Guadalupe: Pablo Livas, Las Torres and Exposición, taken from the real map. Wide avenues, long gaps between signals and only a few ways in. Keep them flowing.",
     budget: 7_000_000,
-    baseline: 148,
+    baseline: 158,
     twoStarRatio: 1.16,
     threeStarRatio: 1.26,
   },

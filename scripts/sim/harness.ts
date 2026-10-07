@@ -18,6 +18,8 @@ export interface Tick {
 export async function createSim() {
   const g = globalThis as unknown as Record<string, unknown> & { onmessage: (e: { data: WorkerInMessage }) => void };
   let last: Tick | null = null;
+  /** Callers waiting for the simulated clock to reach a time. They are answered from the first tick at or past it, not from whatever has arrived by the time a timer fires: the sim runs far faster than real time, so polling would make the answer depend on how busy the machine is. */
+  const waiters: { t: number; resolve: (tick: Tick) => void }[] = [];
   g.self = g;
   g.postMessage = (m: WorkerOutMessage) => {
     if (m.type !== "tick") return;
@@ -45,6 +47,12 @@ export async function createSim() {
       rageCount: t.rageCount ?? 0,
       combos: t.combos ?? 0,
     };
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      if (last.simTime >= waiters[i].t) {
+        waiters[i].resolve({ ...last, incidents: last.incidents });
+        waiters.splice(i, 1);
+      }
+    }
   };
   await import("../../src/sim/worker");
   const send = (m: WorkerInMessage) => g.onmessage({ data: m });
@@ -56,9 +64,8 @@ export async function createSim() {
       send({ type: "setRunning", running: true });
     },
     /** Runs until simulated time reaches `simSeconds`, faster than real time. */
-    async runUntil(simSeconds: number): Promise<Tick> {
-      while ((last?.simTime ?? 0) < simSeconds) await new Promise((r) => setTimeout(r, 15));
-      return last!;
+    runUntil(simSeconds: number): Promise<Tick> {
+      return new Promise((resolve) => waiters.push({ t: simSeconds, resolve }));
     },
   };
 }

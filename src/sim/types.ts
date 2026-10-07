@@ -72,6 +72,8 @@ export type ScriptedEvent =
   | { atS: number; kind: "weather"; weather: Exclude<Weather, "clear">; durationS: number }
   /** Every entry's demand is multiplied for `durationS` seconds, then returns to normal. */
   | { atS: number; kind: "surge"; multiplier: number; durationS: number }
+  /** A wrecker is sent to the oldest incident nobody has sent one to (what the player's tap on a pin does, at an exact moment, for tests). */
+  | { atS: number; kind: "dispatchWrecker" }
   /** A semi breaks down in the middle lane of a freeway and stays there until a wrecker arrives (or a long time passes). */
   | { atS: number; kind: "stall" }
   /** Debris falls into a lane and blocks it until a wrecker clears it. */

@@ -191,6 +191,7 @@ type QueuedEvent =
   | { atS: number; kind: "breakdown"; durationS: number }
   | { atS: number; kind: "surge"; multiplier: number }
   | { atS: number; kind: "surgeEnd" }
+  | { atS: number; kind: "dispatchWrecker" }
   | { atS: number; kind: "ambulance" }
   | { atS: number; kind: "crash" }
   | { atS: number; kind: "stall" }
@@ -2052,7 +2053,10 @@ function runDueEvents() {
     if (e.kind === "breakdown") breakDownOneCar(e.durationS);
     else if (e.kind === "ambulance") ambPending.push(simTime);
     else if (e.kind === "crash") crashPending++;
-    else if (e.kind === "stall") stallPending++;
+    else if (e.kind === "dispatchWrecker") {
+      const open = incidents.find((i) => !i.wreckerRequested);
+      if (open) open.wreckerRequested = true;
+    } else if (e.kind === "stall") stallPending++;
     else if (e.kind === "debris") debrisPending++;
     else if (e.kind === "fender") fenderPending++;
     else if (e.kind === "weatherOn") scriptedWeather = e.weather;
@@ -2600,7 +2604,7 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       for (const e of msg.events) {
         if (e.kind === "ambulance") eventQueue.push({ atS: e.atS, kind: "ambulance" });
         else if (e.kind === "crash") eventQueue.push({ atS: e.atS, kind: "crash" });
-        else if (e.kind === "stall" || e.kind === "debris" || e.kind === "fender") eventQueue.push({ atS: e.atS, kind: e.kind });
+        else if (e.kind === "stall" || e.kind === "debris" || e.kind === "fender" || e.kind === "dispatchWrecker") eventQueue.push({ atS: e.atS, kind: e.kind });
         else if (e.kind === "weather") {
           eventQueue.push({ atS: e.atS, kind: "weatherOn", weather: e.weather });
           eventQueue.push({ atS: e.atS + e.durationS, kind: "weatherOff" });

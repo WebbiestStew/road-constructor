@@ -589,7 +589,6 @@ export function indexPierConflicts(edges: Edge3D[]): void {
   pavementGrid = new Map();
 
   for (const e of edges) {
-    const half = (e.lanes * e.laneWidthFt) / 2 + 5;
     for (let d = 0; d <= e.length + 0.01; d += PIER_SAMPLE_STEP_FT) {
       const t = clamp01(d / e.length);
       edgePointAt(e, t, p);
@@ -600,6 +599,8 @@ export function indexPierConflicts(edges: Edge3D[]): void {
       const z = p.z + right.z * off;
       const key = `${cellOf(x)},${cellOf(z)}`;
       const arr = grid.get(key);
+      // The pavement's real half width here, shoulders and any flare or taper included.
+      const half = ((e.lanes * e.laneWidthFt) / 2 + 4) * ke + 1;
       const sample = { x, z, y: p.y, half, edge: e };
       if (arr) arr.push(sample);
       else grid.set(key, [sample]);
@@ -620,7 +621,7 @@ export function indexPierConflicts(edges: Edge3D[]): void {
         const arr = grid.get(`${cx + dx},${cz + dz}`);
         if (!arr) continue;
         for (const s of arr) {
-          if (s.edge === self || s.y > deckY - 4.5) continue; // only roads clearly below the deck count
+          if (s.edge === self || s.y > deckY - 4.2) continue; // only roads clearly below the deck count
           if (Math.hypot(s.x - x, s.z - z) < s.half + 1.5) return true;
         }
       }

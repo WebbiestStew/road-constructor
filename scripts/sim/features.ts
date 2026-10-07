@@ -12,20 +12,16 @@ async function incidentCase(kind: "stall" | "debris" | "fender", dispatchAfterS:
   const level = getScenarioById("clover-crossing")!;
   const sim = await createSim();
   sim.load(cloneNetwork(level.startingNetwork), 1337, HARNESS_SPEED);
+  // Both the stall and the wrecker's dispatch are scheduled on the sim's own clock, so the run does not depend on how fast the machine is.
   const events: ScriptedEvent[] = [{ atS: 60, kind }];
+  if (dispatchAfterS !== null) events.push({ atS: 60 + dispatchAfterS, kind: "dispatchWrecker" });
   sim.send({ type: "scheduleEvents", events });
   let t = await sim.runUntil(75);
   const opened = t.incidents.length;
-  const id = t.incidents[0]?.id;
-  let dispatched = false;
   let clearedAt: number | null = null;
   const timeline: string[] = [];
   for (let s = 75; s <= 420; s += 5) {
     t = await sim.runUntil(s);
-    if (!dispatched && dispatchAfterS !== null && s >= 60 + dispatchAfterS && id !== undefined) {
-      sim.send({ type: "dispatchWrecker", incidentId: id });
-      dispatched = true;
-    }
     if (t.incidents.length === 0 && clearedAt === null && opened > 0) clearedAt = s;
     if (s % 30 === 0) timeline.push(`${s}:${t.incidents.map((i) => `${i.kind}/${i.wrecker}`).join(",") || "-"}`);
   }

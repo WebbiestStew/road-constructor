@@ -391,17 +391,19 @@ function computeJointTangents(specs: EdgeSpec[], nodesById: Map<string, NodeSpec
 const HELPER_MAX_GRADE = 0.06;
 const clampAbs = (v: number, limit: number) => Math.max(-limit, Math.min(limit, v));
 /** How much of the neighbouring road's slope the joint helper carries (the rest follows this road's own profile). */
-const HELPER_SLOPE_SHARE = 0.4;
+const HELPER_SLOPE_SHARE = 0.5;
+const SHORT_DECK_FT = 0;
+const SHORT_DECK_SHARE = 0.5;
 
 /**
  * Height of a joint's helper point `h` feet in from `end`. On the road's own profile (the straight line from the end to
  * the next control point) it adds no steepness; shifted toward the neighbour's slope it keeps the two roads' slopes
  * close at the joint. Mostly the first, a little of the second.
  */
-function blendedHelperY(end: THREE.Vector3, next: THREE.Vector3, slopeY: number, h: number): number {
+function blendedHelperY(end: THREE.Vector3, next: THREE.Vector3, slopeY: number, h: number, share: number): number {
   const own = end.y + (next.y - end.y) * Math.min(1, h / Math.max(1e-3, end.distanceTo(next)));
   const shared = end.y + clampAbs(slopeY - end.y, HELPER_MAX_GRADE * h);
-  return own + (shared - own) * HELPER_SLOPE_SHARE;
+  return own + (shared - own) * share;
 }
 
 function buildSpline(
@@ -512,6 +514,11 @@ function buildSpline(
       if (flat.lengthSq() < 1e-6 || d.lengthSq() < 1e-6) return false;
       return flat.normalize().dot(d.normalize()) > Math.cos((50 * Math.PI) / 180);
     };
+    // A short deck has no room to pick up its neighbour's slope without steepening in the middle (an S in profile), so it
+    // follows its own line; only longer roads carry some of the shared slope.
+    let polyline = 0;
+    for (let i = 1; i < points.length; i++) polyline += points[i].distanceTo(points[i - 1]);
+    const slopeShare = polyline < SHORT_DECK_FT ? SHORT_DECK_SHARE : HELPER_SLOPE_SHARE;
     const endOk = !!joint.end && agrees(joint.end, points[points.length - 1].clone().sub(points[points.length - 2]));
     const startOk = !!joint.start && agrees(joint.start, points[1].clone().sub(points[0]));
     helped = endOk || startOk;
@@ -521,7 +528,7 @@ function buildSpline(
       const helper = last.clone().addScaledVector(joint.end, -h);
       // It carries the shared slope too, but not below ground: at the foot of a ramp that would dip the road under the grass.
       const before = points[points.length - 2];
-      helper.y = blendedHelperY(last, before, helper.y, h);
+      helper.y = blendedHelperY(last, before, helper.y, h, slopeShare);
       if (last.y >= 0 && before.y >= 0) helper.y = Math.max(0, helper.y);
       points.splice(points.length - 1, 0, helper);
     }
@@ -529,7 +536,7 @@ function buildSpline(
       const first = points[0];
       const h = Math.min(JOINT_HELPER_FT, first.distanceTo(points[1]) * 0.4);
       const helper = first.clone().addScaledVector(joint.start, h);
-      helper.y = blendedHelperY(first, points[1], helper.y, h);
+      helper.y = blendedHelperY(first, points[1], helper.y, h, slopeShare);
       if (first.y >= 0 && points[1].y >= 0) helper.y = Math.max(0, helper.y);
       points.splice(1, 0, helper);
     }
@@ -580,33 +587,35 @@ function traceProfile(curve: THREE.CatmullRomCurve3, shape: (y: number, s: numbe
 const MAX_LOCAL_GRADE = 0.075;
 
 /**
- * A short bridge whose crest was set from the end heights can come out steeper than that in the middle, where the curve
- * overshoots. The crest is shaved to what a climb at the limit from either end allows, so no stretch is steeper than the
- * limit (the ends are untouched, so it still meets the roads it joins).
+ * A short bridge can come out steeper than the limit somewhere in the middle (the curve through its control points
+ * overshoots). Its profile is pulled back to the nearest one that nowhere exceeds the limit, ends held exactly, so the
+ * climb is spread over a little more of the deck instead of being steepest in one place.
  */
 function limitGrade(curve: THREE.CatmullRomCurve3): THREE.CatmullRomCurve3 {
   const length = curve.getLength();
   if (length < 30) return curve;
-  const probe = new THREE.Vector3();
-  const steps = Math.max(8, Math.ceil(length / 10));
+  const n = Math.max(8, Math.ceil(length / 6));
+  const ds = length / n;
+  const ys: number[] = [];
+  for (let i = 0; i <= n; i++) ys.push(curve.getPointAt(i / n).y);
   let steepest = 0;
-  let prevY = curve.getPointAt(0, probe).y;
-  for (let i = 1; i <= steps; i++) {
-    const y = curve.getPointAt(i / steps, probe).y;
-    steepest = Math.max(steepest, Math.abs(y - prevY) / (length / steps));
-    prevY = y;
-  }
-  if (steepest <= MAX_LOCAL_GRADE + 0.005) return curve;
-  const y0 = curve.getPointAt(0).y;
-  const y1 = curve.getPointAt(1).y;
+  for (let i = 1; i <= n; i++) steepest = Math.max(steepest, Math.abs(ys[i] - ys[i - 1]) / ds);
+  if (steepest <= MAX_LOCAL_GRADE + 0.004) return curve;
   // If the ends themselves are further apart than the limit allows over this length, there is nothing the middle can do.
-  if (Math.abs(y1 - y0) > MAX_LOCAL_GRADE * length * 0.95) return curve;
-  return traceProfile(curve, (y, s) => {
-    const fromStart = s;
-    const fromEnd = length - s;
-    const ceiling = Math.min(y0 + MAX_LOCAL_GRADE * fromStart, y1 + MAX_LOCAL_GRADE * fromEnd);
-    const floor = Math.max(y0 - MAX_LOCAL_GRADE * fromStart, y1 - MAX_LOCAL_GRADE * fromEnd);
-    return Math.min(ceiling, Math.max(floor, y));
+  if (Math.abs(ys[n] - ys[0]) > MAX_LOCAL_GRADE * length * 0.95) return curve;
+  const step = MAX_LOCAL_GRADE * ds;
+  const y0 = ys[0];
+  const yn = ys[n];
+  for (let pass = 0; pass < 60; pass++) {
+    for (let i = 1; i <= n; i++) ys[i] = Math.max(ys[i - 1] - step, Math.min(ys[i - 1] + step, ys[i]));
+    ys[n] = yn;
+    for (let i = n - 1; i >= 0; i--) ys[i] = Math.max(ys[i + 1] - step, Math.min(ys[i + 1] + step, ys[i]));
+    ys[0] = y0;
+  }
+  return traceProfile(curve, (_y, s) => {
+    const f = Math.min(n - 1e-9, Math.max(0, s / ds));
+    const i = Math.floor(f);
+    return ys[i] + (ys[i + 1] - ys[i]) * (f - i);
   });
 }
 
