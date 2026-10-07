@@ -38,6 +38,7 @@ import ConditionsChip from "./hud/ConditionsChip";
 import DayClock from "./hud/DayClock";
 import DriveHud from "./hud/DriveHud";
 import ReplayBar from "./hud/ReplayBar";
+import PublishLevel from "./hud/PublishLevel";
 import SavesMenu from "./hud/SavesMenu";
 import { useEditorStore } from "@/state/editorStore";
 import WindshieldFx from "./hud/WindshieldFx";
@@ -103,6 +104,7 @@ export default function SimControls({
       <DriveHud sim={sim} />
       <ReplayBar sim={sim} />
       <SavesMenu sim={sim} />
+      <PublishLevel sim={sim} runner={scenarioRunner} />
       <PlaceCredit />
       <SettingsMenu />
       <KeyboardRoads />

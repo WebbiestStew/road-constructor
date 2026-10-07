@@ -11,7 +11,7 @@ import { setChaos, useChaos } from "@/lib/chaos";
 import { useQuality } from "@/lib/quality";
 import { setSettingsOpen } from "@/lib/settingsMenu";
 import { openSaves } from "@/lib/savesMenu";
-import { requestMakeChallenge } from "@/lib/challenge";
+import { requestMakeChallenge, requestPublish } from "@/lib/challenge";
 import { toggleTour, togglePhotoMode } from "@/lib/photoMode";
 import { useCompact } from "@/lib/compact";
 import {
@@ -328,6 +328,14 @@ export default function TopBar({ sim }: { sim: UseTrafficSimulationReturn }) {
               className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-bold text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
             >
               ⚔️ Challenge
+            </button>
+            <button
+              type="button"
+              onClick={requestPublish}
+              title="Publish this city as a level: its star lines are measured from what the unchanged city moves"
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-bold text-zinc-600 transition hover:bg-black/5 hover:text-zinc-900"
+            >
+              📤 Publish
             </button>
             <button
               type="button"

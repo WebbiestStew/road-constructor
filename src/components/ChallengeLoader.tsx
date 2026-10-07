@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import { CHALLENGE_HASH_PREFIX, challengerName, decodeChallenge, onMakeChallenge, setActiveChallenge } from "@/lib/challenge";
-import { buildChallengeScenario, getScenarioById } from "@/sim/scenarios";
+import { buildChallengeScenario, buildPublishedScenario, getScenarioById } from "@/sim/scenarios";
 import { useEditorStore } from "@/state/editorStore";
 import { pushToast } from "@/lib/toast";
 
@@ -35,6 +35,21 @@ export default function ChallengeLoader({ runner }: { runner: UseScenarioRunnerR
         }
         startRef.current(def);
         setActiveChallenge({ scenarioId: def.id, from: p.from, target: p.target });
+      } else if (p.kind === "published") {
+        const key = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
+        const def = buildPublishedScenario({
+          key,
+          name: p.name,
+          network: p.network,
+          baseline: p.baseline,
+          service: p.delayShare !== undefined && p.queueFt !== undefined ? { delayShare: p.delayShare, queueFt: p.queueFt } : undefined,
+          mix: { bus: p.bus ?? 0, bike: p.bike ?? 0 },
+          from: p.from,
+        });
+        startRef.current(def);
+        setActiveChallenge(null);
+        pushToast(`📤 ${p.from} published “${p.name}”: the unchanged city moves ${p.baseline}. Beat it`, "info");
+        return;
       } else {
         const key = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
         const def = buildChallengeScenario({ key, name: p.name, network: p.network, target: p.target, from: p.from });

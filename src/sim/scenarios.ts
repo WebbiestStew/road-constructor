@@ -1792,6 +1792,41 @@ export function buildChallengeScenario(opts: { key: string; name: string; networ
   return def;
 }
 
+/**
+ * Builds (and registers) a level someone published: their city, with star lines set from what the unchanged city does
+ * (measured when they published it), exactly as the real-city levels are, and the same service medals. The roads are
+ * locked: the player fixes how traffic flows.
+ */
+export function buildPublishedScenario(opts: {
+  key: string;
+  name: string;
+  network: NetworkSnapshot;
+  baseline: number;
+  service?: { delayShare: number; queueFt: number };
+  mix?: { bus: number; bike: number };
+  from?: string;
+}): ScenarioDef {
+  const id = `${CHALLENGE_PREFIX}${opts.key}`;
+  const two = Math.ceil(opts.baseline * 1.07);
+  const three = Math.ceil(opts.baseline * 1.12);
+  const def: ScenarioDef = {
+    id,
+    kind: "manage",
+    name: opts.name,
+    tagline: `${opts.from ? `By ${opts.from}. ` : ""}The unchanged city moves ${opts.baseline}. Beat it.`,
+    briefing: `A city ${opts.from ? `published by ${opts.from}` : "published for you"}. The roads are fixed: fix how traffic flows with lane arrows, speed limits, signals, bus lanes and crossings. The unchanged city moves ${opts.baseline} vehicles in five minutes: ${two} earns two stars, ${three} earns three.`,
+    startingNetwork: opts.network,
+    startingBudget: 1_000_000,
+    durationS: 300,
+    targetAvgSpeedMph: 20,
+    trafficMix: opts.mix && opts.mix.bus + opts.mix.bike > 0 ? opts.mix : undefined,
+    serviceBaseline: opts.service && opts.service.delayShare > 0 ? opts.service : undefined,
+    createEvaluator: createRealCityEvaluator(opts.baseline, 300),
+  };
+  customScenarios.set(id, def);
+  return def;
+}
+
 export function getScenarioById(id: string): ScenarioDef | undefined {
   if (id.startsWith(CHALLENGE_PREFIX)) return customScenarios.get(id);
   if (id.startsWith(DAILY_PREFIX)) return buildDailyScenario(id.slice(DAILY_PREFIX.length));
