@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import type { UseScenarioRunnerReturn } from "@/hooks/useScenarioRunner";
 import BudgetBar from "./hud/BudgetBar";
@@ -32,21 +33,25 @@ import PlaceCredit from "./hud/PlaceCredit";
 import SoundScape from "./hud/SoundScape";
 import EconomyTicker from "./hud/EconomyTicker";
 import GuidedTour from "./hud/GuidedTour";
-import SettingsMenu from "./hud/SettingsMenu";
 import KeyboardRoads from "./KeyboardRoads";
 import ConditionsChip from "./hud/ConditionsChip";
 import DayClock from "./hud/DayClock";
 import DriveHud from "./hud/DriveHud";
-import ReplayBar from "./hud/ReplayBar";
 import PublishLevel from "./hud/PublishLevel";
-import SavesMenu from "./hud/SavesMenu";
 import { useEditorStore } from "@/state/editorStore";
-import WindshieldFx from "./hud/WindshieldFx";
+import { useSettingsOpen } from "@/lib/settingsMenu";
+import { useSavesMenu } from "@/lib/savesMenu";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import CinematicOverlay from "./hud/CinematicOverlay";
 import { useFlyover } from "@/lib/cinematic";
 import { usePhotoMode } from "@/lib/photoMode";
 import Tutorial from "./hud/Tutorial";
+
+// Panels most sessions never open load the first time they are needed, not with the page.
+const SettingsMenu = dynamic(() => import("./hud/SettingsMenu"), { ssr: false });
+const SavesMenu = dynamic(() => import("./hud/SavesMenu"), { ssr: false });
+const ReplayBar = dynamic(() => import("./hud/ReplayBar"), { ssr: false });
+const WindshieldFx = dynamic(() => import("./hud/WindshieldFx"), { ssr: false });
 
 export default function SimControls({
   sim,
@@ -59,6 +64,10 @@ export default function SimControls({
   const flyover = useFlyover();
   // Behind the wheel the road tools and their hints step aside, so the driving HUD has the screen.
   const driving = useEditorStore((s) => s.drivingId !== null || s.replay !== null);
+  const replaying = useEditorStore((s) => s.replay !== null);
+  const hoodView = useEditorStore((s) => s.drivingId !== null && s.driveCam === "hood");
+  const settingsOpen = useSettingsOpen();
+  const savesOpen = useSavesMenu().open;
   // Photo mode: a clean frame. Toasts stay (for "saved"); everything else steps aside.
   if (photo) {
     return (
@@ -100,13 +109,13 @@ export default function SimControls({
       {!driving && <GuidedTour sim={sim} />}
       <DayClock sim={sim} />
       <ConditionsChip sim={sim} />
-      <WindshieldFx sim={sim} />
+      {hoodView && <WindshieldFx sim={sim} />}
       <DriveHud sim={sim} />
-      <ReplayBar sim={sim} />
-      <SavesMenu sim={sim} />
+      {replaying && <ReplayBar sim={sim} />}
+      {savesOpen && <SavesMenu sim={sim} />}
       <PublishLevel sim={sim} runner={scenarioRunner} />
       <PlaceCredit />
-      <SettingsMenu />
+      {settingsOpen && <SettingsMenu />}
       <KeyboardRoads />
       <SoundScape sim={sim} />
       <EconomyTicker sim={sim} />

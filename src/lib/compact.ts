@@ -18,3 +18,20 @@ export function useCompact(): boolean {
     () => false
   );
 }
+
+/** A touch screen as the main pointer: the driving controls grow on-screen buttons here, since there is no keyboard. */
+const COARSE_QUERY = "(pointer: coarse)";
+
+function subscribeCoarse(onChange: () => void): () => void {
+  const mq = window.matchMedia(COARSE_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+export function useCoarsePointer(): boolean {
+  return useSyncExternalStore(
+    subscribeCoarse,
+    () => window.matchMedia(COARSE_QUERY).matches,
+    () => false
+  );
+}

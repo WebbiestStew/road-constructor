@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useCompact } from "@/lib/compact";
 import { useEditorStore } from "@/state/editorStore";
 import { useEditLog } from "@/lib/editLog";
 
@@ -63,6 +64,8 @@ export default function CoachBar() {
     []
   );
 
+  const compact = useCompact();
+  const selected = useEditorStore((s) => s.selection !== null);
   const edited = edits.length > 0;
   const measured = edits.some((e) => e.delta !== null);
 
@@ -70,7 +73,8 @@ export default function CoachBar() {
     if (measured && !coached) markCoached();
   }, [measured, coached]);
 
-  if (coached || !buildLocked || !scenarioActive) return null;
+  // On a phone the coach and a tool's panel would sit on top of each other: the panel wins once something is selected.
+  if (coached || !buildLocked || !scenarioActive || (compact && selected)) return null;
 
   const current = measured ? 4 : edited ? 3 : pickedRoad ? 2 : usedSpeedTool ? 1 : 0;
   const step = STEPS[Math.min(current, STEPS.length - 1)];

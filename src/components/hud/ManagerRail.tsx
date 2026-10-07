@@ -31,7 +31,7 @@ export default function ManagerRail() {
   }, []);
 
   return (
-    <div className="pointer-events-auto absolute bottom-24 left-4 z-20 flex flex-col items-center gap-1.5 rounded-2xl hud-panel p-1.5 max-md:bottom-auto max-md:left-2 max-md:top-[3.9rem] max-md:flex-row max-md:gap-1 max-md:p-1">
+    <div className="pointer-events-auto absolute bottom-24 left-4 z-20 flex flex-col items-center gap-1.5 rounded-2xl hud-panel p-1.5 max-md:bottom-auto max-md:left-2 max-md:top-[3.9rem] max-md:max-w-[calc(100vw-9.5rem)] max-md:flex-row max-md:gap-1 max-md:overflow-x-auto max-md:p-1">
       <span className="font-display px-1 pt-0.5 max-md:hidden text-[8.5px] font-extrabold uppercase leading-none tracking-wider text-zinc-400">
         Traffic
       </span>
@@ -45,7 +45,7 @@ export default function ManagerRail() {
               data-active={tool === t.id}
               aria-label={t.label}
               aria-pressed={tool === t.id}
-              className="icon-btn h-11 w-11 max-md:h-10 max-md:w-10"
+              className="icon-btn h-11 w-11 max-md:h-9 max-md:w-9 max-md:shrink-0"
             >
               <Icon className="h-5 w-5" />
             </button>

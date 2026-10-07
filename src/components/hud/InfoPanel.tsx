@@ -10,6 +10,7 @@ import {
 import { LOS_COLOR, LOS_DESCRIPTIONS, type EdgeTrafficStats, type LOSGrade } from "@/sim/los";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
 import { assembleNetworkCached, computeRoute } from "@/sim/network";
+import { useCompact } from "@/lib/compact";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { GantryCard, JunctionCard, LaneManagerCard, SpeedLimitCard, StreetCard, ToolHintCard, TransitCard } from "./ManagerPanels";
@@ -985,14 +986,18 @@ export default function InfoPanel({
 }) {
   const mode = useEditorStore((s) => s.mode);
   const tool = useEditorStore((s) => s.tool);
+  const selection = useEditorStore((s) => s.selection);
   const managing = tool === "lanes" || tool === "speed" || tool === "junction" || tool === "street" || tool === "transit" || tool === "gantry";
+  // On a phone the panel is a short strip: with a road selected, its tool card gets all of it.
+  const compact = useCompact();
+  const editingCard = compact && managing && selection !== null;
 
   return (
     <div className="pointer-events-auto absolute right-4 top-60 z-20 flex max-h-[calc(100vh-19rem)] w-80 flex-col gap-3 overflow-y-auto hud-scrollbar lg:top-[6.25rem] lg:max-h-[calc(100vh-18rem)] max-md:inset-x-2 max-md:bottom-[4.5rem] max-md:top-auto max-md:max-h-[38vh] max-md:w-auto">
-      {mode === "simulate" && <CityMood sim={sim} />}
+      {mode === "simulate" && !editingCard && <CityMood sim={sim} />}
       {managing ? (
         <>
-          {mode === "simulate" && <MiniStats sim={sim} />}
+          {mode === "simulate" && !editingCard && <MiniStats sim={sim} />}
           <ManagerToolCard sim={sim} />
         </>
       ) : mode === "build" ? (

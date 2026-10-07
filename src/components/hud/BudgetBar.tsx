@@ -46,11 +46,11 @@ export default function BudgetBar() {
       <div className="hud-panel flex flex-col gap-1 rounded-2xl px-4 py-2 max-md:px-3 max-md:py-1">
         <div className="flex items-baseline gap-1.5">
           <span
-            className={`font-display text-lg font-extrabold tabular-nums ${budget < 0 ? "text-red-600" : "text-[#241b3d]"}`}
+            className={`font-display text-lg font-extrabold tabular-nums max-md:text-base ${budget < 0 ? "text-red-600" : "text-[#241b3d]"}`}
           >
             {formatMoney(budget)}
           </span>
-          <span className="text-xs font-semibold text-zinc-500">/ {formatMoney(top)}</span>
+          <span className="text-xs font-semibold text-zinc-500 max-md:hidden">/ {formatMoney(top)}</span>
         </div>
         {perMinute !== null && Math.abs(perMinute) >= 1 && (
           <span className={`text-[10px] font-bold tabular-nums ${perMinute < 0 ? "text-red-600" : "text-emerald-600"}`} title="Upkeep on your roads, less parking income, per minute of traffic">
@@ -62,7 +62,7 @@ export default function BudgetBar() {
             +${Math.round(tollEarned).toLocaleString()} tolls
           </span>
         )}
-        <div className="h-1.5 w-40 max-md:w-28 overflow-hidden rounded-full bg-black/10">
+        <div className="h-1.5 w-40 overflow-hidden rounded-full bg-black/10 max-md:w-24">
           <div
             className={`h-full rounded-full transition-all ${
               fraction >= 1 ? "bg-red-500" : "bg-gradient-to-r from-orange-400 via-pink-500 to-fuchsia-500"

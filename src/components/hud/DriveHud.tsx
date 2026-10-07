@@ -6,6 +6,7 @@ import type { DriveResult, DriveView } from "@/sim/types";
 import { useEditorStore } from "@/state/editorStore";
 import { playBrakeSqueal, playIndicatorTick, setPlayerEngine } from "@/lib/sound";
 import { pushToast } from "@/lib/toast";
+import { useCoarsePointer, useCompact } from "@/lib/compact";
 
 const MOVE_ICON: Record<DriveView["nextMove"], string> = { left: "↰", straight: "↑", right: "↱", end: "🏁" };
 
@@ -44,6 +45,9 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
   const viewRef = useRef<DriveView | null>(null);
   const lastBrakes = useRef(0);
   const { snapshotRef, takeWheel, releaseWheel, driveInput, driveResult, clearDriveResult } = sim;
+  const coarse = useCoarsePointer();
+  const compact = useCompact();
+  const touch = coarse || compact;
 
   // The sim reports a finished drive: show the card and hand the camera back.
   useEffect(() => {
@@ -138,7 +142,7 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
     setResult(null);
     setDrivingId(riding);
     takeWheel(riding);
-    pushToast("🚗 You have the wheel: W/S throttle and brake, A/D change lane, C changes view, Esc lets go", "info");
+    pushToast(touch ? "🚗 You have the wheel: hold GAS and BRAKE, tap the LANE arrows to move over" : "🚗 You have the wheel: W/S throttle and brake, A/D change lane, C changes view, Esc lets go", "info");
   };
 
   if (!rideAlong) return null;
@@ -165,7 +169,7 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
   const v = view;
   const over = v ? v.speedMph > v.limitMph * 1.1 : false;
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex flex-col items-center gap-2 px-2">
+    <div className={`pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center gap-2 px-2 ${touch ? "bottom-[7.5rem]" : "bottom-4"}`}>
       {v && (
         <div className="hud-panel pointer-events-auto flex flex-wrap items-center justify-center gap-x-5 gap-y-2 rounded-3xl px-5 py-3">
           <div className="flex flex-col items-center leading-none" title="Where the route goes at the end of this road">
@@ -209,12 +213,14 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
         </div>
       )}
       <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-black/55 px-4 py-1.5 text-[11px] font-bold text-white">
-        <span>
-          <kbd className="rounded bg-white/20 px-1">W</kbd> gas · <kbd className="rounded bg-white/20 px-1">S</kbd> brake · <kbd className="rounded bg-white/20 px-1">A</kbd>
-          <kbd className="ml-0.5 rounded bg-white/20 px-1">D</kbd> lane
-        </span>
+        {!touch && (
+          <span>
+            <kbd className="rounded bg-white/20 px-1">W</kbd> gas · <kbd className="rounded bg-white/20 px-1">S</kbd> brake · <kbd className="rounded bg-white/20 px-1">A</kbd>
+            <kbd className="ml-0.5 rounded bg-white/20 px-1">D</kbd> lane
+          </span>
+        )}
         <button type="button" onClick={() => setDriveCam(cam === "chase" ? "hood" : "chase")} className="rounded-full bg-white/15 px-2.5 py-0.5 hover:bg-white/25">
-          📷 {cam === "chase" ? "Driver's seat" : "Chase view"} (C)
+          📷 {cam === "chase" ? "Driver's seat" : "Chase view"}{touch ? "" : " (C)"}
         </button>
         <button
           type="button"
@@ -224,7 +230,41 @@ export default function DriveHud({ sim }: { sim: UseTrafficSimulationReturn }) {
           }}
           className="rounded-full bg-white/15 px-2.5 py-0.5 hover:bg-white/25"
         >
-          Let go (Esc)
+          Let go{touch ? "" : " (Esc)"}
+        </button>
+      </div>
+      {touch && <TouchPedals driveInput={driveInput} thrusting={v?.thrusting ?? 0} />}
+    </div>
+  );
+}
+
+/** On-screen controls for a touch screen: lane changes on the left, brake and gas (hold them) on the right. */
+function TouchPedals({ driveInput, thrusting }: { driveInput: (i: { accel?: -1 | 0 | 1; lane?: -1 | 0 | 1 }) => void; thrusting: number }) {
+  const hold = (accel: -1 | 1) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      driveInput({ accel });
+    },
+    onPointerUp: () => driveInput({ accel: 0 }),
+    onPointerCancel: () => driveInput({ accel: 0 }),
+  });
+  const pedal = "pointer-events-auto flex h-20 w-20 touch-none select-none flex-col items-center justify-center rounded-3xl text-xs font-extrabold uppercase text-white shadow-lg active:scale-95";
+  return (
+    <div className="pointer-events-none fixed inset-x-3 bottom-4 flex items-end justify-between">
+      <div className="flex gap-2">
+        <button type="button" aria-label="Change lane left" onClick={() => driveInput({ lane: -1 })} className={`${pedal} bg-gradient-to-br from-sky-400 to-blue-600`}>
+          <span className="text-3xl leading-none">◀</span>lane
+        </button>
+        <button type="button" aria-label="Change lane right" onClick={() => driveInput({ lane: 1 })} className={`${pedal} bg-gradient-to-br from-sky-400 to-blue-600`}>
+          <span className="text-3xl leading-none">▶</span>lane
+        </button>
+      </div>
+      <div className="flex gap-2">
+        <button type="button" aria-label="Brake (hold)" {...hold(-1)} className={`${pedal} ${thrusting < 0 ? "from-red-500 to-red-700" : "from-rose-400 to-red-600"} bg-gradient-to-br`}>
+          <span className="text-2xl leading-none">🛑</span>brake
+        </button>
+        <button type="button" aria-label="Gas (hold)" {...hold(1)} className={`${pedal} ${thrusting > 0 ? "from-emerald-500 to-green-700" : "from-emerald-400 to-teal-600"} bg-gradient-to-br`}>
+          <span className="text-2xl leading-none">⛽</span>gas
         </button>
       </div>
     </div>

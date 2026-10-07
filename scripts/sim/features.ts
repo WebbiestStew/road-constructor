@@ -68,12 +68,15 @@ async function gantryCase(mode: "none" | "closure" | "vsl", vsl = 35) {
 }
 
 /** Left turns that yield to oncoming traffic, with and without displaced lefts on every approach that can have one. */
-async function cfiCase(key: string, mode: "off" | "yield" | "cfi", seed = 1337) {
+async function cfiCase(key: string, mode: "off" | "yield" | "cfi" | "prot" | "protcfi", seed = 1337) {
   const network = cloneNetwork(REAL_CITY_DATA[key].network);
   const assembled = assembleNetwork(network);
   const signals = new Set(network.nodes.filter((n) => n.control?.type === "signal").map((n) => n.id));
   let displaced = 0;
-  if (mode === "cfi") {
+  if (mode === "prot" || mode === "protcfi") {
+    for (const n of network.nodes) if (n.control?.type === "signal") n.control = { ...n.control, mode: "protected" };
+  }
+  if (mode === "cfi" || mode === "protcfi") {
     const byId = new Map(network.edges.map((e) => [e.id, e]));
     for (const e of assembled.edges) {
       if (!signals.has(e.toNodeId) || e.length < 380) continue;
@@ -231,7 +234,7 @@ async function main() {
   }
   if (which.startsWith("cfi:")) {
     const [, key, mode, seed] = which.split(":");
-    return cfiCase(key, mode as "off" | "yield" | "cfi", seed ? Number(seed) : 1337);
+    return cfiCase(key, mode as "off" | "yield" | "cfi" | "prot" | "protcfi", seed ? Number(seed) : 1337);
   }
   if (which === "none" || which === "closure") return gantryCase(which);
   if (which.startsWith("vsl")) return gantryCase("vsl", Number(which.split(":")[1] ?? 35));

@@ -557,12 +557,28 @@ function buildSpline(
 }
 
 /**
+ * True when every control point is within a tenth of a foot of the same height: a road on level ground, whose profile
+ * can neither dip nor climb, so the tests that sample it for grade and for dips can be skipped (most of a real city,
+ * and the biggest saving when one loads).
+ */
+function isFlat(curve: THREE.CatmullRomCurve3): boolean {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const p of curve.points) {
+    if (p.y < lo) lo = p.y;
+    if (p.y > hi) hi = p.y;
+  }
+  return hi - lo <= 0.1;
+}
+
+/**
  * A curve through control points that are all at or above ground can still dip a foot below it between them (the
  * overshoot at the base of a ramp). That buries the pavement and the vehicles on it, so such a curve is traced again at
  * short intervals with the dip taken out. A road meant to go underground (a control point below ground) is left alone.
  */
 function keepAboveGround(curve: THREE.CatmullRomCurve3): THREE.CatmullRomCurve3 {
   if (curve.points.some((p) => p.y < -0.05)) return curve;
+  if (isFlat(curve)) return curve;
   const probe = new THREE.Vector3();
   let low = 0;
   for (let i = 0; i <= 40; i++) low = Math.min(low, curve.getPointAt(i / 40, probe).y);
@@ -592,6 +608,7 @@ const MAX_LOCAL_GRADE = 0.075;
  * climb is spread over a little more of the deck instead of being steepest in one place.
  */
 function limitGrade(curve: THREE.CatmullRomCurve3): THREE.CatmullRomCurve3 {
+  if (isFlat(curve)) return curve;
   const length = curve.getLength();
   if (length < 30) return curve;
   const n = Math.max(8, Math.ceil(length / 6));
@@ -729,10 +746,15 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
 
   classifyMergesAndDiverges(edges);
 
+  // Roads leaving each node, in the order the edges were given (so route ties break as they always did).
+  const leaving = new Map<string, string[]>();
+  for (const e of edges) {
+    const list = leaving.get(e.fromNodeId);
+    if (list) list.push(e.id);
+    else leaving.set(e.fromNodeId, [e.id]);
+  }
   for (const edge of edges) {
-    edge.allNextEdgeIds = edges
-      .filter((e2) => e2.fromNodeId === edge.toNodeId)
-      .map((e2) => e2.id);
+    edge.allNextEdgeIds = (leaving.get(edge.toNodeId) ?? []).slice();
     applyTurnBans(edge, edgesById);
   }
 
