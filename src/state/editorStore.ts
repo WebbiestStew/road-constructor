@@ -47,9 +47,10 @@ import { DEFAULT_LEFT_GREEN_S, MAX_PED_PHASE_S, approxCycleS, type SignalMode } 
 import { SANDBOX_BUDGET, type ScenarioDef } from "@/sim/scenarios";
 import { applyPatchActions, replayStart, visualPatches, type ReplayMeta } from "@/lib/replays";
 import type { LoggedAction } from "@/sim/types";
+import { applyLandUse, landUseCost, type LandUse, type LandUseKind } from "@/sim/landUse";
 
 export type EditorMode = "build" | "simulate";
-export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street" | "transit" | "gantry";
+export type EditorTool = "draw" | "delete" | "inspect" | "zone" | "turnaround" | "lanes" | "speed" | "junction" | "street" | "transit" | "gantry" | "landuse";
 
 /** Tools that change how traffic is managed rather than what is built — these work while traffic is running. */
 export const MANAGER_TOOLS: EditorTool[] = ["inspect", "lanes", "speed", "junction", "street", "transit", "gantry"];
@@ -110,6 +111,7 @@ function reversePoints(
 interface HistoryEntry {
   nodes: NodeSpec[];
   edges: EdgeSpec[];
+  landUse?: LandUse[];
   budget: number;
   nextNodeSeq: number;
   nextEdgeSeq: number;
@@ -242,6 +244,19 @@ interface EditorState {
   setReservedLane: (edgeId: string, kind: ReservedLane | null, wholeRoad: boolean) => void;
   /** Bans (or allows again) left or right turns at the end of this road. Drivers route around a ban; a road can't ban every way out. */
   setBannedTurn: (edgeId: string, turn: "left" | "right", on: boolean) => void;
+  /** Land use: homes, jobs and shops beside the roads; they are what generates the trips. */
+  landUse: LandUse[];
+  landUseKind: LandUseKind;
+  landUseSize: 1 | 2 | 3;
+  setLandUseKind: (kind: LandUseKind) => void;
+  setLandUseSize: (size: 1 | 2 | 3) => void;
+  /** Places a zone of the chosen kind and size on the ground (costs money), and attaches it to the nearest road. */
+  addLandUse: (x: number, z: number) => boolean;
+  removeLandUse: (id: string) => void;
+  /** Works out again which road each zone feeds, after roads were added or removed. */
+  reattachLandUse: () => void;
+  /** Sets (or removes) the meter on a ramp: `seconds` between cars, or `auto` to pace itself from the freeway ahead. */
+  setRampMeter: (edgeId: string, meter: { seconds: number; auto: boolean }) => void;
   /** Reversible lane: gives this direction one more lane and takes one from the opposite carriageway. Free, and works while traffic runs. */
   reverseLane: (edgeId: string) => void;
   /** Makes a road one-way (in the selected direction) or restores its opposite carriageway. Refuses edits that would strand traffic. */
@@ -304,6 +319,11 @@ interface EditorState {
   /** A 24-hour day: demand follows the rush hours and the lighting follows the clock. Free play only. */
   dayCycle: boolean;
   setDayCycle: (on: boolean) => void;
+  /** Optional rules for free play (levels set their own): demand that follows how well the roads work, crashes that happen on their own, and people who wait at crossings. */
+  elasticDemand: boolean;
+  crashRisk: boolean;
+  pedWaits: boolean;
+  setFreePlayRule: (rule: "elasticDemand" | "crashRisk" | "pedWaits", on: boolean) => void;
   /** Share of traffic that is buses and bikes (0 = the classic cars-and-trucks mix). Levels set it; the sandbox turns it on. */
   trafficMix: TrafficMix;
   setTrafficMix: (mix: TrafficMix) => void;
@@ -349,7 +369,7 @@ export interface ReplaySession {
 const REPLAY_RESTORED_KEYS = [
   "nodes", "edges", "nodesById", "edgesById", "budget", "nextNodeSeq", "nextEdgeSeq", "activeScenarioId", "buildLocked",
   "realCityActive", "scenery", "placeName", "economyK", "transitLines", "activeTransitId", "trafficMix", "weather", "dayCycle",
-  "timeOfDay", "mode", "tool", "selection", "drawFromNodeId", "past", "future",
+  "timeOfDay", "mode", "tool", "selection", "drawFromNodeId", "past", "future", "landUse",
 ] as const;
 
 /**
@@ -489,6 +509,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const entry: HistoryEntry = {
       nodes: s.nodes,
       edges: s.edges,
+      landUse: s.landUse,
       budget: s.budget,
       nextNodeSeq: s.nextNodeSeq,
       nextEdgeSeq: s.nextEdgeSeq,
@@ -505,6 +526,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const currentEntry: HistoryEntry = {
       nodes: s.nodes,
       edges: s.edges,
+      landUse: s.landUse,
       budget: s.budget,
       nextNodeSeq: s.nextNodeSeq,
       nextEdgeSeq: s.nextEdgeSeq,
@@ -514,6 +536,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       edges: prev.edges,
       nodesById: new Map(prev.nodes.map((n) => [n.id, n])),
       edgesById: new Map(prev.edges.map((e) => [e.id, e])),
+      landUse: prev.landUse ?? [],
       budget: prev.budget,
       nextNodeSeq: prev.nextNodeSeq,
       nextEdgeSeq: prev.nextEdgeSeq,
@@ -530,6 +553,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const currentEntry: HistoryEntry = {
       nodes: s.nodes,
       edges: s.edges,
+      landUse: s.landUse,
       budget: s.budget,
       nextNodeSeq: s.nextNodeSeq,
       nextEdgeSeq: s.nextEdgeSeq,
@@ -539,6 +563,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       edges: next.edges,
       nodesById: new Map(next.nodes.map((n) => [n.id, n])),
       edgesById: new Map(next.edges.map((e) => [e.id, e])),
+      landUse: next.landUse ?? [],
       budget: next.budget,
       nextNodeSeq: next.nextNodeSeq,
       nextEdgeSeq: next.nextEdgeSeq,
@@ -1441,6 +1466,69 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
 
+  landUse: [],
+  landUseKind: "home",
+  landUseSize: 2,
+  setLandUseKind: (kind) => set({ landUseKind: kind }),
+  setLandUseSize: (size) => set({ landUseSize: size }),
+  addLandUse: (x, z) => {
+    const s = get();
+    if (s.buildLocked) return false;
+    if (s.landUse.length >= 60) {
+      pushToast("That's plenty of buildings for one city", "alert");
+      return false;
+    }
+    if (!s.spendBudget(landUseCost(s.landUseKind, s.landUseSize))) return false;
+    get().pushHistoryEntry();
+    const zone: LandUse = { id: `lu${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`, kind: s.landUseKind, position: [x, z], size: s.landUseSize };
+    const landUse = [...s.landUse, zone];
+    const edges = applyLandUse(s.nodes, s.edges, landUse);
+    set({ landUse, edges, edgesById: new Map(edges.map((e) => [e.id, e])) });
+    const attached = edges.some((e) => e.landUseId === zone.id);
+    pushToast(attached ? `${zone.kind === "home" ? "🏠 Homes" : zone.kind === "work" ? "🏢 Jobs" : "🛍️ Shops"} added` : "No road close enough: draw one nearby and press Re-attach", attached ? "good" : "alert");
+    return true;
+  },
+  removeLandUse: (id) => {
+    const s = get();
+    const zone = s.landUse.find((z) => z.id === id);
+    if (!zone || s.buildLocked) return;
+    get().pushHistoryEntry();
+    const landUse = s.landUse.filter((z) => z.id !== id);
+    const edges = applyLandUse(s.nodes, s.edges, landUse);
+    set({
+      landUse,
+      edges,
+      edgesById: new Map(edges.map((e) => [e.id, e])),
+      budget: isSandboxBudget(s.budget) ? s.budget : s.budget + landUseCost(zone.kind, zone.size) * DEMOLISH_REFUND_FRACTION,
+    });
+  },
+  reattachLandUse: () => {
+    const s = get();
+    if (s.landUse.length === 0) return;
+    const edges = applyLandUse(s.nodes, s.edges, s.landUse);
+    set({ edges, edgesById: new Map(edges.map((e) => [e.id, e])) });
+  },
+  setRampMeter: (edgeId, meter) => {
+    const state = get();
+    const edge = state.edgesById.get(edgeId);
+    if (!edge) return;
+    const seconds = meter.auto ? 0 : meter.seconds;
+    if ((edge.meterS ?? 0) === seconds && !!edge.meterAuto === meter.auto) return;
+    get().pushHistoryEntry();
+    set((s) => {
+      const edges = s.edges.map((e) => {
+        if (e.id !== edgeId) return e;
+        const next = { ...e };
+        if (seconds > 0) next.meterS = seconds;
+        else delete next.meterS;
+        if (meter.auto) next.meterAuto = true;
+        else delete next.meterAuto;
+        return next;
+      });
+      return { edges, edgesById: new Map(edges.map((e) => [e.id, e])) };
+    });
+  },
+
   reverseLane: (edgeId) => {
     const state = get();
     const edge = state.edgesById.get(edgeId);
@@ -1722,6 +1810,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       drawFromNodeId: null,
       nextNodeSeq: 1,
       nextEdgeSeq: 1,
+      landUse: [],
     });
   },
 
@@ -1739,6 +1828,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextNodeSeq: s.nextNodeSeq,
       nextEdgeSeq: s.nextEdgeSeq,
       ...(s.transitLines.length > 0 ? { transit: s.transitLines } : {}),
+      ...(s.landUse.length > 0 ? { landUse: s.landUse } : {}),
     };
   },
 
@@ -1753,6 +1843,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextNodeSeq: payload.nextNodeSeq,
       nextEdgeSeq: payload.nextEdgeSeq,
       transitLines: payload.transit ?? [],
+      landUse: payload.landUse ?? [],
       activeTransitId: null,
       selection: null,
       drawFromNodeId: null,
@@ -1774,6 +1865,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       nextNodeSeq: payload.nextNodeSeq,
       nextEdgeSeq: payload.nextEdgeSeq,
       transitLines: payload.transit ?? [],
+      landUse: payload.landUse ?? [],
     });
   },
 
@@ -1846,6 +1938,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       weather: "clear",
       dayCycle: false,
       placeName: name,
+      landUse: [],
       economyK: null,
       simEpoch: s.simEpoch + 1,
       pendingCameraFit: {
@@ -1860,6 +1953,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setWeather: (w) => set({ weather: w }),
   dayCycle: false,
   setDayCycle: (on) => set({ dayCycle: on }),
+  elasticDemand: true,
+  crashRisk: true,
+  pedWaits: true,
+  setFreePlayRule: (rule, on) => set({ [rule]: on } as Pick<EditorState, "elasticDemand" | "crashRisk" | "pedWaits">),
   trafficMix: CLASSIC_MIX,
   setTrafficMix: (mix) => set({ trafficMix: mix }),
   simEpoch: 0,
@@ -1954,6 +2051,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       buildLocked: scenario.kind === "manage",
       realCityActive: scenario.real === true,
       transitLines: [],
+      landUse: [],
       activeTransitId: null,
       scenery: (scenario.sceneryKey && isRealCityLoaded(scenario.sceneryKey) && getRealCity(scenario.sceneryKey).scenery) || EMPTY_SCENERY,
       placeName: null,
@@ -2008,6 +2106,7 @@ useEditorStore.subscribe((state) => {
       nextNodeSeq: state.nextNodeSeq,
       nextEdgeSeq: state.nextEdgeSeq,
       ...(state.transitLines.length > 0 ? { transit: state.transitLines } : {}),
+      ...(state.landUse.length > 0 ? { landUse: state.landUse } : {}),
     });
   }, 600);
 });

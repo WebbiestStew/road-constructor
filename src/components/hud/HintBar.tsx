@@ -13,6 +13,7 @@ const HINTS: Record<EditorTool, string> = {
   transit: "🚌 Click roads in order to draw a bus line. Buses run along it on a timetable and stop at bus stops.",
   gantry: "🛣️ Click a freeway gantry to post a speed advisory or close a lane ahead of an incident or a merge.",
   junction: "🚦 Click a junction to set priority or a traffic light, and tune its timing.",
+  landuse: "🏘️ Click the ground beside a road to place homes, jobs or shops. Homes send cars out along the nearest road; jobs and shops are where they go.",
   turnaround: "🔁 Click a frontage road — we'll loop a one-way Texas turnaround to the nearest opposing road within 220 ft.",
 };
 

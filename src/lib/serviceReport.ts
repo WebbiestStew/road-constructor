@@ -22,7 +22,7 @@ export interface ServiceReport {
   medals: Medal[];
 }
 
-export type MedalId = "delay" | "queue" | "peds" | "clear" | "gridlock" | "flow" | "buses";
+export type MedalId = "delay" | "queue" | "peds" | "clear" | "gridlock" | "flow" | "buses" | "safe" | "walkable";
 
 export interface Medal {
   id: MedalId;
@@ -43,6 +43,9 @@ export const FLOW_COMBOS_FOR_MEDAL = 3;
 /** Line-bus stops served before the spacing means anything, and the most the gaps may vary (spread = standard deviation / mean). */
 export const MIN_BUS_SERVICES = 12;
 export const MAX_BUS_HEADWAY_CV = 0.45;
+/** The walkable medal: people arriving at a crossing wait no longer than this on average, and nobody gives up and steps into traffic. */
+export const MAX_AVG_PED_WAIT_S = 8;
+export const MIN_PED_ARRIVALS = 5;
 
 export const MEDAL_META: Record<MedalId, { icon: string; label: string }> = {
   delay: { icon: "⏱️", label: "Less waiting" },
@@ -52,6 +55,8 @@ export const MEDAL_META: Record<MedalId, { icon: string; label: string }> = {
   gridlock: { icon: "🟢", label: "No gridlock" },
   flow: { icon: "🌊", label: "Green wave" },
   buses: { icon: "🚌", label: "Even service" },
+  safe: { icon: "🛡️", label: "Vision Zero" },
+  walkable: { icon: "🚶‍♀️", label: "Walkable" },
 };
 
 /** The slice of a run's numbers the report reads: the live metrics, or the final tick of a headless run. */
@@ -67,6 +72,10 @@ export type ServiceInput = Pick<
   | "gridlockPenaltyTotal"
   | "combos"
   | "transit"
+  | "crashRiskOn"
+  | "riskCrashes"
+  | "pedWaitsOn"
+  | "pedWait"
 >;
 
 export function buildServiceReport(m: ServiceInput, baseline?: ScenarioDef["serviceBaseline"]): ServiceReport {
@@ -98,6 +107,14 @@ export function buildServiceReport(m: ServiceInput, baseline?: ScenarioDef["serv
 
   if (m.transit.services >= MIN_BUS_SERVICES) {
     add("buses", m.transit.headwayCv <= MAX_BUS_HEADWAY_CV, `Buses came every ${Math.round(m.transit.headwayMeanS)} s with a spread of ${m.transit.headwayCv.toFixed(2)} (${MAX_BUS_HEADWAY_CV} or less for the medal)${m.transit.transfers > 0 ? `, ${m.transit.transfers} people changed lines` : ""}`);
+  }
+
+  if (m.crashRiskOn) {
+    add("safe", m.riskCrashes === 0 && m.crashes.happened === 0, m.riskCrashes === 0 && m.crashes.happened === 0 ? "No crashes: nobody made a mistake that cost a lane" : `${m.crashes.happened} crash${m.crashes.happened === 1 ? "" : "es"}${m.riskCrashes > 0 ? ` (${m.riskCrashes} from driver mistakes)` : ""}`);
+  }
+  if (m.pedWaitsOn && m.pedWait.arrivals >= MIN_PED_ARRIVALS) {
+    const avg = m.pedWait.waitTotalS / m.pedWait.arrivals;
+    add("walkable", avg <= MAX_AVG_PED_WAIT_S && m.pedWait.gaveUp === 0, `People waited ${avg.toFixed(1)} s on average to cross (${MAX_AVG_PED_WAIT_S} s or less, with nobody giving up, for the medal)${m.pedWait.gaveUp > 0 ? `; ${m.pedWait.gaveUp} gave up and stepped out` : ""}`);
   }
 
   return {

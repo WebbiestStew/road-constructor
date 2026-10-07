@@ -38,6 +38,9 @@ async function main() {
     if (variants.has("busEW") && ew && e.lanes >= 2) e.reservedLane = "bus";
     if (variants.has("busNS") && !ew && e.lanes >= 2) e.reservedLane = "bus";
     if (variants.has("ramps2") && e.roadClassId === "highway") e.lanes = 2;
+    if (variants.has("meter4") && e.roadClassId === "highway") e.meterS = 4;
+    if (variants.has("meter8") && e.roadClassId === "highway") e.meterS = 8;
+    if (variants.has("meterauto") && e.roadClassId === "highway") e.meterAuto = true;
     if (variants.has("main4") && e.roadClassId === "motorway") e.lanes = 4;
     if (variants.has("rampfast") && e.roadClassId === "highway") e.speedLimitMph = 45;
     if (variants.has("cross") && e.jaywalkers) e.crosswalk = true;
@@ -77,6 +80,9 @@ async function main() {
     if (m.type === "tick") last = m;
     prev(m);
   };
+  if (variants.has("elastic")) sim.send({ type: "setElasticDemand", enabled: true });
+  if (variants.has("risk")) sim.send({ type: "setCrashRisk", enabled: true });
+  if (variants.has("waits")) sim.send({ type: "setPedWaits", enabled: true });
   if (variants.has("rain")) sim.send({ type: "setWeather", weather: "rain" });
   if (variants.has("fog")) sim.send({ type: "setWeather", weather: "fog" });
   if (variants.has("night")) sim.send({ type: "setDarkness", level: 1 });
@@ -99,6 +105,9 @@ async function main() {
       crashes: last?.crashes ? `${last.crashes.cleared}/${last.crashes.happened} avg ${last.crashes.cleared ? Math.round(last.crashes.totalClearS / last.crashes.cleared) : "-"}s` : "-",
       amb: em ? `${em.completed}/${em.dispatched} x${em.totalIdealS ? (em.totalResponseS / em.totalIdealS).toFixed(2) : "-"}` : "-",
       mph: Math.round(r.avgMph),
+      demandIndex: +(last?.demandIndex ?? 1).toFixed(3),
+      riskCrashes: last?.riskCrashes ?? 0,
+      pedWait: last?.pedWait ? `${last.pedWait.arrivals} came, avg wait ${last.pedWait.arrivals ? (last.pedWait.waitTotalS / last.pedWait.arrivals).toFixed(1) : 0}s, ${last.pedWait.gaveUp} gave up` : "-",
       delayShare: r.freeFlowS > 0 ? +(r.delayS / r.freeFlowS).toFixed(3) : null,
       queueFt: r.queuePeakFt,
     })

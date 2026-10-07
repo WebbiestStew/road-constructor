@@ -59,6 +59,16 @@ export interface SimMetricsState {
   expressVehicleS: number;
   /** How the bus service is running: headways, bunching, transfers. */
   transit: TransitStats;
+  /** Demand against what the entries were set to (1 = as set), and which of the optional rules are on. */
+  demandIndex: number;
+  elasticOn: boolean;
+  crashRiskOn: boolean;
+  pedWaitsOn: boolean;
+  riskCrashes: number;
+  pedWait: { arrivals: number; waitTotalS: number; gaveUp: number };
+  closedEdges: string[];
+  /** Each ramp meter's light: red or green. */
+  meters: [string, number][];
   /** True once the worker is running the replay that was last started (the numbers above are not from the run before it). */
   replayLive: boolean;
   pedServedTotal: number;
@@ -100,6 +110,14 @@ const DEFAULT_METRICS: SimMetricsState = {
   queuePeakFt: 0,
   expressVehicleS: 0,
   transit: { services: 0, headwayMeanS: 0, headwayCv: 0, boarded: 0, transfers: 0, heldS: 0 },
+  demandIndex: 1,
+  elasticOn: false,
+  crashRiskOn: false,
+  pedWaitsOn: false,
+  riskCrashes: 0,
+  pedWait: { arrivals: 0, waitTotalS: 0, gaveUp: 0 },
+  closedEdges: [],
+  meters: [],
   replayLive: false,
   pedServedTotal: 0,
   pedIncidentsTotal: 0,
@@ -151,6 +169,12 @@ function postRunFlags(worker: Worker) {
   worker.postMessage({ type: "setLeftTurnsYield", enabled } satisfies WorkerInMessage);
   // Desperate lane weaves are part of free play; the levels' baselines were measured without them.
   worker.postMessage({ type: "setRageWeaves", enabled: !id } satisfies WorkerInMessage);
+  // The optional rules: a level says which it uses; free play uses whatever the player has switched on.
+  const def = id ? getScenarioById(id) : undefined;
+  const st = useEditorStore.getState();
+  worker.postMessage({ type: "setElasticDemand", enabled: id ? def?.elasticDemand === true : st.elasticDemand } satisfies WorkerInMessage);
+  worker.postMessage({ type: "setCrashRisk", enabled: id ? def?.crashRisk === true : st.crashRisk } satisfies WorkerInMessage);
+  worker.postMessage({ type: "setPedWaits", enabled: id ? def?.pedWaits === true : st.pedWaits } satisfies WorkerInMessage);
 }
 
 export function useTrafficSimulation() {
@@ -270,6 +294,14 @@ export function useTrafficSimulation() {
             queuePeakFt: msg.queuePeakFt ?? 0,
             expressVehicleS: msg.expressVehicleS ?? 0,
             transit: msg.transit ?? DEFAULT_METRICS.transit,
+            demandIndex: msg.demandIndex ?? 1,
+            elasticOn: msg.elasticOn ?? false,
+            crashRiskOn: msg.crashRiskOn ?? false,
+            pedWaitsOn: msg.pedWaitsOn ?? false,
+            riskCrashes: msg.riskCrashes ?? 0,
+            pedWait: msg.pedWait ?? DEFAULT_METRICS.pedWait,
+            closedEdges: msg.closedEdges ?? [],
+            meters: stats.meters ?? [],
             replayLive: msg.runId !== undefined && msg.runId > replayFloorRef.current,
             pedServedTotal: msg.pedServedTotal,
             pedIncidentsTotal: msg.pedIncidentsTotal,
@@ -323,6 +355,18 @@ export function useTrafficSimulation() {
     workerRef.current?.postMessage({ type: "setDarkness", level } satisfies WorkerInMessage);
   }, [timeOfDay]);
 
+  // In free play the optional rules follow the switches, live.
+  const freeElastic = useEditorStore((s) => s.elasticDemand);
+  const freeRisk = useEditorStore((s) => s.crashRisk);
+  const freeWaits = useEditorStore((s) => s.pedWaits);
+  const inFreePlay = useEditorStore((s) => s.activeScenarioId === null);
+  useEffect(() => {
+    if (!inFreePlay) return;
+    workerRef.current?.postMessage({ type: "setElasticDemand", enabled: freeElastic } satisfies WorkerInMessage);
+    workerRef.current?.postMessage({ type: "setCrashRisk", enabled: freeRisk } satisfies WorkerInMessage);
+    workerRef.current?.postMessage({ type: "setPedWaits", enabled: freeWaits } satisfies WorkerInMessage);
+  }, [inFreePlay, freeElastic, freeRisk, freeWaits]);
+
   const dayCycle = useEditorStore((s) => s.dayCycle);
   useEffect(() => {
     // Starts at 6 am; a day lasts eight minutes of sim time.
@@ -355,7 +399,7 @@ export function useTrafficSimulation() {
     postScenarioEvents(worker);
     postRunFlags(worker);
 
-    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${(e.bannedTurns ?? []).join(".")}|${e.crosswalk ? 1 : 0}|${e.busStop ? 1 : 0}|${e.parking ? 1 : 0}|${e.vslMph ?? ""}|${(e.closedLanes ?? []).join(".")}|${e.displacedLeft ? 1 : 0}`;
+    const edgeSig = (e: EdgeSpec) => `${e.speedLimitMph}|${JSON.stringify(e.laneMoves ?? null)}|${e.reservedLane ?? ""}|${(e.bannedTurns ?? []).join(".")}|${e.meterS ?? 0}|${e.meterAuto ? 1 : 0}|${e.crosswalk ? 1 : 0}|${e.busStop ? 1 : 0}|${e.parking ? 1 : 0}|${e.vslMph ?? ""}|${(e.closedLanes ?? []).join(".")}|${e.displacedLeft ? 1 : 0}`;
     const nodeSig = (n: NodeSpec) => JSON.stringify(n.control ?? null);
     let sentEdges = new Map(snapshot.edges.map((e) => [e.id, edgeSig(e)]));
     let sentNodes = new Map(snapshot.nodes.map((n) => [n.id, nodeSig(n)]));
@@ -388,6 +432,8 @@ export function useTrafficSimulation() {
           laneMoves: e.laneMoves ?? null,
           reservedLane: e.reservedLane ?? null,
           bannedTurns: e.bannedTurns ?? [],
+          meterS: e.meterS ?? 0,
+          meterAuto: e.meterAuto ?? false,
           crosswalk: e.crosswalk ?? false,
           busStop: e.busStop ?? false,
           parking: e.parking ?? false,

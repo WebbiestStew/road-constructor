@@ -29,7 +29,16 @@ export default function ConditionsChip({ sim }: { sim: UseTrafficSimulationRetur
     }
     effects.push(dark ? "unlit lanes 14% slower" : "unlit lanes 7% slower", "people seen late at crossings");
   }
-  if (effects.length === 0) return null;
+  // What the optional rules are doing right now.
+  const m = sim.metrics;
+  const shift = Math.round((m.demandIndex - 1) * 100);
+  const demandNote = m.elasticOn && Math.abs(shift) >= 3 ? `demand ${shift > 0 ? "+" : "−"}${Math.abs(shift)}% (${shift > 0 ? "a free road draws drivers" : "jams push drivers away"})` : "";
+  if (effects.length === 0 && !demandNote) return null;
+  if (demandNote && !icon) {
+    icon = shift > 0 ? "📈" : "📉";
+    title = "Demand";
+    effects.push(demandNote);
+  } else if (demandNote) effects.push(demandNote);
   return (
     <div className="pointer-events-none absolute left-1/2 top-[7.5rem] z-20 hidden -translate-x-1/2 md:block">
       <div className="hud-panel flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[11px] font-bold text-[#241b3d]">

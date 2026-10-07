@@ -74,6 +74,8 @@ export type ScriptedEvent =
   | { atS: number; kind: "surge"; multiplier: number; durationS: number }
   /** A wrecker is sent to the oldest incident nobody has sent one to (what the player's tap on a pin does, at an exact moment, for tests). */
   | { atS: number; kind: "dispatchWrecker" }
+  /** Roads close for `durationS` seconds (a bridge out): nobody routes onto them, and drivers already on their way find another road. */
+  | { atS: number; kind: "roadClosure"; edgeIds: string[]; durationS: number }
   /** A semi breaks down in the middle lane of a freeway and stays there until a wrecker arrives (or a long time passes). */
   | { atS: number; kind: "stall" }
   /** Debris falls into a lane and blocks it until a wrecker clears it. */
@@ -126,6 +128,12 @@ export interface EdgeSpec {
   reservedLane?: ReservedLane;
   /** Turns banned at the end of this road (drivers route around them). Only left and right: a road can't ban going straight. */
   bannedTurns?: ("left" | "right")[];
+  /** Ramp meter: seconds between cars let onto the freeway from this ramp (0 or omitted = no meter). */
+  meterS?: number;
+  /** Ramp meter that sets its own pace from how freely the freeway ahead is flowing. Wins over `meterS`. */
+  meterAuto?: boolean;
+  /** Set on a road whose entry or destination marker comes from a land-use zone rather than from the player's own zone tool. */
+  landUseId?: string;
   /** A mid-block pedestrian crossing: traffic stops for people who press the button. */
   crosswalk?: boolean;
   /** A bus stop on this side of the road: buses on a route through here stop, and pick up more riders. */
@@ -330,6 +338,8 @@ export interface Edge3D {
   /** Turns banned at the end of this road, and every road it could lead into before the bans were applied. */
   bannedTurns: LaneMove[];
   allNextEdgeIds: string[];
+  meterS: number;
+  meterAuto: boolean;
   crosswalk: boolean;
   jaywalkers: boolean;
   busStop: boolean;
@@ -482,6 +492,12 @@ export type WorkerInMessage =
   | { type: "setTransit"; lines: TransitLine[] }
   /** The weather the player picked. Scripted weather events override it while they last. */
   | { type: "setWeather"; weather: Weather }
+  /** Demand follows how well the roads work: a free road draws more drivers, a jammed one sends some elsewhere or onto buses. */
+  | { type: "setElasticDemand"; enabled: boolean }
+  /** Crashes happen on their own, from speeding, weather, darkness and tailgating. */
+  | { type: "setCrashRisk"; enabled: boolean }
+  /** People at a crossing wait for a gap or the button, and the waits are scored. */
+  | { type: "setPedWaits"; enabled: boolean }
   /** The player takes the wheel of a vehicle (by id, from the snapshot) or lets go of it. */
   | { type: "drive"; action: "take" | "release"; id: number }
   /** Pedals and lane changes while driving: accel -1 brake, 0 coast, 1 throttle; lane -1 left, 1 right (a request, carried out when there is a gap). */
@@ -504,6 +520,8 @@ export interface EdgePatch {
   laneMoves: LaneMove[][] | null;
   reservedLane?: ReservedLane | null;
   bannedTurns?: LaneMove[];
+  meterS?: number;
+  meterAuto?: boolean;
   crosswalk?: boolean;
   busStop?: boolean;
   parking?: boolean;
@@ -575,6 +593,8 @@ export interface TickStats {
   gridlockMarkers: [number, number, number][];
   /** What each approach's signal shows right now: [edgeId, 0 red | 1 green | 2 left-turn arrow only | 3 amber]. */
   signalHeads: [string, number][];
+  /** Each ramp meter's light: [edgeId, 0 red | 1 green]. */
+  meters: [string, number][];
 }
 
 export type WorkerOutMessage =
@@ -627,6 +647,17 @@ export type WorkerOutMessage =
       /** The vehicle the player is driving, if any, and how the last drive ended. */
       drive: DriveView | null;
       driveResult: DriveResult | null;
+      /** Demand relative to what the entries were set to (1 = as set), and what changed it: elastic demand on, crash risk on, ped waits on. */
+      demandIndex: number;
+      elasticOn: boolean;
+      crashRiskOn: boolean;
+      pedWaitsOn: boolean;
+      /** Crashes the risk model caused this run. */
+      riskCrashes: number;
+      /** People who came to a crossing, how long they waited in all, and how many gave up and stepped out into traffic. */
+      pedWait: { arrivals: number; waitTotalS: number; gaveUp: number };
+      /** Roads closed right now. */
+      closedEdges: string[];
       /** Actions that changed the run since the last tick (for recording a replay), and which run they belong to. */
       actions?: LoggedAction[];
       runId?: number;

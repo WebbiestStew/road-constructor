@@ -29,6 +29,9 @@ import StreetNames from "@/components/StreetNames";
 import FreewaySigns from "@/components/FreewaySigns";
 import ManagementOverlays from "@/components/ManagementOverlays";
 import TurnBanSigns from "@/components/TurnBanSigns";
+import RampMeters from "@/components/RampMeters";
+import LandUseZones from "@/components/LandUseZones";
+import RoadClosures from "@/components/RoadClosures";
 import SimControls from "@/components/SimControls";
 import Terrain from "@/components/Terrain";
 import { useTrafficSimulation } from "@/hooks/useTrafficSimulation";
@@ -172,7 +175,7 @@ function AmbienceController({ avgSpeedMph }: { avgSpeedMph: number }) {
 }
 
 /** Which tools are "aim and place something new" (crosshair) vs. "click an existing thing" (default pointer) — a small but real cue for what a click will do, especially since Simulate mode's Inspect tool now reveals a live stats panel rather than editing anything. */
-const CROSSHAIR_TOOLS = new Set<EditorTool>(["draw", "zone", "turnaround"]);
+const CROSSHAIR_TOOLS = new Set<EditorTool>(["draw", "zone", "turnaround", "landuse"]);
 
 export default function Play() {
   const sim = useTrafficSimulation();
@@ -359,6 +362,9 @@ export default function Play() {
         <ManagementOverlays />
         <FreewaySigns />
         <TurnBanSigns />
+        <RampMeters meters={sim.metrics.meters} />
+        <LandUseZones />
+        <RoadClosures closed={sim.metrics.closedEdges} />
         <StreetNames />
         {flyover && <LightTrails snapshotRef={sim.snapshotRef} />}
         <SoundscapeDriver snapshotRef={sim.snapshotRef} wet={weather === "rain"} running={sim.running} texas={texasMap} avgMph={sim.metrics.avgSpeedMph} rageMarkers={sim.metrics.rageMarkers} rageCount={sim.metrics.rageCount} />

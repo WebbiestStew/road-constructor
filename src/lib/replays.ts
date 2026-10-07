@@ -116,6 +116,9 @@ const ALLOWED_ACTION_TYPES = new Set<WorkerInMessage["type"]>([
   "scheduleEvents",
   "setDayCycle",
   "setMaxVehicles",
+  "setElasticDemand",
+  "setCrashRisk",
+  "setPedWaits",
   "drive",
   "driveInput",
 ]);

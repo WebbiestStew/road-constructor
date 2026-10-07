@@ -94,6 +94,12 @@ export interface ScenarioDef {
    * empty-road time, and the longest queue in feet. The service medals ask for a clear improvement on these.
    */
   serviceBaseline?: { delayShare: number; queueFt: number };
+  /** Demand follows how well the roads work in this level (a free road draws more drivers). Off in the levels measured without it. */
+  elasticDemand?: boolean;
+  /** Crashes happen on their own from speeding, weather, darkness and tailgating. */
+  crashRisk?: boolean;
+  /** People at crossings wait for a gap or the button, and the waits are scored. */
+  pedWaits?: boolean;
   /** Left turns at signals give way to oncoming traffic in this level (otherwise they run unopposed, as in the classic levels). */
   leftTurnsYield?: boolean;
   /** Share of traffic that is buses and bikes in this level. Omitted = cars and trucks only. */

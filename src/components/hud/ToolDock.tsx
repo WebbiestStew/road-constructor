@@ -3,12 +3,13 @@
 import type { ComponentType, SVGProps } from "react";
 import { ELEVATION_LEVELS, HOTKEY_TIER_IDS, ROAD_CLASS_LIST, TEXAS_TURNAROUND_SPEED_MPH } from "@/sim/roadClasses";
 import { useEditorStore, type EditorTool } from "@/state/editorStore";
-import { IconDelete, IconDraw, IconInspect, IconTurnaround, IconZone } from "./icons";
+import { IconDelete, IconDraw, IconInspect, IconLandUse, IconTurnaround, IconZone } from "./icons";
 
 /** Primary Actions — the always-visible tool row. Draw/Zone/Inspect/Delete only; Turnaround lives with the other road-type picks below since it's really "what to draw," not a separate mode. */
 const TOOLS: { id: EditorTool; icon: ComponentType<SVGProps<SVGSVGElement>>; label: string; hotkey: string }[] = [
   { id: "draw", icon: IconDraw, label: "Draw", hotkey: "B" },
   { id: "zone", icon: IconZone, label: "Zone", hotkey: "Z" },
+  { id: "landuse", icon: IconLandUse, label: "Land use", hotkey: "U" },
   { id: "inspect", icon: IconInspect, label: "Inspect", hotkey: "I" },
   { id: "delete", icon: IconDelete, label: "Delete", hotkey: "X" },
 ];

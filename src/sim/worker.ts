@@ -129,6 +129,12 @@ let queueNowFt = 0;
 let queuePeakFt = 0;
 /** Car-seconds spent in toll express lanes this run; the main thread turns it into money. */
 let expressVehicleS = 0;
+/** Switches the player can turn on (free play, and levels built around them). Off leaves a run exactly as it was before they existed. */
+let elasticDemand = false;
+let crashRisk = false;
+let pedWaits = false;
+/** Roads closed right now (a bridge out): see ScriptedEvent roadClosure. */
+const blockedEdges = new Set<string>();
 /** Share of new vehicles that are buses / bikes. Zero keeps the classic mix (and its exact random sequence). */
 let busShare = 0;
 let bikeShare = 0;
@@ -254,6 +260,8 @@ type QueuedEvent =
   | { atS: number; kind: "debris" }
   | { atS: number; kind: "fender" }
   | { atS: number; kind: "weatherOn"; weather: Exclude<Weather, "clear"> }
+  | { atS: number; kind: "closeOn"; edgeIds: string[] }
+  | { atS: number; kind: "closeOff"; edgeIds: string[] }
   | { atS: number; kind: "weatherOff" };
 let eventQueue: QueuedEvent[] = [];
 
@@ -411,9 +419,10 @@ function randNormalish(mean: number, spread: number): number {
   return mean + (u - 0.5) * 2 * spread;
 }
 
-function sampleExponentialInterarrival(vehiclesPerHour: number): number {
+function sampleExponentialInterarrival(vehiclesPerHour: number, entryId?: string): number {
   if (vehiclesPerHour <= 0) return simTime + 1e9;
-  const ratePerSecond = (vehiclesPerHour * demandScale * dayDemandMultiplier()) / 3600;
+  const elastic = elasticDemand && entryId ? (elasticMult.get(entryId) ?? 1) : 1;
+  const ratePerSecond = (vehiclesPerHour * demandScale * dayDemandMultiplier() * elastic) / 3600;
   const u = Math.max(rng(), 1e-9);
   return simTime + -Math.log(1 - u) / ratePerSecond;
 }
@@ -446,7 +455,7 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
       currentEntryIds.add(edge.id);
       if (!demandByEntry.has(edge.id)) {
         demandByEntry.set(edge.id, edge.zone.demandVehPerHour);
-        nextSpawnTimeByEntry.set(edge.id, sampleExponentialInterarrival(edge.zone.demandVehPerHour));
+        nextSpawnTimeByEntry.set(edge.id, sampleExponentialInterarrival(edge.zone.demandVehPerHour, edge.id));
       }
     }
   }
@@ -468,6 +477,7 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
     if (!currentDestIds.has(key)) contractSamples.delete(key);
   }
 
+  rebuildMeteredEdges();
   congestionTimer.clear();
   problemEdges.clear();
   lastSnapshotSimTime = simTime;
@@ -491,6 +501,11 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   }
 }
 
+/** The shortest route, steering clear of roads that are closed right now. */
+function routeBetween(from: string, to: string): string[] | null {
+  return network ? computeRoute(network, from, to, blockedEdges.size > 0 ? blockedEdges : undefined) : null;
+}
+
 function resetServiceStats() {
   tripDelayTotalS = 0;
   tripFreeFlowTotalS = 0;
@@ -498,6 +513,12 @@ function resetServiceStats() {
   queueNowFt = 0;
   queuePeakFt = 0;
   expressVehicleS = 0;
+  resetElasticDemand();
+  riskCrashes = 0;
+  pedArrivals = 0;
+  pedWaitTotalS = 0;
+  pedGaveUp = 0;
+  meterNext.clear();
 }
 
 /** Records a finished trip for the delay average: its time on the road against the time at the limit all the way. Cars and trucks only (a bus's stops are not delay). */
@@ -513,6 +534,70 @@ function recordTripDelay(v: VehicleState) {
   tripFreeFlowTotalS += freeS;
   tripDelayTotalS += Math.max(0, actualS - freeS);
   tripsTimed++;
+  if (elasticDemand && v.routeEdgeIds.length > 0) noteOriginTrip(v.routeEdgeIds[0], Math.max(0, actualS - freeS), freeS);
+}
+
+// ---------------------------------------------------------------------------
+// Demand that responds. Each entry's traffic is scaled by how well trips that started there have gone lately: a road
+// that works draws more drivers (up to 30% more), a jammed one loses them (down to 55%), and the drivers it loses are
+// partly riders for the bus lines. Updated every ten seconds from the delay of recently finished trips.
+// ---------------------------------------------------------------------------
+
+const elasticMult = new Map<string, number>();
+const originStats = new Map<string, { delay: number; free: number; n: number }>();
+let nextElasticUpdate = 10;
+/** Share of car demand that has moved to buses, so stops fill faster the worse the roads are. */
+let transitShift = 0;
+const ELASTIC_MAX = 1.3;
+const ELASTIC_MIN = 0.55;
+
+function resetElasticDemand() {
+  elasticMult.clear();
+  originStats.clear();
+  nextElasticUpdate = 10;
+  transitShift = 0;
+}
+
+function noteOriginTrip(origin: string, delayS: number, freeS: number) {
+  const st = originStats.get(origin) ?? { delay: 0, free: 0, n: 0 };
+  st.delay += delayS;
+  st.free += freeS;
+  st.n++;
+  originStats.set(origin, st);
+}
+
+function updateElasticDemand() {
+  if (!elasticDemand || simTime < nextElasticUpdate) return;
+  nextElasticUpdate = simTime + 10;
+  let lost = 0;
+  let n = 0;
+  for (const entryId of demandByEntry.keys()) {
+    const st = originStats.get(entryId);
+    let m = elasticMult.get(entryId) ?? 1;
+    if (st && st.n >= 3 && st.free > 0) {
+      const target = clamp(ELASTIC_MAX - 0.5 * (st.delay / st.free), ELASTIC_MIN, ELASTIC_MAX);
+      m += (target - m) * 0.2;
+      elasticMult.set(entryId, m);
+      st.delay *= 0.5;
+      st.free *= 0.5;
+      st.n *= 0.5;
+    }
+    lost += Math.max(0, 1 - m);
+    n++;
+  }
+  transitShift = n > 0 ? lost / n : 0;
+}
+
+/** Demand now against what the entries were set to, weighted by the entries' own demand. 1 when demand is not elastic. */
+function demandIndex(): number {
+  if (!elasticDemand) return 1;
+  let sum = 0;
+  let base = 0;
+  for (const [id, d] of demandByEntry) {
+    sum += d * (elasticMult.get(id) ?? 1);
+    base += d;
+  }
+  return base > 0 ? sum / base : 1;
 }
 
 const QUEUE_SPEED_FTPS = mphToFtps(3);
@@ -560,6 +645,7 @@ function resetRun() {
   drive = null;
   driveResult = null;
   scriptedWeather = null;
+  blockedEdges.clear();
   gridlockPenaltyTotal = 0;
   demandScale = 1;
   eventQueue = [];
@@ -585,6 +671,7 @@ function trySpawn(entryEdgeId: string) {
 
   const edge = network.edgesById.get(entryEdgeId);
   if (!edge || edge.zone?.type !== "entry") return;
+  if (blockedEdges.has(entryEdgeId)) return;
 
   const destinations = network.edges.filter((e) => e.zone?.type === "destination" && e.id !== entryEdgeId);
   if (destinations.length === 0) return;
@@ -596,7 +683,7 @@ function trySpawn(entryEdgeId: string) {
   let route: string[] | null = null;
   for (let k = 0; k < destinations.length; k++) {
     const candidate = destinations[(startIdx + k) % destinations.length];
-    const r = computeRoute(network, entryEdgeId, candidate.id);
+    const r = routeBetween(entryEdgeId, candidate.id);
     if (r && r.length > 0) {
       destination = candidate;
       route = r;
@@ -700,7 +787,7 @@ function updateSpawning() {
     let guard = 0;
     while (simTime >= nextTime && guard < 8) {
       trySpawn(entryId);
-      nextTime = sampleExponentialInterarrival(demand);
+      nextTime = sampleExponentialInterarrival(demand, entryId);
       guard++;
     }
     nextSpawnTimeByEntry.set(entryId, nextTime);
@@ -881,6 +968,13 @@ interface Crossing {
   /** People really want to cross here (set by the level); otherwise only the odd walker uses a placed crossing. */
   demand: boolean;
   nextAt: number;
+  /** With ped waits on: someone has come to cross and is waiting (since `arrivedAt`) for a gap or the button. */
+  waiting: boolean;
+  arrivedAt: number;
+  groupSize: number;
+  pendingDir: 1 | -1;
+  /** Most lanes of the roads here: wider roads take longer to stop. */
+  lanes: number;
   walkStart: number;
   walkUntil: number;
   /** A near miss was already counted for this walk. */
@@ -924,6 +1018,11 @@ function rebuildCrossings() {
         marked: false,
         demand: false,
         nextAt: old ? old.nextAt : simTime + randRange(3, PED_GAP_DEMAND_S),
+        waiting: old?.waiting ?? false,
+        arrivedAt: old?.arrivedAt ?? 0,
+        groupSize: old?.groupSize ?? 1,
+        pendingDir: old?.pendingDir ?? 1,
+        lanes: 1,
         walkStart: old?.walkStart ?? -1e9,
         walkUntil: old?.walkUntil ?? -1e9,
         missed: old?.missed ?? false,
@@ -939,6 +1038,7 @@ function rebuildCrossings() {
     c.marked = c.marked || edge.crosswalk;
     c.demand = c.demand || edge.jaywalkers;
     c.halfWidth = Math.max(c.halfWidth, edge.lateralShiftFt + (edge.lanes * edge.laneWidthFt) / 2 + 3);
+    c.lanes = Math.max(c.lanes, edge.lanes);
     crossingByEdge.set(edge.id, c);
   }
 }
@@ -974,10 +1074,55 @@ function checkNearMisses(c: Crossing) {
   }
 }
 
+let pedArrivals = 0;
+let pedWaitTotalS = 0;
+let pedGaveUp = 0;
+/** At a marked crossing the button changes the lights after this long on a busy road: a few seconds, more for each lane. */
+const PED_BUTTON_BASE_S = 4;
+const PED_BUTTON_PER_LANE_S = 1.5;
+/** Without a crossing, someone waits this long for a gap and then steps out. */
+const PED_PATIENCE_S = 14;
+
+/** People who arrive at a crossing wait for a gap in the traffic, or for the button, and the wait is scored; those without a crossing give up and step out. */
+function updateCrossingWaits(c: Crossing) {
+  if (!c.waiting) {
+    if (simTime < c.nextAt) return;
+    c.waiting = true;
+    c.arrivedAt = simTime;
+    c.groupSize = 1 + Math.floor(rng() * 3);
+    c.pendingDir = rng() < 0.5 ? 1 : -1;
+    pedArrivals += c.groupSize;
+  }
+  const waited = simTime - c.arrivedAt;
+  const traffic = trafficApproachingCrossing(c);
+  let go = !traffic;
+  if (!go) go = c.marked ? waited >= PED_BUTTON_BASE_S + PED_BUTTON_PER_LANE_S * c.lanes : waited >= PED_PATIENCE_S;
+  if (!go) return;
+  c.waiting = false;
+  pedWaitTotalS += waited * c.groupSize;
+  c.walkStart = simTime;
+  c.dir = c.pendingDir;
+  pedServedTotal += c.groupSize;
+  if (c.marked) {
+    c.walkUntil = simTime + PED_WALK_S;
+  } else {
+    c.walkUntil = simTime + PED_DART_S;
+    if (traffic) {
+      pedIncidentsTotal++;
+      pedGaveUp += c.groupSize;
+    }
+  }
+  c.nextAt = c.walkUntil + crossingGap(c);
+}
+
 function updateCrossings() {
   for (const c of crossings.values()) {
     if (simTime < c.walkUntil) {
       if (c.marked) checkNearMisses(c);
+      continue;
+    }
+    if (pedWaits) {
+      updateCrossingWaits(c);
       continue;
     }
     if (simTime < c.nextAt) continue;
@@ -1078,7 +1223,7 @@ function trySpawnAmbulance(): boolean {
     for (let j = 0; j < destinations.length && !route; j++) {
       const cand = destinations[(dStart + j) % destinations.length];
       if (cand.id === edge.id) continue;
-      const r = computeRoute(network, edge.id, cand.id);
+      const r = routeBetween(edge.id, cand.id);
       if (r && r.length > 0) {
         route = r;
         destId = cand.id;
@@ -1216,7 +1361,7 @@ function rebuildLinesOnEdge() {
 function stopCrowd(edgeId: string): number {
   const st = stopState.get(edgeId);
   const since = simTime - (st?.lastServedAt ?? 0);
-  const demand = (linesOnEdge.get(edgeId) ?? 0) >= 2 ? TRANSFER_STOP_DEMAND : 1;
+  const demand = ((linesOnEdge.get(edgeId) ?? 0) >= 2 ? TRANSFER_STOP_DEMAND : 1) * (1 + transitShift * 1.5);
   return Math.min(STOP_CROWD_MAX, STOP_ARRIVAL_PER_S * demand * Math.max(0, since));
 }
 
@@ -1484,6 +1629,58 @@ function causeCrash(elevatedOnly = false): boolean {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Crash risk. With it on, a driver can make a mistake: the chance per second grows with speeding, rain, fog, darkness on
+// an unlit road and tailgating, from a very small base, so a calm daytime city sees almost none and a fast, wet, dark
+// one sees several. A mistake is a rear-end crash with whoever is ahead (or a spin alone), and it blocks the lane until
+// police arrive like any other crash.
+// ---------------------------------------------------------------------------
+
+/** Chance per vehicle-second of a mistake in perfectly calm conditions. */
+const RISK_BASE_PER_S = 1 / 25000;
+const RISK_EVERY_STEPS = 5;
+let riskCrashes = 0;
+
+function updateCrashRisk() {
+  if (!crashRisk || !network || stepCounter % RISK_EVERY_STEPS !== 0) return;
+  const dt = SIM_DT * RISK_EVERY_STEPS;
+  const w = currentWeather();
+  for (const v of vehicles.values()) {
+    if (v.frozenUntil > simTime || v.speed < 20 || isEmergencyKind(v.kind) || v.kind === "debris" || v.kind === "bike" || isDriven(v)) continue;
+    const edge = network.edgesById.get(v.edgeId);
+    if (!edge || edge.isRoundaboutRing) continue;
+    const limit = mphToFtps(effectiveSpeedLimitMph(edge));
+    // Faster means harder to recover from a mistake: the chance grows with the square of the speed (1 at 35 mph).
+    let f = clamp((v.speed / mphToFtps(35)) ** 2, 0.3, 4);
+    const over = v.speed / limit;
+    if (over > 1.05) f *= 1 + (over - 1.05) * 12;
+    if (w === "rain") f *= 3;
+    else if (w === "fog") f *= 2.6;
+    if (darkness > 0) f *= 1 + darkness * (isLitRoad(edge) ? 0.6 : 2);
+    // tailgating: the time gap to the car ahead in the same lane
+    let leader: VehicleState | null = null;
+    const lane = laneOccupancy.get(edge.id)?.[clamp(v.laneIndex, 0, edge.lanes - 1)];
+    if (lane) {
+      const i = lane.indexOf(v.id);
+      if (i >= 0 && i < lane.length - 1) leader = vehicles.get(lane[i + 1]) ?? null;
+    }
+    if (leader) {
+      const headway = (leader.distanceAlongEdge - leader.length - v.distanceAlongEdge) / Math.max(v.speed, 1);
+      if (headway < 0.9) f *= 1 + (0.9 - headway) * 8;
+    }
+    if (rng() >= RISK_BASE_PER_S * f * dt) continue;
+    const hit: VehicleState[] = [v];
+    if (leader && leader.frozenUntil <= simTime && leader.distanceAlongEdge - leader.length - v.distanceAlongEdge < 60) hit.push(leader);
+    for (const h of hit) {
+      h.frozenUntil = CRASH_FOREVER;
+      h.speed = 0;
+    }
+    newIncident("crash", v.edgeId, v.distanceAlongEdge, hit.map((h) => h.id));
+    crashesHappened++;
+    riskCrashes++;
+  }
+}
+
 /** A semi dies in the middle lane of a freeway (any road, if there is no freeway with a truck on it). */
 function causeStall(): boolean {
   if (!network) return false;
@@ -1550,7 +1747,7 @@ function trySpawnResponder(inc: Incident, kind: "police" | "wrecker"): number | 
     const lengthOf = (route: string[]) => route.reduce((n, id) => n + (network!.edgesById.get(id)?.length ?? 0), 0);
     order = entries
       .map((entry) => {
-        const r = entry.id === inc.edgeId ? [entry.id] : computeRoute(network!, entry.id, inc.edgeId);
+        const r = entry.id === inc.edgeId ? [entry.id] : routeBetween(entry.id, inc.edgeId);
         return { entry, d: r ? lengthOf(r) : Infinity };
       })
       .filter((x) => x.d < Infinity)
@@ -1563,13 +1760,13 @@ function trySpawnResponder(inc: Incident, kind: "police" | "wrecker"): number | 
   for (const entry of order) {
     const occupancy = laneOccupancy.get(entry.id);
     if (!occupancy) continue;
-    const toScene = entry.id === inc.edgeId ? [entry.id] : computeRoute(network, entry.id, inc.edgeId);
+    const toScene = entry.id === inc.edgeId ? [entry.id] : routeBetween(entry.id, inc.edgeId);
     if (!toScene) continue;
     let onward: string[] | null = null;
     let destId = "";
     for (const d of destinations) {
       if (d.id === inc.edgeId) continue;
-      const r = computeRoute(network, inc.edgeId, d.id);
+      const r = routeBetween(inc.edgeId, d.id);
       if (r && r.length > 0) {
         onward = r;
         destId = d.id;
@@ -1722,6 +1919,56 @@ function updateShoulderMode(v: VehicleState, edge: Edge3D, dt: number) {
 const SHOULDER_AFTER_S = 3;
 
 // ---------------------------------------------------------------------------
+// Ramp meters. A metered ramp lets one car go per release: the first to reach the stop line passes, and the next waits
+// until the period has run out. The period is fixed, or (auto) set from how freely the freeway ahead is flowing: short
+// when it is fast, long when it is packed, which is what keeps a ramp from feeding a jam.
+// ---------------------------------------------------------------------------
+
+/** A car this close to the stop line is already through. */
+const METER_THROUGH_FT = 1.5;
+const meterNext = new Map<string, number>();
+let meteredEdges: Edge3D[] = [];
+
+function rebuildMeteredEdges() {
+  meteredEdges = network ? network.edges.filter((e) => e.meterS > 0 || e.meterAuto) : [];
+}
+
+/** Seconds between cars for this ramp's meter right now. */
+function meterPeriodS(edge: Edge3D): number {
+  if (!edge.meterAuto) return Math.max(1.5, edge.meterS);
+  let slowest = 1;
+  for (const id of edge.nextEdgeIds) {
+    const next = network?.edgesById.get(id);
+    if (!next || !next.isFreeway) continue;
+    let n = 0;
+    let sum = 0;
+    for (const lane of laneOccupancy.get(id) ?? []) {
+      for (const vid of lane) {
+        const o = vehicles.get(vid);
+        if (o) {
+          sum += o.speed;
+          n++;
+        }
+      }
+    }
+    if (n >= 3) slowest = Math.min(slowest, sum / n / Math.max(1, mphToFtps(effectiveSpeedLimitMph(next))));
+  }
+  if (slowest > 0.8) return 2.5;
+  if (slowest > 0.5) return 2.5 + ((0.8 - slowest) / 0.3) * 5.5;
+  return 8;
+}
+
+/** True while the meter on this ramp is red (a car went through less than a period ago). */
+function meterRed(edge: Edge3D): boolean {
+  return (edge.meterS > 0 || edge.meterAuto) && simTime < (meterNext.get(edge.id) ?? 0);
+}
+
+/** What each meter shows: [edge, 0 red | 1 green]. */
+function meterStates(): [string, number][] {
+  return meteredEdges.map((e) => [e.id, meterRed(e) ? 0 : 1] as [string, number]);
+}
+
+// ---------------------------------------------------------------------------
 // Traffic rage and flow combos: how the drivers feel about the traffic. Rage shows who has been stopped for a while
 // (and, when `rageWeaves` is on, lets the angriest of them weave between lanes through gaps they would not normally
 // take); combos reward a platoon that sails through signals in a row.
@@ -1784,6 +2031,10 @@ function junctionStopDistance(v: VehicleState, edge: Edge3D): number | null {
   if (ringEntryBlocked(v, edge)) {
     const toLine = edge.length - v.distanceAlongEdge;
     if (toLine <= JUNCTION_APPROACH_FT) return Math.max(toLine, 0.1);
+  }
+  if ((edge.meterS > 0 || edge.meterAuto) && meterRed(edge)) {
+    const toLine = edge.length - v.distanceAlongEdge;
+    if (toLine <= JUNCTION_APPROACH_FT && toLine > METER_THROUGH_FT) return Math.max(toLine - 1, 0.1);
   }
   const nodeId = edge.toNodeId;
   const incomingCount = incomingEdgeCountByNode.get(nodeId) ?? 0;
@@ -2519,7 +2770,7 @@ function breakDownOneCar(durationS: number) {
 
 /** Re-times every entry's next arrival under the current demand scale, so a surge starts (and ends) immediately. */
 function resampleSpawns() {
-  for (const [entryId, demand] of demandByEntry) nextSpawnTimeByEntry.set(entryId, sampleExponentialInterarrival(demand));
+  for (const [entryId, demand] of demandByEntry) nextSpawnTimeByEntry.set(entryId, sampleExponentialInterarrival(demand, entryId));
 }
 
 function runDueEvents() {
@@ -2536,6 +2787,8 @@ function runDueEvents() {
     else if (e.kind === "fender") fenderPending++;
     else if (e.kind === "weatherOn") scriptedWeather = e.weather;
     else if (e.kind === "weatherOff") scriptedWeather = null;
+    else if (e.kind === "closeOn") for (const id of e.edgeIds) blockedEdges.add(id);
+    else if (e.kind === "closeOff") for (const id of e.edgeIds) blockedEdges.delete(id);
     else if (e.kind === "surge") {
       demandScale = e.multiplier;
       resampleSpawns();
@@ -2557,6 +2810,8 @@ function step(dt: number) {
   if (crossings.size > 0) updateCrossings();
   // Crashes first: towing a wreck removes vehicles, which must happen before this tick's lane lists are built.
   updateCrashes();
+  updateCrashRisk();
+  updateElasticDemand();
   updateFlowCombos();
   rebuildLaneOccupancy();
   updateAmbulanceDispatch();
@@ -2622,8 +2877,8 @@ function step(dt: number) {
       v.routeIndex += 1;
       let nextEdgeId = v.routeEdgeIds[v.routeIndex];
       // A turn the player banned after this driver set out: find another way from here, if there is one.
-      if (nextEdgeId && currentEdge.bannedTurns.length > 0 && !currentEdge.nextEdgeIds.includes(nextEdgeId)) {
-        const detour = computeRoute(network, currentEdge.id, v.destinationEdgeId);
+      if (nextEdgeId && ((currentEdge.bannedTurns.length > 0 && !currentEdge.nextEdgeIds.includes(nextEdgeId)) || blockedEdges.has(nextEdgeId))) {
+        const detour = routeBetween(currentEdge.id, v.destinationEdgeId);
         if (detour && detour.length > 1) {
           v.routeEdgeIds = detour;
           v.routeIndex = 1;
@@ -2644,6 +2899,7 @@ function step(dt: number) {
         leftTurnWaitTotalS += v.leftWaitS;
       }
       v.leftWaitS = 0;
+      if (currentEdge.meterS > 0 || currentEdge.meterAuto) meterNext.set(currentEdge.id, simTime + meterPeriodS(currentEdge));
       if (network.nodesById.get(currentEdge.toNodeId)?.control?.type === "signal") noteSignalPass(v, currentEdge);
       v.edgeId = nextEdgeId;
       v.laneIndex = mapLaneAcross(currentEdge, nextEdge, v.laneIndex);
@@ -2940,6 +3196,7 @@ function postSnapshot(forceStats: boolean) {
       gridlockMarkers,
       incidentMarkers,
       signalHeads: signalHeadStates(),
+      meters: meterStates(),
     };
   }
   const matricesBuffer = buf.matrices.buffer as ArrayBuffer;
@@ -2966,6 +3223,13 @@ function postSnapshot(forceStats: boolean) {
     transit: transitStats(),
     drive: driveView(),
     driveResult,
+    demandIndex: demandIndex(),
+    elasticOn: elasticDemand,
+    crashRiskOn: crashRisk,
+    pedWaitsOn: pedWaits,
+    riskCrashes,
+    pedWait: { arrivals: pedArrivals, waitTotalS: pedWaitTotalS, gaveUp: pedGaveUp },
+    closedEdges: Array.from(blockedEdges),
     runId,
     actions: takeNewActions(),
     pedServedTotal,
@@ -3044,6 +3308,7 @@ function handleMessage(msg: WorkerInMessage) {
           const edge = network.edgesById.get(p.id);
           if (edge) patchEdge(edge, network.edgesById, p);
         }
+        rebuildMeteredEdges();
         rebuildCrossings();
       }
       break;
@@ -3111,6 +3376,17 @@ function handleMessage(msg: WorkerInMessage) {
         }
       }
       break;
+    case "setElasticDemand":
+      elasticDemand = msg.enabled;
+      if (!msg.enabled) resetElasticDemand();
+      resampleSpawns();
+      break;
+    case "setCrashRisk":
+      crashRisk = msg.enabled;
+      break;
+    case "setPedWaits":
+      pedWaits = msg.enabled;
+      break;
     case "setDarkness":
       darkness = Math.max(0, Math.min(1, msg.level));
       break;
@@ -3132,6 +3408,9 @@ function handleMessage(msg: WorkerInMessage) {
         else if (e.kind === "weather") {
           eventQueue.push({ atS: e.atS, kind: "weatherOn", weather: e.weather });
           eventQueue.push({ atS: e.atS + e.durationS, kind: "weatherOff" });
+        } else if (e.kind === "roadClosure") {
+          eventQueue.push({ atS: e.atS, kind: "closeOn", edgeIds: e.edgeIds });
+          eventQueue.push({ atS: e.atS + e.durationS, kind: "closeOff", edgeIds: e.edgeIds });
         } else eventQueue.push(e.kind === "breakdown" ? { atS: e.atS, kind: "breakdown", durationS: e.durationS } : { atS: e.atS, kind: "surge", multiplier: e.multiplier });
         if (e.kind === "surge") eventQueue.push({ atS: e.atS + e.durationS, kind: "surgeEnd" });
       }
@@ -3144,7 +3423,7 @@ function handleMessage(msg: WorkerInMessage) {
     case "setDemand":
       demandByEntry.set(msg.edgeId, msg.vehiclesPerHour);
       if (!nextSpawnTimeByEntry.has(msg.edgeId)) {
-        nextSpawnTimeByEntry.set(msg.edgeId, sampleExponentialInterarrival(msg.vehiclesPerHour));
+        nextSpawnTimeByEntry.set(msg.edgeId, sampleExponentialInterarrival(msg.vehiclesPerHour, msg.edgeId));
       }
       break;
     case "setColorMode":
@@ -3186,6 +3465,9 @@ const LOGGED_TYPES = new Set<WorkerInMessage["type"]>([
   "scheduleEvents",
   "setDayCycle",
   "setMaxVehicles",
+  "setElasticDemand",
+  "setCrashRisk",
+  "setPedWaits",
   "drive",
   "driveInput",
 ]);
@@ -3212,6 +3494,9 @@ function startActionLog() {
   logAction({ type: "setDarkness", level: darkness });
   logAction({ type: "setTrafficMix", bus: busShare, bike: bikeShare });
   logAction({ type: "setDayCycle", enabled: dayCycleOn, startHour: dayStartHour, dayLengthS });
+  logAction({ type: "setElasticDemand", enabled: elasticDemand });
+  logAction({ type: "setCrashRisk", enabled: crashRisk });
+  logAction({ type: "setPedWaits", enabled: pedWaits });
 }
 
 /** Actions logged since the last snapshot. */

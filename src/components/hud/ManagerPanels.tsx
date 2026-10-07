@@ -581,12 +581,13 @@ const LANE_USE_CHOICES: { id: ReservedLane | null; emoji: string; label: string;
 
 /** Bus and bike lanes, one-way streets and pedestrian crossings: the road-level traffic tools. */
 export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; setWholeRoad: (v: boolean) => void }) {
-  const { spec } = useSelectedEdge();
+  const { spec, assembled } = useSelectedEdge();
   const edges = useEditorStore((s) => s.edges);
   const setSelection = useEditorStore((s) => s.setSelection);
   const setReservedLane = useEditorStore((s) => s.setReservedLane);
   const setBannedTurn = useEditorStore((s) => s.setBannedTurn);
   const reverseLane = useEditorStore((s) => s.reverseLane);
+  const setRampMeter = useEditorStore((s) => s.setRampMeter);
   const setRoadOneWay = useEditorStore((s) => s.setRoadOneWay);
   const setCrosswalk = useEditorStore((s) => s.setCrosswalk);
   const setBusStop = useEditorStore((s) => s.setBusStop);
@@ -677,6 +678,37 @@ export function StreetCard({ wholeRoad, setWholeRoad }: { wholeRoad: boolean; se
         </div>
         <p className="text-[11px] leading-snug text-zinc-500">A banned turn is gone from the lane arrows and drivers take another way round. Banning left turns at a busy light keeps its green for through traffic.</p>
       </div>
+
+      {assembled?.padEnd && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Ramp meter</span>
+          <div className="grid grid-cols-5 gap-1">
+            {[
+              { label: "Off", seconds: 0, auto: false },
+              { label: "3 s", seconds: 3, auto: false },
+              { label: "5 s", seconds: 5, auto: false },
+              { label: "8 s", seconds: 8, auto: false },
+              { label: "Auto", seconds: 0, auto: true },
+            ].map((c) => {
+              const active = c.auto ? !!spec.meterAuto : !spec.meterAuto && (spec.meterS ?? 0) === c.seconds;
+              return (
+                <button
+                  key={c.label}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setRampMeter(spec.id, { seconds: c.seconds, auto: c.auto })}
+                  className={`rounded-xl py-2 text-[11px] font-bold transition active:scale-95 ${active ? "bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-sm" : "bg-black/5 text-zinc-600 hover:bg-black/10"}`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] leading-snug text-zinc-500">
+            A meter lets one car onto the freeway per release, so the ramp does not feed a jam. Auto paces itself from how freely the freeway ahead is flowing. It trades ramp queues for a freer mainline: not always a win.
+          </p>
+        </div>
+      )}
 
       {twoWay && (
         <div className="flex flex-col gap-1.5">

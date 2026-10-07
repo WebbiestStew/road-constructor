@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { NetworkSnapshot, TransitLine } from "@/sim/types";
+import type { LandUse } from "@/sim/landUse";
 
 const STORAGE_KEY = "road-constructor:autosave:v1";
 
@@ -7,6 +8,8 @@ export interface PersistedPayload {
   version: 1;
   /** Bus lines the player drew. */
   transit?: TransitLine[];
+  /** Homes, jobs and shops the player placed. */
+  landUse?: LandUse[];
   network: NetworkSnapshot;
   budget: number;
   nextNodeSeq: number;
@@ -67,6 +70,9 @@ const edgeSchema = z.object({
   laneMoves: z.array(z.array(z.enum(["left", "straight", "right"]))).optional(),
   reservedLane: z.enum(["bus", "bike", "hov", "express"]).optional(),
   bannedTurns: z.array(z.enum(["left", "right"])).max(2).optional(),
+  meterS: z.number().min(0).max(30).optional(),
+  meterAuto: z.boolean().optional(),
+  landUseId: z.string().max(40).optional(),
   crosswalk: z.boolean().optional(),
   jaywalkers: z.boolean().optional(),
   busStop: z.boolean().optional(),
@@ -93,8 +99,16 @@ const transitLineSchema = z.object({
   hold: z.boolean().optional(),
 });
 
+const landUseSchema = z.object({
+  id: z.string().max(40),
+  kind: z.enum(["home", "work", "shop"]),
+  position: z.tuple([z.number(), z.number()]),
+  size: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+});
+
 const persistedPayloadSchema = z.object({
   version: z.literal(1),
+  landUse: z.array(landUseSchema).max(80).optional(),
   transit: z.array(transitLineSchema).optional(),
   network: networkSnapshotSchema,
   budget: z.number(),

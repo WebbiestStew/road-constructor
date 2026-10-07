@@ -88,6 +88,8 @@ function RoadEditor() {
       reservedLane: null,
       bannedTurns: [],
       allNextEdgeIds: [],
+      meterS: 0,
+      meterAuto: false,
       crosswalk: false,
       jaywalkers: false,
       busStop: false,
@@ -158,6 +160,10 @@ function RoadEditor() {
         store.setTool("turnaround");
         return;
       }
+      if (e.key.toLowerCase() === "u") {
+        store.setTool("landuse");
+        return;
+      }
       const idx = Number(e.key) - 1;
       if (Number.isInteger(idx) && idx >= 0 && idx < ROAD_CLASS_LIST.length) {
         store.setRoadClass(ROAD_CLASS_LIST[idx].id);
@@ -206,6 +212,8 @@ function RoadEditor() {
       }
     } else if (store.tool === "inspect") {
       store.setSelection(null);
+    } else if (store.tool === "landuse") {
+      store.addLandUse(event.point.x, event.point.z);
     }
   };
 

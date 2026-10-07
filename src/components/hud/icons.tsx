@@ -56,6 +56,17 @@ export function IconZone(props: IconProps) {
   );
 }
 
+export function IconLandUse(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 20h18" />
+      <path d="M5 20v-8l5-4 5 4v8" />
+      <path d="M15 20V9h5v11" />
+      <path d="M8.5 20v-4h3v4" />
+    </svg>
+  );
+}
+
 export function IconPlay(props: IconProps) {
   return (
     <svg {...base} fill="currentColor" stroke="none" viewBox="0 0 24 24" {...props}>

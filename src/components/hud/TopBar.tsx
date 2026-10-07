@@ -55,6 +55,10 @@ function EventsMenu({ sim }: { sim: UseTrafficSimulationReturn }) {
   const setWeather = useEditorStore((s) => s.setWeather);
   const dayCycle = useEditorStore((s) => s.dayCycle);
   const setDayCycle = useEditorStore((s) => s.setDayCycle);
+  const elastic = useEditorStore((s) => s.elasticDemand);
+  const risk = useEditorStore((s) => s.crashRisk);
+  const waits = useEditorStore((s) => s.pedWaits);
+  const setRule = useEditorStore((s) => s.setFreePlayRule);
   const active = chaos || dayCycle || weather !== "clear";
   const item = "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-700 transition hover:bg-black/5 active:scale-[0.99]";
 
@@ -93,6 +97,17 @@ function EventsMenu({ sim }: { sim: UseTrafficSimulationReturn }) {
           </button>
           <button type="button" className={`${item} ${dayCycle ? "bg-amber-100" : ""}`} aria-pressed={dayCycle} onClick={() => setDayCycle(!dayCycle)}>
             🕒 <span>24-hour day {dayCycle ? "(on)" : ""}</span>
+          </button>
+          <div className="mx-2 my-1 h-px bg-black/10" />
+          <span className="px-3 pt-1 text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Rules of the city</span>
+          <button type="button" className={`${item} ${elastic ? "bg-emerald-50" : ""}`} aria-pressed={elastic} title="A road that flows draws more drivers; a jammed one loses them (some take the bus)" onClick={() => setRule("elasticDemand", !elastic)}>
+            📈 <span>Demand follows the roads {elastic ? "(on)" : "(off)"}</span>
+          </button>
+          <button type="button" className={`${item} ${risk ? "bg-emerald-50" : ""}`} aria-pressed={risk} title="Speeding, rain, fog, darkness and tailgating cause crashes" onClick={() => setRule("crashRisk", !risk)}>
+            💥 <span>Crashes can happen {risk ? "(on)" : "(off)"}</span>
+          </button>
+          <button type="button" className={`${item} ${waits ? "bg-emerald-50" : ""}`} aria-pressed={waits} title="People wait for a gap or the button, and the wait is scored" onClick={() => setRule("pedWaits", !waits)}>
+            🚶 <span>People wait to cross {waits ? "(on)" : "(off)"}</span>
           </button>
           <div className="flex items-center gap-1 px-2 py-1.5">
             <span className="mr-1 text-[11px] font-extrabold uppercase text-zinc-400">Weather</span>

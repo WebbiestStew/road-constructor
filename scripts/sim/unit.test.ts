@@ -13,7 +13,7 @@ import type { EdgeSpec, LoggedAction, NetworkSnapshot } from "../../src/sim/type
 const noCrashes = { happened: 0, cleared: 0, open: 0, totalClearS: 0, lastClearS: 0 };
 const quiet = { services: 0, headwayMeanS: 0, headwayCv: 0, boarded: 0, transfers: 0, heldS: 0 };
 const run = (over: Partial<Parameters<typeof buildServiceReport>[0]> = {}) =>
-  buildServiceReport({ tripDelayTotalS: 3000, tripFreeFlowTotalS: 6000, tripsTimed: 100, queuePeakFt: 200, pedServedTotal: 0, pedIncidentsTotal: 0, crashes: noCrashes, gridlockPenaltyTotal: 0, combos: 0, transit: quiet, ...over }, { delayShare: 0.6, queueFt: 300 });
+  buildServiceReport({ tripDelayTotalS: 3000, tripFreeFlowTotalS: 6000, tripsTimed: 100, queuePeakFt: 200, pedServedTotal: 0, pedIncidentsTotal: 0, crashes: noCrashes, gridlockPenaltyTotal: 0, combos: 0, transit: quiet, crashRiskOn: false, riskCrashes: 0, pedWaitsOn: false, pedWait: { arrivals: 0, waitTotalS: 0, gaveUp: 0 }, ...over }, { delayShare: 0.6, queueFt: 300 });
 
 test("career: a win pays for new stars and new medals, and a replay pays a trickle", () => {
   const first = payoutFor({ stars: 3, previousStars: 0, earned: ["delay", "gridlock"], previousMedals: [] });
@@ -128,4 +128,43 @@ test("turn bans: a banned turn leaves the graph, the lane arrows and the exits",
     assert.ok(e.nextEdgeIds.length > 0 || base.edgesById.get(e.id)!.nextEdgeIds.length === 0, `${e.id} lost every way out`);
     assert.ok(e.laneMoves.every((moves) => !moves.includes("left")), `${e.id} still shows a left arrow`);
   }
+});
+
+test("service report: Vision Zero and Walkable only appear when their rules are on, and need a clean record", () => {
+  const ids = (r: ReturnType<typeof run>) => r.medals.map((m) => m.id);
+  assert.ok(!ids(run()).includes("safe") && !ids(run()).includes("walkable"));
+  assert.ok(run({ crashRiskOn: true }).medals.find((m) => m.id === "safe")?.earned);
+  assert.ok(!run({ crashRiskOn: true, riskCrashes: 1, crashes: { ...noCrashes, happened: 1, cleared: 1 } }).medals.find((m) => m.id === "safe")?.earned);
+  const waits = (avg: number, gaveUp = 0) => run({ pedWaitsOn: true, pedWait: { arrivals: 20, waitTotalS: avg * 20, gaveUp } }).medals.find((m) => m.id === "walkable");
+  assert.ok(waits(5)?.earned);
+  assert.ok(!waits(12)?.earned);
+  assert.ok(!waits(5, 2)?.earned);
+  assert.ok(!ids(run({ pedWaitsOn: true, pedWait: { arrivals: 2, waitTotalS: 4, gaveUp: 0 } })).includes("walkable"), "too few people to judge");
+});
+
+test("land use: homes become entries, jobs and shops destinations, and the player's own zones are left alone", async () => {
+  const { applyLandUse } = await import("../../src/sim/landUse");
+  const edge = (id: string, from: string, to: string, extra: Partial<EdgeSpec> = {}): EdgeSpec => ({ id, fromNodeId: from, toNodeId: to, interiorPoints: [], roadClassId: "street", elevationLevelId: "ground", lanes: 2, laneWidthFt: 12, speedLimitMph: 30, ...extra });
+  const nodes = [
+    { id: "a", position: [0, 0, 0] as [number, number, number] },
+    { id: "b", position: [600, 0, 0] as [number, number, number] },
+    { id: "c", position: [600, 0, 600] as [number, number, number] },
+    { id: "d", position: [0, 0, 600] as [number, number, number] },
+  ];
+  const edges = [edge("ab", "a", "b"), edge("bc", "b", "c"), edge("cd", "c", "d", { zone: { type: "entry", demandVehPerHour: 500 } })];
+  const zones = [
+    { id: "h1", kind: "home" as const, position: [300, 60] as [number, number], size: 3 as const },
+    { id: "h2", kind: "home" as const, position: [320, -40] as [number, number], size: 1 as const },
+    { id: "s1", kind: "shop" as const, position: [650, 300] as [number, number], size: 2 as const },
+    { id: "far", kind: "work" as const, position: [5000, 5000] as [number, number], size: 2 as const },
+  ];
+  const out = applyLandUse(nodes, edges, zones);
+  const ab = out.find((e) => e.id === "ab")!;
+  assert.deepEqual(ab.zone, { type: "entry", demandVehPerHour: 270 + 90 }, "two homes on one road add up");
+  assert.equal(out.find((e) => e.id === "bc")!.zone?.type, "destination", "the shop's road is a destination");
+  assert.deepEqual(out.find((e) => e.id === "cd")!.zone, { type: "entry", demandVehPerHour: 500 }, "a zone the player placed stays");
+  assert.ok(!out.find((e) => e.id === "cd")!.landUseId);
+  const cleared = applyLandUse(nodes, out, []);
+  assert.equal(cleared.find((e) => e.id === "ab")!.zone, undefined, "removing the zones takes their markers away");
+  assert.deepEqual(cleared.find((e) => e.id === "cd")!.zone, { type: "entry", demandVehPerHour: 500 });
 });

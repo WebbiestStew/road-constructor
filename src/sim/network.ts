@@ -709,6 +709,8 @@ export function assembleNetwork(snapshot: NetworkSnapshot): RoadNetwork {
       reservedLane: spec.lanes >= 2 ? (spec.reservedLane ?? null) : null,
       bannedTurns: spec.bannedTurns ?? [],
       allNextEdgeIds: [],
+      meterS: spec.meterS ?? 0,
+      meterAuto: spec.meterAuto ?? false,
       crosswalk: spec.crosswalk ?? false,
       jaywalkers: spec.jaywalkers ?? false,
       busStop: spec.busStop ?? false,
@@ -922,6 +924,8 @@ export function patchEdge(
   edge.speedLimitMph = patch.speedLimitMph;
   edge.manualLaneMoves = patch.laneMoves;
   if (patch.reservedLane !== undefined) edge.reservedLane = edge.lanes >= 2 ? patch.reservedLane : null;
+  if (patch.meterS !== undefined) edge.meterS = patch.meterS;
+  if (patch.meterAuto !== undefined) edge.meterAuto = patch.meterAuto;
   if (patch.bannedTurns !== undefined) {
     edge.bannedTurns = patch.bannedTurns;
     applyTurnBans(edge, edgesById);
@@ -943,7 +947,9 @@ export function patchEdge(
 export function computeRoute(
   network: RoadNetwork,
   fromEdgeId: string,
-  toEdgeId: string
+  toEdgeId: string,
+  /** Roads nobody may be routed onto (a closure), other than the destination itself. */
+  blocked?: Set<string>
 ): string[] | null {
   if (fromEdgeId === toEdgeId) return [fromEdgeId];
 
@@ -1026,6 +1032,7 @@ export function computeRoute(
 
     for (const nextId of currentEdge.nextEdgeIds) {
       if (visited.has(nextId)) continue;
+      if (blocked && blocked.has(nextId) && nextId !== toEdgeId) continue;
       const nextEdge = network.edgesById.get(nextId);
       if (!nextEdge) continue;
       const candidate = currentDist + travelTime(nextEdge);

@@ -11,6 +11,7 @@ import { LOS_COLOR, LOS_DESCRIPTIONS, type EdgeTrafficStats, type LOSGrade } fro
 import { computeGradePercent, MAX_GRADE_PERCENT } from "@/sim/grade";
 import { assembleNetworkCached, computeRoute } from "@/sim/network";
 import { useCompact } from "@/lib/compact";
+import LandUseCard from "./LandUseCard";
 import { useEditorStore } from "@/state/editorStore";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { GantryCard, JunctionCard, LaneManagerCard, SpeedLimitCard, StreetCard, ToolHintCard, TransitCard } from "./ManagerPanels";
@@ -1000,6 +1001,8 @@ export default function InfoPanel({
           {mode === "simulate" && !editingCard && <MiniStats sim={sim} />}
           <ManagerToolCard sim={sim} />
         </>
+      ) : mode === "build" && tool === "landuse" ? (
+        <LandUseCard />
       ) : mode === "build" ? (
         <BuildInfo />
       ) : (
