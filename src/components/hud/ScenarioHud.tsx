@@ -11,6 +11,10 @@ import { playFailTone, playVictoryFanfare } from "@/lib/sound";
 import { IconClock, IconFlag, IconStar } from "./icons";
 import PlaceSearch from "./PlaceSearch";
 import DailyBoard from "./DailyBoard";
+import ServiceReportCard from "./ServiceReportCard";
+import CareerCard from "./CareerCard";
+import { useCareer } from "@/lib/career";
+import { MEDAL_META } from "@/lib/serviceReport";
 import { makeShareCard, shareOrDownload } from "@/lib/shareCard";
 import { startFlyover } from "@/lib/cinematic";
 import { challengerName, encodeChallenge, setActiveChallenge, useActiveChallenge } from "@/lib/challenge";
@@ -26,6 +30,7 @@ function formatMMSS(seconds: number): string {
 
 function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) => void }) {
   const stars = useProgress()[s.id] ?? 0;
+  const medals = useCareer().medals[s.id] ?? [];
   return (
     <button
       type="button"
@@ -41,6 +46,13 @@ function ScenarioCard({ s, onStart }: { s: ScenarioDef; onStart: (id: string) =>
           {[1, 2, 3].map((i) => (i <= stars ? "★" : "☆")).join("")}
         </span>
       </span>
+      {medals.length > 0 && (
+        <span className="flex gap-1 text-xs" title={medals.map((m) => MEDAL_META[m]?.label ?? m).join(", ")}>
+          {medals.map((m) => (
+            <span key={m}>{MEDAL_META[m]?.icon ?? "🏅"}</span>
+          ))}
+        </span>
+      )}
       <span className="text-xs font-semibold text-violet-600">{s.tagline}</span>
       <span className="text-[11px] leading-snug text-zinc-500">{s.briefing}</span>
       <span className="mt-1 flex gap-3 text-[10.5px] font-bold uppercase tracking-wide text-zinc-400">
@@ -117,6 +129,7 @@ function ScenarioPicker({
           </button>
         </div>
 
+        <CareerCard />
         <DailyCard onStart={onStart} />
         <SandboxCard onSandbox={onSandbox} />
         <PlaceSearch onPlace={onPlace} />
@@ -193,7 +206,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
 
   return (
     <div className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-      <div className="hud-panel flex w-full max-w-sm flex-col items-center gap-3 rounded-2xl p-6 text-center">
+      <div className="hud-panel flex max-h-[94vh] w-full max-w-sm flex-col items-center gap-3 overflow-y-auto rounded-2xl p-6 text-center">
         <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{scenario.name}</span>
         <div
           className={`hover-wiggle flex h-20 w-20 items-center justify-center rounded-full text-3xl font-black text-white shadow-lg ${
@@ -220,6 +233,8 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
             <StatRow label="Budget left" value={`$${Math.max(0, results.budgetRemaining).toLocaleString()}`} />
           )}
         </div>
+
+        {results.report && <ServiceReportCard report={results.report} payout={results.payout} />}
 
         {challenge && challenge.scenarioId === scenario.id && results.score !== null && (
           <div

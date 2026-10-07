@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   finalizeScenario,
+  CHALLENGE_PREFIX,
   DAILY_PREFIX,
   getScenarioById,
   SCENARIOS,
@@ -13,7 +14,9 @@ import {
 } from "@/sim/scenarios";
 import { assembleNetworkCached } from "@/sim/network";
 import { useEditorStore } from "@/state/editorStore";
-import { recordStars } from "@/lib/progress";
+import { bestStarsFor, recordStars } from "@/lib/progress";
+import { recordRun } from "@/lib/career";
+import { buildServiceReport } from "@/lib/serviceReport";
 import { dateKey, recordDaily } from "@/lib/daily";
 import { pushToast } from "@/lib/toast";
 import { isRealCityLoaded, loadRealCity } from "@/sim/real";
@@ -87,6 +90,10 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
       spawnedTotal: metrics.spawnedTotal,
       completedTripsTotal: metrics.completedTripsTotal,
       peopleMovedTotal: metrics.peopleMovedTotal,
+      tripDelayTotalS: metrics.tripDelayTotalS,
+      tripFreeFlowTotalS: metrics.tripFreeFlowTotalS,
+      tripsTimed: metrics.tripsTimed,
+      queuePeakFt: metrics.queuePeakFt,
       pedServedTotal: metrics.pedServedTotal,
       pedIncidentsTotal: metrics.pedIncidentsTotal,
       emergency: metrics.emergency,
@@ -106,7 +113,14 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
         { avgSpeedMph: metrics.avgSpeedMph, budgetRemaining, starsOverride: evalProgress.stars },
         evalProgress.detailLines
       );
+      const report = buildServiceReport(metrics, scenario.serviceBaseline);
       const raf = requestAnimationFrame(() => {
+        const previousStars = bestStarsFor(scenario.id);
+        // Stars (and funds for them) belong to the campaign levels; a daily or a friend's challenge pays only for medals and the replay.
+        const rated = !scenario.id.startsWith(DAILY_PREFIX) && !scenario.id.startsWith(CHALLENGE_PREFIX);
+        const payout = result.won
+          ? recordRun(scenario.id, { stars: rated ? result.stars : 0, previousStars: rated ? previousStars : 0, earned: report.medals.filter((m) => m.earned).map((m) => m.id) })
+          : undefined;
         if (scenario.id.startsWith(DAILY_PREFIX)) {
           // Dailies keep a best-of-the-day score and a streak instead of a permanent star rating.
           const moved = metrics.completedTripsTotal;
@@ -114,7 +128,7 @@ export function useScenarioRunner(sim: UseTrafficSimulationReturn) {
         } else if (result.won && recordStars(scenario.id, result.stars)) {
           pushToast(`⭐ ${"★".repeat(result.stars)} saved for ${scenario.name}`, "good");
         }
-        setResults({ ...result, score: evalProgress.score ?? null });
+        setResults({ ...result, score: evalProgress.score ?? null, report, payout });
         setSimRunning(false);
       });
       return () => cancelAnimationFrame(raf);

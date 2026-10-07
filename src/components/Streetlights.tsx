@@ -45,6 +45,8 @@ function computeLampFixtures(network: RoadNetwork): LampFixture[] {
   const seenPairs = new Set<string>();
   for (const edge of network.edges) {
     if (edge.isRoundaboutRing || edge.isTexasTurnaround) continue;
+    // The narrowest lanes have no lamps (and drive slower at night: see isLitRoad in the sim).
+    if (edge.roadClassId === "lane" && edge.elevationLevelId !== "tunnel") continue;
     const key = [edge.fromNodeId, edge.toNodeId].sort().join("|");
     if (seenPairs.has(key)) continue;
     seenPairs.add(key);

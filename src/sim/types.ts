@@ -402,6 +402,8 @@ export type WorkerInMessage =
   | { type: "setTransit"; lines: TransitLine[] }
   /** The weather the player picked. Scripted weather events override it while they last. */
   | { type: "setWeather"; weather: Weather }
+  /** How dark it is (0 day, 0.5 dusk, 1 night). Drivers are more careful on unlit roads, and see people late. */
+  | { type: "setDarkness"; level: number }
   /** Turns the 24-hour demand cycle on or off: demand follows rush hours and the clock starts at `startHour`, one day lasting `dayLengthS` sim-seconds. */
   | { type: "setDayCycle"; enabled: boolean; startHour: number; dayLengthS: number }
   | { type: "patchNodes"; nodes: { id: string; control: JunctionControl | null }[] }
@@ -526,6 +528,12 @@ export type WorkerOutMessage =
       pedCrossings: number[][];
       /** People carried by the vehicles that completed their routes (a bus counts for all its riders). */
       peopleMovedTotal: number;
+      /** Service quality: seconds cars and trucks lost against an empty road over `tripsTimed` finished trips (and the empty-road time for the same trips), and the longest line of stopped cars now and this run. */
+      tripDelayTotalS: number;
+      tripFreeFlowTotalS: number;
+      tripsTimed: number;
+      queueNowFt: number;
+      queuePeakFt: number;
       /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */
       completedTripsTotal: number;
       /** The heavy per-edge statistics. Only present on ticks where they were recomputed (about 5 per second); the main thread keeps the last set. */

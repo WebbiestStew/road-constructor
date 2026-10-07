@@ -117,6 +117,12 @@ let spawnedTotal = 0;
 let maxVehicles = MAX_VEHICLES;
 let completedTripsTotal = 0;
 let peopleMovedTotal = 0;
+/** Service quality: how much longer drivers' trips took than an empty road would have, and the longest line of stopped cars. */
+let tripDelayTotalS = 0;
+let tripFreeFlowTotalS = 0;
+let tripsTimed = 0;
+let queueNowFt = 0;
+let queuePeakFt = 0;
 /** Share of new vehicles that are buses / bikes. Zero keeps the classic mix (and its exact random sequence). */
 let busShare = 0;
 let bikeShare = 0;
@@ -165,6 +171,50 @@ function weatherSpeedMult(): number {
 function weatherHeadwayMult(): number {
   const w = currentWeather();
   return w === "rain" ? 1.3 : w === "fog" ? 1.2 : 1;
+}
+
+/** How dark it is: 0 by day, 0.5 at dusk, 1 at night. Set from the clock the player sees. */
+let darkness = 0;
+/** Streets with lamps are lit; the narrowest lanes (and nothing else) are not. A tunnel always is, and so is a roundabout. */
+function isLitRoad(edge: Edge3D): boolean {
+  return edge.roadClassId !== "lane" || edge.isRoundaboutRing || edge.elevationLevelId === "tunnel";
+}
+
+/**
+ * What the conditions do to how fast drivers go on this road: the weather, and darkness (a lit road barely matters,
+ * an unlit one makes people cautious). 1 by clear day.
+ */
+function conditionSpeedMult(edge: Edge3D): number {
+  let m = weatherSpeedMult();
+  if (darkness > 0) {
+    m *= 1 - darkness * (isLitRoad(edge) ? 0.03 : 0.14);
+    if (currentWeather() === "fog" && !isLitRoad(edge)) m *= 0.94;
+  }
+  return m;
+}
+
+/** Wet pavement: tyres grip less, so a driver brakes (and pulls away) more gently and needs more road to stop. */
+function brakeGripMult(): number {
+  return currentWeather() === "rain" ? 0.72 : 1;
+}
+/** The hardest a car can slow down right now (ft/s^2, negative). */
+function maxBrakeFtps2(): number {
+  return currentWeather() === "rain" ? -14 : -20;
+}
+/** Curves are taken slower on a wet road. */
+function curveGripMult(): number {
+  return currentWeather() === "rain" ? 0.87 : 1;
+}
+
+/** How far ahead drivers notice people crossing, in feet: far on a clear day, short in fog or the dark. */
+const CROSSING_SIGHT_CLEAR_FT = 120;
+function crossingSightFt(edge: Edge3D): number {
+  let sight = CROSSING_SIGHT_CLEAR_FT;
+  const w = currentWeather();
+  if (w === "rain") sight = Math.min(sight, 100);
+  if (w === "fog") sight = Math.min(sight, 70);
+  if (darkness > 0) sight = Math.min(sight, isLitRoad(edge) ? 120 - 45 * darkness : 120 - 70 * darkness);
+  return sight;
 }
 
 let dayCycleOn = false;
@@ -414,6 +464,7 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   gridlockPenaltyTotal = 0;
   completedTripsTotal = 0;
   peopleMovedTotal = 0;
+  resetServiceStats();
   rebuildCrossings();
 
   for (const [id, v] of vehicles) {
@@ -426,6 +477,48 @@ function onNetworkUpdated(msg: Extract<WorkerInMessage, { type: "updateNetwork" 
   }
 }
 
+function resetServiceStats() {
+  tripDelayTotalS = 0;
+  tripFreeFlowTotalS = 0;
+  tripsTimed = 0;
+  queueNowFt = 0;
+  queuePeakFt = 0;
+}
+
+/** Records a finished trip for the delay average: its time on the road against the time at the limit all the way. Cars and trucks only (a bus's stops are not delay). */
+function recordTripDelay(v: VehicleState) {
+  if (v.kind !== "car" && v.kind !== "truck") return;
+  if (!network) return;
+  let freeS = 0;
+  for (const id of v.routeEdgeIds) {
+    const e = network.edgesById.get(id);
+    if (e) freeS += e.length / Math.max(1, mphToFtps(e.speedLimitMph));
+  }
+  const actualS = simTime - v.spawnTime;
+  tripFreeFlowTotalS += freeS;
+  tripDelayTotalS += Math.max(0, actualS - freeS);
+  tripsTimed++;
+}
+
+const QUEUE_SPEED_FTPS = mphToFtps(3);
+const QUEUE_SLOT_FT = VEHICLE_LENGTH_FT + 6;
+const _queueCount = new Map<string, number>();
+
+/** The longest line of stopped cars in any one lane right now, in feet. Run with the heavy stats, a few times a second. */
+function updateQueueStats() {
+  _queueCount.clear();
+  let worst = 0;
+  for (const v of vehicles.values()) {
+    if (v.speed > QUEUE_SPEED_FTPS || v.frozenUntil > simTime || isEmergencyKind(v.kind)) continue;
+    const key = `${v.edgeId}#${v.laneIndex}`;
+    const n = (_queueCount.get(key) ?? 0) + 1;
+    _queueCount.set(key, n);
+    if (n > worst) worst = n;
+  }
+  queueNowFt = worst * QUEUE_SLOT_FT;
+  if (queueNowFt > queuePeakFt) queuePeakFt = queueNowFt;
+}
+
 /** Returns the sim to t = 0 with no traffic, keeping the loaded network. */
 function resetRun() {
   for (const v of vehicles.values()) releaseVehicle(v);
@@ -435,6 +528,7 @@ function resetRun() {
   spawnedTotal = 0;
   completedTripsTotal = 0;
   peopleMovedTotal = 0;
+  resetServiceStats();
   pedServedTotal = 0;
   pedIncidentsTotal = 0;
   crossings.clear();
@@ -766,6 +860,8 @@ interface Crossing {
   nextAt: number;
   walkStart: number;
   walkUntil: number;
+  /** A near miss was already counted for this walk. */
+  missed: boolean;
   dir: 1 | -1;
   center: [number, number, number];
   right: [number, number];
@@ -807,6 +903,7 @@ function rebuildCrossings() {
         nextAt: old ? old.nextAt : simTime + randRange(3, PED_GAP_DEMAND_S),
         walkStart: old?.walkStart ?? -1e9,
         walkUntil: old?.walkUntil ?? -1e9,
+        missed: old?.missed ?? false,
         dir: old?.dir ?? 1,
         center: [_pos.x, _pos.y, _pos.z],
         right: [_right.x, _right.z],
@@ -833,9 +930,35 @@ function trafficApproachingCrossing(c: Crossing): boolean {
   return false;
 }
 
+/** Where traffic at a marked crossing can no longer stop in time: a car this close to the people, still moving. */
+const NEAR_MISS_ZONE_FT = 14;
+const NEAR_MISS_SPEED_FTPS = 22;
+
+/** In fog or the dark, drivers see people late: a car that is still doing speed at the crossing while people are on it counts as stepping into traffic. Skipped in clear conditions, where braking always makes it. */
+function checkNearMisses(c: Crossing) {
+  if (simTime >= c.walkUntil || c.missed) return;
+  for (const v of vehicles.values()) {
+    const at = c.distByEdge.get(v.edgeId);
+    if (at === undefined || isEmergencyKind(v.kind)) continue;
+    const edge = network?.edgesById.get(v.edgeId);
+    if (!edge || crossingSightFt(edge) >= CROSSING_SIGHT_CLEAR_FT) return;
+    const toLine = at - v.distanceAlongEdge;
+    if (toLine > -NEAR_MISS_ZONE_FT && toLine < NEAR_MISS_ZONE_FT && v.speed > NEAR_MISS_SPEED_FTPS) {
+      c.missed = true;
+      pedIncidentsTotal++;
+      return;
+    }
+  }
+}
+
 function updateCrossings() {
   for (const c of crossings.values()) {
-    if (simTime < c.walkUntil || simTime < c.nextAt) continue;
+    if (simTime < c.walkUntil) {
+      if (c.marked) checkNearMisses(c);
+      continue;
+    }
+    if (simTime < c.nextAt) continue;
+    c.missed = false;
     c.walkStart = simTime;
     c.dir = rng() < 0.5 ? 1 : -1;
     pedServedTotal += 1 + Math.floor(rng() * 3);
@@ -854,7 +977,7 @@ function crossingStopDistance(v: VehicleState, edge: Edge3D): number | null {
   const c = crossingByEdge.get(edge.id);
   if (!c || simTime >= c.walkUntil || isEmergencyKind(v.kind)) return null;
   const d = (c.distByEdge.get(edge.id) ?? 0) - CROSSING_STOP_BEFORE_FT - v.distanceAlongEdge;
-  return d > 0.5 && d <= CROSSING_APPROACH_FT ? d : null;
+  return d > 0.5 && d <= crossingSightFt(edge) ? d : null;
 }
 
 /** Crossings with people on the road right now, for the renderer: [x, y, z, rightX, rightZ, halfWidth, progress 0-1, direction, marked 1/0]. */
@@ -1794,15 +1917,15 @@ function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
 
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
   const v0 = Math.min(
-    mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(v) * weatherSpeedMult() * parkingSpeedMult(edge, v),
-    curvatureSpeedCapFtps(edge, v.distanceAlongEdge),
+    mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(v) * conditionSpeedMult(edge) * parkingSpeedMult(edge, v),
+    curvatureSpeedCapFtps(edge, v.distanceAlongEdge) * curveGripMult(),
     displacedLeftSpeedCapFtps(v, edge),
     v.maxSpeedFtps
   );
   const deltaV = v.speed - gapInfo.leaderSpeed;
   const params = {
-    a: v.maxAccel,
-    b: v.comfortBrake,
+    a: v.maxAccel * (brakeGripMult() < 1 ? 0.9 : 1),
+    b: v.comfortBrake * brakeGripMult(),
     s0: v.jamDistance,
     T: v.desiredHeadway * weatherHeadwayMult(),
     v0,
@@ -1817,7 +1940,7 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
   // A heavy truck on a steep climb slows to a crawl; it does not stop for good. Without a floor the grade's pull
   // beats the engine, the truck rolls to a halt, and it blocks the lane for everyone behind it.
   if (gradeAccel < 0 && free > 0 && v.speed <= CRAWL_SPEED_FTPS && accel < 0.4) accel = 0.4;
-  return clamp(accel, -20, params.a);
+  return clamp(accel, maxBrakeFtps2(), params.a);
 }
 
 /** The slowest a vehicle will hold on a climb it could otherwise not manage (about 10 mph). */
@@ -1828,7 +1951,7 @@ const CRAWL_SPEED_FTPS = mphToFtps(10);
 // ---------------------------------------------------------------------------
 
 function pairAccel(followerV: VehicleState, followerDist: number, leader: VehicleState | null, edge: Edge3D): number {
-  const v0 = Math.min(mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(followerV) * weatherSpeedMult() * parkingSpeedMult(edge, followerV), followerV.maxSpeedFtps);
+  const v0 = Math.min(mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(followerV) * conditionSpeedMult(edge) * parkingSpeedMult(edge, followerV), followerV.maxSpeedFtps);
   let gap = NO_LEADER_GAP;
   let leaderSpeed = followerV.speed;
   if (leader) {
@@ -1836,8 +1959,8 @@ function pairAccel(followerV: VehicleState, followerDist: number, leader: Vehicl
     leaderSpeed = leader.speed;
   }
   const params = {
-    a: followerV.maxAccel,
-    b: followerV.comfortBrake,
+    a: followerV.maxAccel * (brakeGripMult() < 1 ? 0.9 : 1),
+    b: followerV.comfortBrake * brakeGripMult(),
     s0: followerV.jamDistance,
     T: followerV.desiredHeadway * weatherHeadwayMult(),
     v0,
@@ -1847,7 +1970,7 @@ function pairAccel(followerV: VehicleState, followerDist: number, leader: Vehicl
     edgeSinThetaAt(edge, followerDist),
     climbSensitivityFromWeightToPower(followerV.weightToPowerLbPerHp)
   );
-  return clamp(idmAccel(followerV.speed, gap, followerV.speed - leaderSpeed, v0, params) + gradeAccel, -20, params.a);
+  return clamp(idmAccel(followerV.speed, gap, followerV.speed - leaderSpeed, v0, params) + gradeAccel, maxBrakeFtps2(), params.a);
 }
 
 function tryLaneChange(v: VehicleState, edge: Edge3D) {
@@ -2178,6 +2301,7 @@ function step(dt: number) {
         ambulances.delete(id);
       } else if (!gridlockRemoved.has(id)) {
         despawnTimestamps.push(simTime);
+        recordTripDelay(v);
         completedTripsTotal++;
         peopleMovedTotal += v.passengers;
       }
@@ -2436,6 +2560,7 @@ function postSnapshot(forceStats: boolean) {
     const deltaSimTime = Math.max(0, simTime - lastSnapshotSimTime);
     lastSnapshotSimTime = simTime;
     updateCongestionState(deltaSimTime);
+    updateQueueStats();
     stats = {
       contracts: computeContracts(),
       edgeSpeedRatios: computeEdgeSpeedRatios(),
@@ -2462,6 +2587,11 @@ function postSnapshot(forceStats: boolean) {
     spawnedTotal,
     completedTripsTotal,
     peopleMovedTotal,
+    tripDelayTotalS,
+    tripFreeFlowTotalS,
+    tripsTimed,
+    queueNowFt,
+    queuePeakFt,
     pedServedTotal,
     pedIncidentsTotal,
     pedCrossings: activeCrossingViews(),
@@ -2589,6 +2719,9 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
     case "setTransit":
       transitLines = msg.lines;
       for (const id of Array.from(nextBusAt.keys())) if (!transitLines.some((l) => l.id === id)) nextBusAt.delete(id);
+      break;
+    case "setDarkness":
+      darkness = Math.max(0, Math.min(1, msg.level));
       break;
     case "setWeather":
       manualWeather = msg.weather;

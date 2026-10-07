@@ -43,7 +43,7 @@ async function main() {
   };
   sim.load(network, Number(seed), HARNESS_SPEED);
   const r = await sim.runUntil(REAL_PLANS.find((p) => p.key === key)?.durationS ?? 300);
-  console.log(JSON.stringify({ trips: r.trips, mph: r.avgMph, jams: r.problems.length, spawned: lastTick?.spawnedTotal, active: lastTick?.activeCount }));
+  console.log(JSON.stringify({ trips: r.trips, mph: r.avgMph, jams: r.problems.length, delayShare: r.freeFlowS > 0 ? +(r.delayS / r.freeFlowS).toFixed(3) : null, queueFt: r.queuePeakFt, spawned: lastTick?.spawnedTotal, active: lastTick?.activeCount }));
   process.exit(0);
 }
 void main();

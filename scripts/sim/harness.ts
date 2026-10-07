@@ -8,6 +8,10 @@ export interface Tick {
   avgMph: number;
   trips: number;
   people: number;
+  delayS: number;
+  freeFlowS: number;
+  timedTrips: number;
+  queuePeakFt: number;
   problems: string[];
   incidents: IncidentView[];
   jakeBrakes: number;
@@ -29,6 +33,10 @@ export async function createSim() {
       avgSpeedFtS: number;
       completedTripsTotal: number;
       peopleMovedTotal?: number;
+      tripDelayTotalS?: number;
+      tripFreeFlowTotalS?: number;
+      tripsTimed?: number;
+      queuePeakFt?: number;
       incidents?: IncidentView[];
       jakeBrakes?: unknown[];
       rageCount?: number;
@@ -41,6 +49,10 @@ export async function createSim() {
       avgMph: t.avgSpeedFtS * 0.681818,
       trips: t.completedTripsTotal,
       people: t.peopleMovedTotal ?? 0,
+      delayS: t.tripDelayTotalS ?? 0,
+      freeFlowS: t.tripFreeFlowTotalS ?? 0,
+      timedTrips: t.tripsTimed ?? 0,
+      queuePeakFt: t.queuePeakFt ?? 0,
       problems: t.stats?.problemEdgeIds ?? last?.problems ?? [],
       incidents: t.incidents ?? [],
       jakeBrakes: t.jakeBrakes?.length ?? 0,

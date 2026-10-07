@@ -193,6 +193,10 @@ export default function Play() {
     if (weather === "clear") return baseSky;
     return new THREE.Color(baseSky).lerp(new THREE.Color(weather === "rain" ? "#6f8096" : "#cfd6dc"), 0.55).getStyle();
   }, [baseSky, weather]);
+  // Wet pavement follows the sim's weather, including a scripted storm.
+  useEffect(() => {
+    useEditorStore.setState({ roadsWet: weather === "rain" });
+  }, [weather]);
   const canvasCursor = mode === "build" && CROSSHAIR_TOOLS.has(tool) ? "crosshair" : "default";
   const quality = useQuality();
   const q = useGraphics();

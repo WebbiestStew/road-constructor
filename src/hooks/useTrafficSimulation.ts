@@ -43,6 +43,12 @@ export interface SimMetricsState {
   spawnedTotal: number;
   completedTripsTotal: number;
   peopleMovedTotal: number;
+  /** Service quality (see the worker's tick): lost time per trip and the longest queue. */
+  tripDelayTotalS: number;
+  tripFreeFlowTotalS: number;
+  tripsTimed: number;
+  queueNowFt: number;
+  queuePeakFt: number;
   pedServedTotal: number;
   pedIncidentsTotal: number;
   emergency: EmergencyStats;
@@ -75,6 +81,11 @@ const DEFAULT_METRICS: SimMetricsState = {
   spawnedTotal: 0,
   completedTripsTotal: 0,
   peopleMovedTotal: 0,
+  tripDelayTotalS: 0,
+  tripFreeFlowTotalS: 0,
+  tripsTimed: 0,
+  queueNowFt: 0,
+  queuePeakFt: 0,
   pedServedTotal: 0,
   pedIncidentsTotal: 0,
   emergency: { dispatched: 0, completed: 0, waiting: 0, active: 0, totalResponseS: 0, totalIdealS: 0, lastResponseS: 0, lastIdealS: 0 },
@@ -213,6 +224,11 @@ export function useTrafficSimulation() {
             spawnedTotal: msg.spawnedTotal,
             completedTripsTotal: msg.completedTripsTotal,
             peopleMovedTotal: msg.peopleMovedTotal,
+            tripDelayTotalS: msg.tripDelayTotalS ?? 0,
+            tripFreeFlowTotalS: msg.tripFreeFlowTotalS ?? 0,
+            tripsTimed: msg.tripsTimed ?? 0,
+            queueNowFt: msg.queueNowFt ?? 0,
+            queuePeakFt: msg.queuePeakFt ?? 0,
             pedServedTotal: msg.pedServedTotal,
             pedIncidentsTotal: msg.pedIncidentsTotal,
             emergency: msg.emergency,
@@ -258,6 +274,12 @@ export function useTrafficSimulation() {
   useEffect(() => {
     workerRef.current?.postMessage({ type: "setWeather", weather: manualWeather } satisfies WorkerInMessage);
   }, [manualWeather]);
+
+  const timeOfDay = useEditorStore((s) => s.timeOfDay);
+  useEffect(() => {
+    const level = timeOfDay === "night" ? 1 : timeOfDay === "dusk" ? 0.5 : 0;
+    workerRef.current?.postMessage({ type: "setDarkness", level } satisfies WorkerInMessage);
+  }, [timeOfDay]);
 
   const dayCycle = useEditorStore((s) => s.dayCycle);
   useEffect(() => {

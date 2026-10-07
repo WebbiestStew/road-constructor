@@ -3,6 +3,8 @@ import { getRealCity } from "./real";
 import type { CrashStats, EdgeSpec, EmergencyStats, NetworkSnapshot, NodeSpec, RoadNetwork, ScriptedEvent } from "./types";
 import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
+import type { ServiceReport } from "@/lib/serviceReport";
+import type { RunPayout } from "@/lib/career";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "./grade";
 
 /** A generous, JSON-safe stand-in for "infinite" budget in Sandbox Mode — plain `Infinity` doesn't survive JSON persistence. */
@@ -36,6 +38,10 @@ export interface ScenarioEvalContext {
   spawnedTotal: number;
   completedTripsTotal: number;
   peopleMovedTotal: number;
+  tripDelayTotalS: number;
+  tripFreeFlowTotalS: number;
+  tripsTimed: number;
+  queuePeakFt: number;
   pedServedTotal: number;
   pedIncidentsTotal: number;
   emergency: EmergencyStats;
@@ -83,6 +89,11 @@ export interface ScenarioDef {
   sceneryKey?: string;
   /** A Texas map: its overpasses are drawn TxDOT style (concrete decks, open-slot Texas Classic rails). */
   texas?: boolean;
+  /**
+   * What the unchanged level scores for service quality (measured in the headless sim): trip delay as a share of the
+   * empty-road time, and the longest queue in feet. The service medals ask for a clear improvement on these.
+   */
+  serviceBaseline?: { delayShare: number; queueFt: number };
   /** Left turns at signals give way to oncoming traffic in this level (otherwise they run unopposed, as in the classic levels). */
   leftTurnsYield?: boolean;
   /** Share of traffic that is buses and bikes in this level. Omitted = cars and trucks only. */
@@ -103,6 +114,10 @@ export interface ScenarioResult {
   budgetSpent: number;
   budgetRemaining: number;
   summaryLines: string[];
+  /** The run's service report (delay, queues, pedestrians) and the medals it earned. Added by the run's owner once the run ends. */
+  report?: ServiceReport;
+  /** What the win paid into the career. */
+  payout?: RunPayout;
 }
 
 function node(id: string, x: number, y: number, z: number): NodeSpec {
@@ -658,6 +673,8 @@ export interface RealCityPlan {
   budget: number;
   /** Mean vehicles moved in 300 s by the unmodified network over eight seeds in the headless sim. */
   baseline: number;
+  /** Service quality of the unmodified network (mean of the baseline seeds): delay share and longest queue. Absent until measured; the delay and queue medals need it. */
+  service?: { delayShare: number; queueFt: number };
   /** Three stars at this multiple of the baseline when the default (1.12) is out of reach. */
   threeStarRatio?: number;
   /** Two stars at this multiple of the baseline (default 1.07); raised where the untouched run varies a lot from seed to seed. */
@@ -854,6 +871,7 @@ function realScenario(plan: RealCityPlan): ScenarioDef {
       return getRealCity(plan.key).network;
     },
     startingBudget: plan.budget,
+    serviceBaseline: plan.service,
     durationS: plan.durationS ?? 300,
     targetAvgSpeedMph: 25,
     createEvaluator: createRealCityEvaluator(plan.baseline, plan.durationS ?? 300, plan.threeStarRatio, plan.twoStarRatio),

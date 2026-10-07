@@ -124,6 +124,8 @@ interface EditorState {
   heatmapEnabled: boolean;
   setHeatmapEnabled: (v: boolean) => void;
   timeOfDay: "day" | "dusk" | "night";
+  /** The pavement is wet (it is raining in the sim, whoever started the rain). Set by the page from the live weather. */
+  roadsWet: boolean;
   setTimeOfDay: (v: "day" | "dusk" | "night") => void;
   /** Chase/ride-along camera: locks the view behind a live vehicle instead of the free orthographic overview. Only meaningful in Simulate mode. */
   rideAlongActive: boolean;
@@ -215,6 +217,8 @@ interface EditorState {
   setSpeedLimit: (edgeId: string, mph: number, wholeRoad: boolean) => void;
   /** Takes `amount` from a budgeted level's money (free in sandbox); false when it can't be afforded. */
   spendBudget: (amount: number) => boolean;
+  /** Adds money to a free-build city's budget (the career treasury paying in). Ignored in levels, where budgets are part of the challenge, and in sandbox, where there is no limit. */
+  addFreeBuildBudget: (amount: number) => boolean;
   /** Posts a variable speed advisory on a freeway gantry (null clears it). It can only ever be at or below the posted limit. */
   setVslAdvisory: (edgeId: string, mph: number | null) => void;
   /** Closes or reopens one lane at a gantry; drivers are warned a quarter mile ahead and move over. At least one lane stays open. */
@@ -390,6 +394,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   heatmapEnabled: false,
   setHeatmapEnabled: (v) => set({ heatmapEnabled: v }),
   timeOfDay: "day",
+  roadsWet: false,
   setTimeOfDay: (v) => set({ timeOfDay: v }),
   rideAlongActive: false,
   setRideAlongActive: (v) => set({ rideAlongActive: v }),
@@ -1101,6 +1106,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return false;
     }
     set({ budget: s.budget - amount });
+    return true;
+  },
+
+  addFreeBuildBudget: (amount) => {
+    const s = get();
+    if (s.activeScenarioId || isSandboxBudget(s.budget) || amount <= 0) return false;
+    set({ budget: s.budget + amount });
     return true;
   },
 

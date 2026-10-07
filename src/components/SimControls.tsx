@@ -34,6 +34,7 @@ import EconomyTicker from "./hud/EconomyTicker";
 import GuidedTour from "./hud/GuidedTour";
 import SettingsMenu from "./hud/SettingsMenu";
 import KeyboardRoads from "./KeyboardRoads";
+import ConditionsChip from "./hud/ConditionsChip";
 import DayClock from "./hud/DayClock";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import CinematicOverlay from "./hud/CinematicOverlay";
@@ -90,6 +91,7 @@ export default function SimControls({
       <CoachBar />
       <GuidedTour sim={sim} />
       <DayClock sim={sim} />
+      <ConditionsChip sim={sim} />
       <PlaceCredit />
       <SettingsMenu />
       <KeyboardRoads />

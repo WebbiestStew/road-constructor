@@ -44,6 +44,11 @@ export function recordStars(scenarioId: string, stars: 0 | 1 | 2 | 3): boolean {
   return true;
 }
 
+/** The best rating earned on a level so far (0 = never cleared). */
+export function bestStarsFor(scenarioId: string): 0 | 1 | 2 | 3 {
+  return read()[scenarioId] ?? 0;
+}
+
 function subscribe(cb: () => void) {
   listeners.add(cb);
   return () => {

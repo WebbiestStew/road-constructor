@@ -1,5 +1,5 @@
 // Calibrates a campaign level in the headless sim: npx tsx scripts/sim/level.ts <levelId> <variant,variant> [seed]
-// Variants: none | fixed (the level's planted faults removed) | bus | bike | cross (crosswalks on the jaywalking roads) | oneway
+// Variants: none | rain | fog | night | dusk | fixed (the level's planted faults removed) | bus | bike | cross (crosswalks on the jaywalking roads) | oneway
 import { buildHarborDrive, buildMidtown } from "../../src/sim/cities";
 import { getScenarioById } from "../../src/sim/scenarios";
 import type { NetworkSnapshot } from "../../src/sim/types";
@@ -40,6 +40,7 @@ async function main() {
     if (variants.has("main4") && e.roadClassId === "motorway") e.lanes = 4;
     if (variants.has("rampfast") && e.roadClassId === "highway") e.speedLimitMph = 45;
     if (variants.has("cross") && e.jaywalkers) e.crosswalk = true;
+    if (variants.has("slow15") && e.jaywalkers) e.speedLimitMph = 15;
     if (variants.has("stops") && e.lanes >= 2) e.busStop = true;
     if (variants.has("parking") && e.lanes >= 2) e.parking = true;
   }
@@ -51,6 +52,10 @@ async function main() {
     if (m.type === "tick") last = m;
     prev(m);
   };
+  if (variants.has("rain")) sim.send({ type: "setWeather", weather: "rain" });
+  if (variants.has("fog")) sim.send({ type: "setWeather", weather: "fog" });
+  if (variants.has("night")) sim.send({ type: "setDarkness", level: 1 });
+  if (variants.has("dusk")) sim.send({ type: "setDarkness", level: 0.5 });
   sim.send({ type: "setTrafficMix", bus: scenario.trafficMix?.bus ?? 0, bike: scenario.trafficMix?.bike ?? 0 });
   sim.load(network, Number(seed), HARNESS_SPEED);
   if (scenario.scriptedEvents) sim.send({ type: "scheduleEvents", events: scenario.scriptedEvents });
@@ -67,6 +72,8 @@ async function main() {
       crashes: last?.crashes ? `${last.crashes.cleared}/${last.crashes.happened} avg ${last.crashes.cleared ? Math.round(last.crashes.totalClearS / last.crashes.cleared) : "-"}s` : "-",
       amb: em ? `${em.completed}/${em.dispatched} x${em.totalIdealS ? (em.totalResponseS / em.totalIdealS).toFixed(2) : "-"}` : "-",
       mph: Math.round(r.avgMph),
+      delayShare: r.freeFlowS > 0 ? +(r.delayS / r.freeFlowS).toFixed(3) : null,
+      queueFt: r.queuePeakFt,
     })
   );
   process.exit(0);

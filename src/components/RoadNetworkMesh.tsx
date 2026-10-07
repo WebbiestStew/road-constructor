@@ -663,6 +663,7 @@ const EdgeGroup = memo(function EdgeGroup({
     (s) => s.selection?.kind === "edge" && s.selection.id === edge.id
   );
   const heatmapEnabled = useEditorStore((s) => s.heatmapEnabled);
+  const wet = useEditorStore((s) => s.roadsWet);
   const mode = useEditorStore((s) => s.mode);
   const showHeatmap = heatmapEnabled && mode === "simulate" && speedRatio !== undefined && !edge.isRoundaboutRing;
 
@@ -739,8 +740,8 @@ const EdgeGroup = memo(function EdgeGroup({
                         ? TX_DECK_COLOR
                         : ASPHALT_COLOR
           }
-          roughness={0.95}
-          metalness={0.05}
+          roughness={wet ? 0.42 : 0.95}
+          metalness={wet ? 0.2 : 0.05}
         />
       </mesh>
 
@@ -762,7 +763,7 @@ const EdgeGroup = memo(function EdgeGroup({
 
       {geometries.gorePaves.map((geo, i) => (
         <mesh key={i} geometry={geo} receiveShadow>
-          <meshStandardMaterial color={ASPHALT_COLOR} roughness={0.95} metalness={0.05} />
+          <meshStandardMaterial color={ASPHALT_COLOR} roughness={wet ? 0.42 : 0.95} metalness={wet ? 0.2 : 0.05} />
         </mesh>
       ))}
 
