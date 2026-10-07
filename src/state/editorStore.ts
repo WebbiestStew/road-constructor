@@ -129,6 +129,13 @@ interface EditorState {
   setTimeOfDay: (v: "day" | "dusk" | "night") => void;
   /** Chase/ride-along camera: locks the view behind a live vehicle instead of the free orthographic overview. Only meaningful in Simulate mode. */
   rideAlongActive: boolean;
+  /** The vehicle the ride-along camera is locked to (null when not riding), and the one the player is driving (null when not driving). */
+  rideAlongVehicleId: number | null;
+  drivingId: number | null;
+  /** Chase camera behind the car, or from the driver's seat. */
+  driveCam: "chase" | "hood";
+  setDrivingId: (id: number | null) => void;
+  setDriveCam: (cam: "chase" | "hood") => void;
   setRideAlongActive: (v: boolean) => void;
 
   /** Transient user-facing message (e.g. a rejected clearance-violating road) — cleared automatically after a few seconds. */
@@ -407,7 +414,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   roadsWet: false,
   setTimeOfDay: (v) => set({ timeOfDay: v }),
   rideAlongActive: false,
-  setRideAlongActive: (v) => set({ rideAlongActive: v }),
+  rideAlongVehicleId: null,
+  drivingId: null,
+  driveCam: "chase",
+  setDrivingId: (id) => set({ drivingId: id }),
+  setDriveCam: (cam) => set({ driveCam: cam }),
+  setRideAlongActive: (v) => set(v ? { rideAlongActive: true } : { rideAlongActive: false, drivingId: null, rideAlongVehicleId: null }),
 
   buildWarning: null,
   setBuildWarning: (message) => set({ buildWarning: message }),
@@ -521,6 +533,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
             : "draw",
       selection: null,
       rideAlongActive: mode === "simulate" ? s.rideAlongActive : false,
+      drivingId: mode === "simulate" ? s.drivingId : null,
     })),
   setTool: (tool) =>
     set((s) => (s.buildLocked && !MANAGER_TOOLS.includes(tool) ? s : { tool, drawFromNodeId: null, selection: null })),

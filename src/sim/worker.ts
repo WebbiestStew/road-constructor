@@ -35,6 +35,8 @@ import {
   type TickStats,
   type TransitLine,
   type TransitStats,
+  type DriveView,
+  type DriveResult,
   type VehicleKind,
   type VehicleState,
   type Weather,
@@ -554,6 +556,8 @@ function resetRun() {
   nextComboAt = 0;
   nextBusAt.clear();
   resetTransitStats();
+  drive = null;
+  driveResult = null;
   scriptedWeather = null;
   gridlockPenaltyTotal = 0;
   demandScale = 1;
@@ -2072,7 +2076,7 @@ function edgeSinThetaAt(edge: Edge3D, distanceAlongEdge: number): number {
 
 function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): number {
   const v0 = Math.min(
-    mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(v) * conditionSpeedMult(edge) * parkingSpeedMult(edge, v),
+    isDriven(v) ? Math.max(0.5, drive!.targetFtps) : mphToFtps(effectiveSpeedLimitMph(edge)) * cruiseFactor(v) * conditionSpeedMult(edge) * parkingSpeedMult(edge, v),
     curvatureSpeedCapFtps(edge, v.distanceAlongEdge) * curveGripMult(),
     displacedLeftSpeedCapFtps(v, edge),
     v.maxSpeedFtps
@@ -2100,6 +2104,192 @@ function idmAccelForVehicle(v: VehicleState, edge: Edge3D, gapInfo: GapInfo): nu
 
 /** The slowest a vehicle will hold on a climb it could otherwise not manage (about 10 mph). */
 const CRAWL_SPEED_FTPS = mphToFtps(10);
+
+// ---------------------------------------------------------------------------
+// Driving a vehicle yourself. The player takes the wheel of one vehicle on the road: they set how fast it goes (the car
+// still keeps its distance, stops at lights and crossings, and takes corners at a sane speed, as a driver-assist
+// would) and ask for lane changes, which happen only when there is a gap. The route stays the one the driver set out
+// on, so the lane they need for the next turn is the lane arrows' business. Nothing here touches the random stream.
+// ---------------------------------------------------------------------------
+
+/** How hard the throttle and the brake move the target speed, ft/s per second. */
+const DRIVE_THROTTLE_FTPS2 = 9;
+const DRIVE_BRAKE_FTPS2 = 20;
+/** The fastest a driver may ask for: a third over the limit (and never above the car's own top speed). */
+const DRIVE_OVER_LIMIT = 1.35;
+/** A lane change that cannot happen for this long is dropped. */
+const DRIVE_LANE_PATIENCE_S = 2.5;
+const DRIVE_BLOCKED_SHOW_S = 1.2;
+const DRIVE_HARD_BRAKE_FTPS2 = -9;
+
+interface DriveState {
+  id: number;
+  /** The speed the driver is asking for (ft/s), moved by the throttle and the brake. */
+  targetFtps: number;
+  accel: -1 | 0 | 1;
+  laneReq: -1 | 0 | 1;
+  laneReqAt: number;
+  blockedUntil: number;
+  startedAt: number;
+  /** Time the rest of the route would take at the limit from where the driver took over. */
+  idealS: number;
+  hardBrakes: number;
+  speedingS: number;
+  distanceFt: number;
+  laneChanges: number;
+  lastAccel: number;
+}
+let drive: DriveState | null = null;
+let driveResult: DriveResult | null = null;
+
+function isDriven(v: VehicleState): boolean {
+  return drive !== null && v.id === drive.id;
+}
+
+function routeTimeAtLimitS(v: VehicleState): number {
+  if (!network) return 0;
+  let t = 0;
+  for (let i = v.routeIndex; i < v.routeEdgeIds.length; i++) {
+    const e = network.edgesById.get(v.routeEdgeIds[i]);
+    if (!e) continue;
+    const remaining = i === v.routeIndex ? Math.max(0, e.length - v.distanceAlongEdge) : e.length;
+    t += remaining / Math.max(1, mphToFtps(effectiveSpeedLimitMph(e)));
+  }
+  return t;
+}
+
+function takeWheel(id: number): boolean {
+  const v = vehicles.get(id);
+  if (!v || v.kind === "debris" || v.kind === "wrecker" || v.kind === "police" || v.frozenUntil > simTime) return false;
+  drive = {
+    id,
+    targetFtps: v.speed,
+    accel: 0,
+    laneReq: 0,
+    laneReqAt: 0,
+    blockedUntil: 0,
+    startedAt: simTime,
+    idealS: routeTimeAtLimitS(v),
+    hardBrakes: 0,
+    speedingS: 0,
+    distanceFt: 0,
+    laneChanges: 0,
+    lastAccel: 0,
+  };
+  driveResult = null;
+  return true;
+}
+
+/** Moves the target speed with the pedals; called once per step. */
+function updateDriveTarget(dt: number) {
+  if (!drive) return;
+  const v = vehicles.get(drive.id);
+  if (!v) {
+    drive = null;
+    return;
+  }
+  const edge = network?.edgesById.get(v.edgeId);
+  const limit = edge ? mphToFtps(effectiveSpeedLimitMph(edge)) : mphToFtps(30);
+  const ceiling = Math.min(limit * DRIVE_OVER_LIMIT, v.maxSpeedFtps, MAX_SPEED_FTPS);
+  if (drive.accel > 0) drive.targetFtps = Math.min(ceiling, drive.targetFtps + DRIVE_THROTTLE_FTPS2 * dt);
+  else if (drive.accel < 0) drive.targetFtps = Math.max(0, drive.targetFtps - DRIVE_BRAKE_FTPS2 * dt);
+  else if (drive.targetFtps > v.speed + 6) drive.targetFtps = v.speed + 6; // lifting off: don't keep a stale target the car is far from
+  drive.targetFtps = Math.min(drive.targetFtps, ceiling);
+}
+
+/** Carries out the driver's pending lane change if the gaps allow it. Returns true once handled (done, or given up on). */
+function applyDriveLaneChange(v: VehicleState, edge: Edge3D) {
+  if (!drive || drive.laneReq === 0) return;
+  const want = v.laneIndex + drive.laneReq;
+  const fail = () => {
+    if (simTime - drive!.laneReqAt > DRIVE_LANE_PATIENCE_S) {
+      drive!.laneReq = 0;
+      drive!.blockedUntil = simTime + DRIVE_BLOCKED_SHOW_S;
+    }
+  };
+  if (want < 0 || want >= edge.lanes || laneForbidden(v, edge, want)) {
+    drive.laneReq = 0;
+    drive.blockedUntil = simTime + DRIVE_BLOCKED_SHOW_S;
+    return;
+  }
+  const lanes = laneOccupancy.get(edge.id);
+  if (!lanes) return;
+  const candArr = lanes[want];
+  let insertIdx = 0;
+  while (insertIdx < candArr.length && vehicles.get(candArr[insertIdx])!.distanceAlongEdge < v.distanceAlongEdge) insertIdx++;
+  const newLeader = insertIdx < candArr.length ? vehicles.get(candArr[insertIdx])! : null;
+  const newFollower = insertIdx > 0 ? vehicles.get(candArr[insertIdx - 1])! : null;
+  if (newLeader && newLeader.distanceAlongEdge - newLeader.length - v.distanceAlongEdge < v.minGap + 2) return fail();
+  if (newFollower && v.distanceAlongEdge - v.length - newFollower.distanceAlongEdge < v.minGap + 2) return fail();
+  // the car that would end up behind must not have to brake hard for it
+  if (newFollower && pairAccel(newFollower, newFollower.distanceAlongEdge, v, edge) < -4) return fail();
+  v.laneIndex = want;
+  v.laneChangeCooldown = 20;
+  drive.laneReq = 0;
+  drive.laneChanges++;
+}
+
+/** Keeps the drive's trip numbers (distance, hard braking, speeding) as the step runs. */
+function trackDrive(v: VehicleState, edge: Edge3D, dt: number) {
+  if (!drive || v.id !== drive.id) return;
+  drive.distanceFt += v.speed * dt;
+  if (v.speed > mphToFtps(effectiveSpeedLimitMph(edge)) * 1.1) drive.speedingS += dt;
+  if (v.accel < DRIVE_HARD_BRAKE_FTPS2 && drive.lastAccel >= DRIVE_HARD_BRAKE_FTPS2 && v.speed > 4) drive.hardBrakes++;
+  drive.lastAccel = v.accel;
+}
+
+/** How the driver did, worked out when they arrive. Out of 100: speeding and hard stops cost points. */
+function finishDrive(arrived: boolean): void {
+  if (!drive) return;
+  const elapsedS = simTime - drive.startedAt;
+  const score = Math.max(0, Math.round(100 - drive.hardBrakes * 6 - drive.speedingS * 1.4));
+  driveResult = {
+    arrived,
+    elapsedS,
+    idealS: drive.idealS,
+    distanceFt: drive.distanceFt,
+    hardBrakes: drive.hardBrakes,
+    speedingS: drive.speedingS,
+    laneChanges: drive.laneChanges,
+    score,
+  };
+  drive = null;
+}
+
+/** What the HUD shows while someone drives. */
+function driveView(): DriveView | null {
+  if (!drive || !network) return null;
+  const v = vehicles.get(drive.id);
+  const edge = v ? network.edgesById.get(v.edgeId) : undefined;
+  if (!v || !edge) return null;
+  const nextId = v.routeEdgeIds[v.routeIndex + 1];
+  const move = nextId ? edge.nextMoves.get(nextId) ?? "straight" : "end";
+  const allowed = allowedLanesForNext(v, edge);
+  const stop = computeVirtualStopDistance(v, edge);
+  return {
+    id: v.id,
+    kind: v.kind,
+    speedMph: ftpsToMph(v.speed),
+    targetMph: ftpsToMph(drive.targetFtps),
+    limitMph: effectiveSpeedLimitMph(edge),
+    laneIndex: v.laneIndex,
+    lanes: edge.lanes,
+    nextMove: move,
+    toJunctionFt: Math.max(0, edge.length - v.distanceAlongEdge),
+    laneOk: !allowed || !!allowed[clamp(v.laneIndex, 0, edge.lanes - 1)],
+    laneAllowed: allowed ? allowed.slice() : null,
+    stopAheadFt: stop,
+    streetName: edge.name ?? "",
+    elapsedS: simTime - drive.startedAt,
+    idealS: drive.idealS,
+    hardBrakes: drive.hardBrakes,
+    speedingS: drive.speedingS,
+    laneBlocked: simTime < drive.blockedUntil,
+    laneChangePending: drive.laneReq !== 0,
+    passengers: v.passengers,
+    thrusting: drive.accel,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // MOBIL lane changing (within the current edge only)
@@ -2372,6 +2562,7 @@ function step(dt: number) {
   markAmbulanceYielders();
   rebuildNodeApproaches();
 
+  updateDriveTarget(dt);
   for (const v of vehicles.values()) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
@@ -2387,7 +2578,8 @@ function step(dt: number) {
     const edge = network.edgesById.get(v.edgeId);
     if (!edge) continue;
     if (v.frozenUntil > simTime) continue;
-    tryLaneChange(v, edge);
+    if (isDriven(v)) applyDriveLaneChange(v, edge);
+    else tryLaneChange(v, edge);
   }
 
   const toRemove: number[] = [];
@@ -2410,7 +2602,7 @@ function step(dt: number) {
     } else {
       v.stuckTimeS = 0;
     }
-    if (v.stuckTimeS >= GRIDLOCK_DESPAWN_S && !isEmergencyKind(v.kind)) {
+    if (v.stuckTimeS >= GRIDLOCK_DESPAWN_S && !isEmergencyKind(v.kind) && !isDriven(v)) {
       toRemove.push(v.id);
       gridlockRemoved.add(v.id);
       gridlockPenaltyTotal++;
@@ -2419,6 +2611,7 @@ function step(dt: number) {
 
     const deltaDist = v.speed * dt;
     v.distanceAlongEdge += deltaDist;
+    trackDrive(v, edge, dt);
     if (edge.reservedLane === "express" && v.laneIndex === 0 && v.kind === "car") expressVehicleS += dt;
 
     let currentEdge = edge;
@@ -2463,6 +2656,7 @@ function step(dt: number) {
 
   for (const id of toRemove) {
     const v = vehicles.get(id);
+    if (drive && id === drive.id) finishDrive(!gridlockRemoved.has(id));
     if (v) {
       // Only trips that actually reached their destination count toward
       // throughput — a gridlock-forced removal is a penalty, not a completion.
@@ -2768,6 +2962,8 @@ function postSnapshot(forceStats: boolean) {
     queuePeakFt,
     expressVehicleS,
     transit: transitStats(),
+    drive: driveView(),
+    driveResult,
     pedServedTotal,
     pedIncidentsTotal,
     pedCrossings: activeCrossingViews(),
@@ -2896,6 +3092,22 @@ ctx.onmessage = (event: MessageEvent<WorkerInMessage>) => {
       transitLines = msg.lines;
       rebuildLinesOnEdge();
       for (const id of Array.from(nextBusAt.keys())) if (!transitLines.some((l) => l.id === id)) nextBusAt.delete(id);
+      break;
+    case "drive":
+      if (msg.action === "take") {
+        if (!takeWheel(msg.id)) driveResult = null;
+      } else if (drive) {
+        drive = null;
+      }
+      break;
+    case "driveInput":
+      if (drive) {
+        if (msg.accel !== undefined) drive.accel = msg.accel;
+        if (msg.lane !== undefined && msg.lane !== 0) {
+          drive.laneReq = msg.lane;
+          drive.laneReqAt = simTime;
+        }
+      }
       break;
     case "setDarkness":
       darkness = Math.max(0, Math.min(1, msg.level));

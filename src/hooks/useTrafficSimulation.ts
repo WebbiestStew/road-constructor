@@ -5,6 +5,8 @@ import type {
   ContractStatus,
   Weather,
   CrashStats,
+  DriveResult,
+  DriveView,
   EmergencyStats,
   EdgePatch,
   EdgeSpec,
@@ -33,6 +35,8 @@ export interface VehicleSnapshot {
   ambulances: [number, number, number][];
   /** Where heavy trucks are engine-braking down a grade right now (for the soundscape). */
   jakeBrakes: [number, number, number][];
+  /** The vehicle the player is driving, as of this tick. */
+  drive: DriveView | null;
   version: number;
 }
 
@@ -154,12 +158,14 @@ export function useTrafficSimulation() {
     taillightColors: ArrayBuffer;
   } | null>(null);
   const versionCounterRef = useRef(0);
+  const lastDriveKeyRef = useRef("");
 
   const [metrics, setMetrics] = useState<SimMetricsState>(DEFAULT_METRICS);
   const [userPaused, setUserPaused] = useState(false);
   const [speedMultiplier, setSpeedMultiplierState] = useState(1);
   const [ready, setReady] = useState(false);
   const [workerFailed, setWorkerFailed] = useState(false);
+  const [driveResult, setDriveResult] = useState<DriveResult | null>(null);
   const graphics = useGraphics();
 
   const mode = useEditorStore((s) => s.mode);
@@ -216,8 +222,16 @@ export function useTrafficSimulation() {
           pedCrossings: msg.pedCrossings,
           ambulances: msg.ambulances,
           jakeBrakes: msg.jakeBrakes ?? [],
+          drive: msg.drive ?? null,
           version: versionCounterRef.current,
         };
+        // A drive that has just ended: keep its summary (the worker repeats it in every tick until the next drive).
+        const result = msg.driveResult ?? null;
+        const key = result ? `${result.elapsedS.toFixed(2)}|${result.score}|${result.distanceFt.toFixed(0)}` : "";
+        if (key !== lastDriveKeyRef.current) {
+          lastDriveKeyRef.current = key;
+          setDriveResult(result);
+        }
 
         // The worker attaches the heavy per-edge stats only a few times a second (and once per change while
         // paused), so a React state update happens exactly then — not on every 30 Hz snapshot.
@@ -454,6 +468,22 @@ export function useTrafficSimulation() {
     workerRef.current?.postMessage({ type: "incident", kind, edgeId } satisfies WorkerInMessage);
   }, []);
 
+  /** The player takes the wheel of the vehicle with this id (from the snapshot). */
+  const takeWheel = useCallback((id: number) => {
+    workerRef.current?.postMessage({ type: "drive", action: "take", id } satisfies WorkerInMessage);
+  }, []);
+
+  const releaseWheel = useCallback(() => {
+    workerRef.current?.postMessage({ type: "drive", action: "release", id: 0 } satisfies WorkerInMessage);
+  }, []);
+
+  /** Pedals (accel -1 brake, 0 coast, 1 throttle) and lane-change requests (-1 left, 1 right) while driving. */
+  const driveInput = useCallback((input: { accel?: -1 | 0 | 1; lane?: -1 | 0 | 1 }) => {
+    workerRef.current?.postMessage({ type: "driveInput", ...input } satisfies WorkerInMessage);
+  }, []);
+
+  const clearDriveResult = useCallback(() => setDriveResult(null), []);
+
   /** Sends a wrecker to an incident. */
   const dispatchWrecker = useCallback((incidentId: number) => {
     workerRef.current?.postMessage({ type: "dispatchWrecker", incidentId } satisfies WorkerInMessage);
@@ -475,6 +505,11 @@ export function useTrafficSimulation() {
     triggerCrash,
     triggerIncident,
     dispatchWrecker,
+    takeWheel,
+    releaseWheel,
+    driveInput,
+    driveResult,
+    clearDriveResult,
   };
 }
 

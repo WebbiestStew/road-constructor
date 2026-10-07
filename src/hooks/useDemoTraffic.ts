@@ -62,6 +62,7 @@ export function useDemoTraffic(network: NetworkSnapshot, active: boolean, visibl
         pedCrossings: msg.pedCrossings,
         ambulances: msg.ambulances,
         jakeBrakes: [],
+        drive: null,
         version: versionRef.current,
       };
 

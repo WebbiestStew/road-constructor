@@ -31,6 +31,126 @@ function getCtx(): AudioContext | null {
   return ctx;
 }
 
+// ---------------------------------------------------------------------------
+// The mixer. Every sound goes through one of three group buses (effects: the interface chimes and thumps; ambience:
+// traffic, engines, rain, road; alerts: sirens, crossing beeps, warning honks), then a master gain and a limiter, so
+// layering many loops never clips and the player can balance the groups. Levels are remembered in this browser.
+// ---------------------------------------------------------------------------
+
+export type SoundGroup = "effects" | "ambience" | "alerts";
+export type MixLevels = Record<SoundGroup | "master", number>;
+
+const MIX_KEY = "road-constructor:mix:v1";
+const DEFAULT_MIX: MixLevels = { master: 1, effects: 1, ambience: 1, alerts: 1 };
+
+function loadMix(): MixLevels {
+  const mix = { ...DEFAULT_MIX };
+  if (typeof window === "undefined") return mix;
+  try {
+    const raw = window.localStorage.getItem(MIX_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<MixLevels>;
+      for (const k of Object.keys(mix) as (keyof MixLevels)[]) {
+        const v = p[k];
+        if (typeof v === "number" && Number.isFinite(v)) mix[k] = Math.min(1.5, Math.max(0, v));
+      }
+    }
+  } catch {
+    // unreadable: defaults
+  }
+  return mix;
+}
+
+let mix: MixLevels = loadMix();
+const mixListeners = new Set<() => void>();
+
+interface Mixer {
+  master: GainNode;
+  groups: Record<SoundGroup, GainNode>;
+}
+let mixer: Mixer | null = null;
+/** How far the ambience is pushed down while an alert is sounding (1 = not at all), easing back after. */
+let ambienceDuck = 1;
+let duckTimer: ReturnType<typeof setTimeout> | null = null;
+
+function getMixer(audio: AudioContext): Mixer {
+  if (mixer) return mixer;
+  const master = audio.createGain();
+  // A limiter in front of the speakers: loud overlaps are squeezed instead of clipping.
+  const limiter = audio.createDynamicsCompressor();
+  limiter.threshold.value = -14;
+  limiter.knee.value = 10;
+  limiter.ratio.value = 8;
+  limiter.attack.value = 0.004;
+  limiter.release.value = 0.22;
+  master.connect(limiter);
+  limiter.connect(audio.destination);
+  const groups = {} as Record<SoundGroup, GainNode>;
+  for (const g of ["effects", "ambience", "alerts"] as SoundGroup[]) {
+    groups[g] = audio.createGain();
+    groups[g].connect(master);
+  }
+  mixer = { master, groups };
+  applyMix();
+  return mixer;
+}
+
+/** The bus a sound plays into. */
+function bus(audio: AudioContext, group: SoundGroup): AudioNode {
+  return getMixer(audio).groups[group];
+}
+
+function applyMix(): void {
+  if (!mixer || !ctx) return;
+  const now = ctx.currentTime;
+  mixer.master.gain.setTargetAtTime(muted ? 0 : mix.master, now, 0.05);
+  mixer.groups.effects.gain.setTargetAtTime(mix.effects, now, 0.05);
+  mixer.groups.ambience.gain.setTargetAtTime(mix.ambience * ambienceDuck, now, 0.12);
+  mixer.groups.alerts.gain.setTargetAtTime(mix.alerts, now, 0.05);
+}
+
+export function getMixLevels(): MixLevels {
+  return mix;
+}
+
+export function setMixLevel(key: keyof MixLevels, value: number): void {
+  mix = { ...mix, [key]: Math.min(1.5, Math.max(0, value)) };
+  try {
+    window.localStorage.setItem(MIX_KEY, JSON.stringify(mix));
+  } catch {
+    // ignore
+  }
+  applyMix();
+  mixListeners.forEach((l) => l());
+}
+
+export function resetMix(): void {
+  mix = { ...DEFAULT_MIX };
+  try {
+    window.localStorage.removeItem(MIX_KEY);
+  } catch {
+    // ignore
+  }
+  applyMix();
+  mixListeners.forEach((l) => l());
+}
+
+export function subscribeMix(listener: () => void): () => void {
+  mixListeners.add(listener);
+  return () => mixListeners.delete(listener);
+}
+
+/** Pushes the ambience down to `depth` of its level for `holdS` seconds (an alert is sounding), then eases it back. */
+function duckAmbience(depth: number, holdS: number): void {
+  ambienceDuck = depth;
+  applyMix();
+  if (duckTimer) clearTimeout(duckTimer);
+  duckTimer = setTimeout(() => {
+    ambienceDuck = wantSiren ? SIREN_DUCK : 1;
+    applyMix();
+  }, holdS * 1000);
+}
+
 export function isMuted(): boolean {
   return muted;
 }
@@ -51,6 +171,7 @@ export function setMuted(value: boolean): void {
   }
   if (fx) applyFxLevels();
   if (road) applyRoadLevels();
+  applyMix();
   for (const l of listeners) l(muted);
 }
 
@@ -63,7 +184,7 @@ export function subscribeMuted(listener: (muted: boolean) => void): () => void {
   return () => listeners.delete(listener);
 }
 
-function tone(freq: number, startOffsetS: number, durationS: number, peakGain: number, type: OscillatorType = "sine") {
+function tone(freq: number, startOffsetS: number, durationS: number, peakGain: number, type: OscillatorType = "sine", group: SoundGroup = "effects") {
   const audio = getCtx();
   if (!audio) return;
   const osc = audio.createOscillator();
@@ -75,12 +196,12 @@ function tone(freq: number, startOffsetS: number, durationS: number, peakGain: n
   gain.gain.linearRampToValueAtTime(peakGain, start + 0.008);
   gain.gain.exponentialRampToValueAtTime(0.0001, start + durationS);
   osc.connect(gain);
-  gain.connect(audio.destination);
+  gain.connect(bus(audio, group));
   osc.start(start);
   osc.stop(start + durationS + 0.02);
 }
 
-function noiseBurst(durationS: number, peakGain: number, filterFreq: number) {
+function noiseBurst(durationS: number, peakGain: number, filterFreq: number, group: SoundGroup = "effects", filterType: BiquadFilterType = "lowpass") {
   const audio = getCtx();
   if (!audio) return;
   const sampleCount = Math.max(1, Math.floor(audio.sampleRate * durationS));
@@ -91,7 +212,7 @@ function noiseBurst(durationS: number, peakGain: number, filterFreq: number) {
   const source = audio.createBufferSource();
   source.buffer = buffer;
   const filter = audio.createBiquadFilter();
-  filter.type = "lowpass";
+  filter.type = filterType;
   filter.frequency.value = filterFreq;
   const gain = audio.createGain();
   const start = audio.currentTime;
@@ -100,7 +221,7 @@ function noiseBurst(durationS: number, peakGain: number, filterFreq: number) {
 
   source.connect(filter);
   filter.connect(gain);
-  gain.connect(audio.destination);
+  gain.connect(bus(audio, group));
   source.start(start);
   source.stop(start + durationS + 0.02);
 }
@@ -153,8 +274,8 @@ export function playDrawWhoosh(): void {
 /** A low, brief double-honk when a road segment breaks down to Level of Service F. */
 export function playGridlockHonk(): void {
   if (muted) return;
-  tone(240, 0, 0.14, 0.07, "sawtooth");
-  tone(190, 0.16, 0.16, 0.07, "sawtooth");
+  tone(240, 0, 0.14, 0.07, "sawtooth", "alerts");
+  tone(190, 0.16, 0.16, 0.07, "sawtooth", "alerts");
 }
 
 /** A quick double clack-clack when a vehicle rolls over a bridge expansion joint. `volume` (0-1) is how near the listener is. */
@@ -204,7 +325,7 @@ function ensureAmbience(): AmbienceGraph | null {
   humGain.gain.value = 0;
   humSource.connect(humFilter);
   humFilter.connect(humGain);
-  humGain.connect(audio.destination);
+  humGain.connect(bus(audio, "ambience"));
   humSource.start();
 
   // Close-up engine buzz: a detuned pair of low sawtooth oscillators.
@@ -214,7 +335,7 @@ function ensureAmbience(): AmbienceGraph | null {
   engineFilter.type = "lowpass";
   engineFilter.frequency.value = 480;
   engineFilter.connect(engineGain);
-  engineGain.connect(audio.destination);
+  engineGain.connect(bus(audio, "ambience"));
   const engineOscillators: OscillatorNode[] = [];
   for (const detune of [-6, 6]) {
     const osc = audio.createOscillator();
@@ -237,7 +358,7 @@ function ensureAmbience(): AmbienceGraph | null {
   rumbleFilter.type = "lowpass";
   rumbleFilter.frequency.value = 150;
   rumbleFilter.connect(rumbleGain);
-  rumbleGain.connect(audio.destination);
+  rumbleGain.connect(bus(audio, "ambience"));
   const rumbleOsc = audio.createOscillator();
   rumbleOsc.type = "sawtooth";
   rumbleOsc.frequency.value = 38;
@@ -310,6 +431,7 @@ interface FxGraph {
 let fx: FxGraph | null = null;
 let wantRain = false;
 let wantSiren = false;
+const SIREN_DUCK = 0.65;
 
 function applyFxLevels(): void {
   const audio = getCtx();
@@ -317,6 +439,9 @@ function applyFxLevels(): void {
   const now = audio.currentTime;
   fx.rainGain.gain.cancelScheduledValues(now);
   fx.sirenGain.gain.cancelScheduledValues(now);
+  // An ambulance wailing pushes the rest of the soundscape down so it can be heard.
+  ambienceDuck = wantSiren ? SIREN_DUCK : 1;
+  applyMix();
   fx.rainGain.gain.linearRampToValueAtTime(!muted && wantRain ? 0.05 : 0, now + 0.8);
   fx.sirenGain.gain.linearRampToValueAtTime(!muted && wantSiren ? 0.03 : 0, now + 0.15);
 }
@@ -342,7 +467,7 @@ function ensureFx(): FxGraph | null {
   rainGain.gain.value = 0;
   rainSrc.connect(rainFilter);
   rainFilter.connect(rainGain);
-  rainGain.connect(audio.destination);
+  rainGain.connect(bus(audio, "ambience"));
   rainSrc.start();
 
   // Siren: a tone whose pitch swings up and down, driven by a slow oscillator.
@@ -358,7 +483,7 @@ function ensureFx(): FxGraph | null {
   const sirenGain = audio.createGain();
   sirenGain.gain.value = 0;
   sirenOsc.connect(sirenGain);
-  sirenGain.connect(audio.destination);
+  sirenGain.connect(bus(audio, "alerts"));
   sirenOsc.start();
   lfo.start();
 
@@ -385,8 +510,8 @@ export function setSirenSound(on: boolean): void {
 /** A soft double beep for a pedestrian crossing signal. */
 export function playCrossingBeep(): void {
   if (muted) return;
-  tone(1040, 0, 0.07, 0.035, "square");
-  tone(1040, 0.12, 0.07, 0.035, "square");
+  tone(1040, 0, 0.07, 0.035, "square", "alerts");
+  tone(1040, 0.12, 0.07, 0.035, "square", "alerts");
 }
 
 // ---------------------------------------------------------------------------
@@ -429,7 +554,7 @@ function ensureRoad(): RoadGraph | null {
   roarGain.gain.value = 0;
   src.connect(roarFilter);
   roarFilter.connect(roarGain);
-  roarGain.connect(audio.destination);
+  roarGain.connect(bus(audio, "ambience"));
   src.start();
 
   // Engine brake: a low sawtooth chopped by a fast tremolo, which is what makes it a "brrrrap" and not a hum.
@@ -453,7 +578,7 @@ function ensureRoad(): RoadGraph | null {
   jakeOsc.connect(jakeFilter);
   jakeFilter.connect(chop);
   chop.connect(jakeGain);
-  jakeGain.connect(audio.destination);
+  jakeGain.connect(bus(audio, "ambience"));
   jakeOsc.start();
   lfo.start();
 
@@ -492,7 +617,7 @@ function ensureRoad(): RoadGraph | null {
   thumpSrc.connect(thumpFilter);
   thumpFilter.connect(gate);
   gate.connect(thumpGain);
-  thumpGain.connect(audio.destination);
+  thumpGain.connect(bus(audio, "ambience"));
   thumpSrc.start();
 
   road = { roarGain, roarFilter, jakeGain, thumpGain, thumpClocks };
@@ -549,6 +674,7 @@ export function stopRoadSounds(): void {
   jakeLevel = 0;
   concreteRoad = false;
   if (road) applyRoadLevels();
+  setPlayerEngine(false);
 }
 
 // ---------------------------------------------------------------------------
@@ -579,9 +705,10 @@ export function playAlertSiren(): void {
   filter.frequency.value = 2200;
   osc.connect(filter);
   filter.connect(gain);
-  gain.connect(audio.destination);
+  gain.connect(bus(audio, "alerts"));
   osc.start(now);
   osc.stop(now + 1.9);
+  duckAmbience(0.55, 2.2);
 }
 
 /** A bright rising arpeggio that climbs a little higher with each combo in a row. */
@@ -623,7 +750,7 @@ function honkOnce(level: number): void {
     osc.stop(now + dur + 0.08);
   }
   filter.connect(gain);
-  gain.connect(audio.destination);
+  gain.connect(bus(audio, "ambience"));
 }
 
 function scheduleHonk(): void {
@@ -640,4 +767,207 @@ function scheduleHonk(): void {
 export function setHonkChorus(level: number): void {
   honkLevel = Math.min(1, Math.max(0, level));
   if (honkLevel > 0.03 && honkTimer === null && !muted) honkTimer = setTimeout(scheduleHonk, 150);
+}
+
+// ---------------------------------------------------------------------------
+// Driving: the player's own engine (it changes gear as the speed climbs, so the pitch climbs and drops), tyre squeal on
+// a hard stop and the indicator's tick while a lane change is waiting for a gap.
+// ---------------------------------------------------------------------------
+
+interface PlayerEngine {
+  oscillators: OscillatorNode[];
+  filter: BiquadFilterNode;
+  gain: GainNode;
+  intakeGain: GainNode;
+}
+let playerEngine: PlayerEngine | null = null;
+
+function ensurePlayerEngine(): PlayerEngine | null {
+  const audio = getCtx();
+  if (!audio) return null;
+  if (playerEngine) return playerEngine;
+  const filter = audio.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 500;
+  const gain = audio.createGain();
+  gain.gain.value = 0;
+  filter.connect(gain);
+  gain.connect(bus(audio, "ambience"));
+  const oscillators: OscillatorNode[] = [];
+  // two sawtooths a few cents apart for the body, and a square an octave down for the growl
+  for (const [type, detune, octave] of [["sawtooth", -7, 1], ["sawtooth", 7, 1], ["square", 0, 0.5]] as [OscillatorType, number, number][]) {
+    const osc = audio.createOscillator();
+    osc.type = type;
+    osc.frequency.value = 40 * octave;
+    osc.detune.value = detune;
+    const level = audio.createGain();
+    level.gain.value = octave === 1 ? 0.5 : 0.28;
+    osc.connect(level);
+    level.connect(filter);
+    osc.start();
+    oscillators.push(osc);
+  }
+  // intake hiss under load
+  const len = audio.sampleRate;
+  const buf = audio.createBuffer(1, len, audio.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const src = audio.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  const bp = audio.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = 1400;
+  bp.Q.value = 0.6;
+  const intakeGain = audio.createGain();
+  intakeGain.gain.value = 0;
+  src.connect(bp);
+  bp.connect(intakeGain);
+  intakeGain.connect(bus(audio, "ambience"));
+  src.start();
+  playerEngine = { oscillators, filter, gain, intakeGain };
+  return playerEngine;
+}
+
+/** Top speed (mph) of each gear: the engine note climbs through a gear's range and drops when the next one is engaged. */
+const GEAR_TOP_MPH = [13, 25, 38, 52, 68, 140];
+
+/** Engine revs for a speed: 0.28 (just engaged) to 1 (top of the gear). Pure, for tests. */
+export function engineRevs(mph: number): { gear: number; revs: number } {
+  let gear = GEAR_TOP_MPH.findIndex((top) => mph < top);
+  if (gear < 0) gear = GEAR_TOP_MPH.length - 1;
+  const low = gear === 0 ? 0 : GEAR_TOP_MPH[gear - 1] * 0.62;
+  const t = Math.min(1, Math.max(0, (mph - low) / (GEAR_TOP_MPH[gear] - low)));
+  return { gear: gear + 1, revs: 0.28 + 0.72 * t };
+}
+
+/** The player's engine: on while driving, at `mph`, with `throttle` -1 (braking) to 1. Call every frame; `on: false` fades it out. */
+export function setPlayerEngine(on: boolean, mph = 0, throttle = 0): void {
+  if (!on && !playerEngine) return;
+  const e = ensurePlayerEngine();
+  const audio = getCtx();
+  if (!e || !audio) return;
+  const now = audio.currentTime;
+  if (!on || muted) {
+    e.gain.gain.linearRampToValueAtTime(0, now + 0.25);
+    e.intakeGain.gain.linearRampToValueAtTime(0, now + 0.25);
+    return;
+  }
+  const { revs } = engineRevs(mph);
+  const load = Math.max(0, throttle);
+  const freq = 36 + revs * 88;
+  for (const osc of e.oscillators) osc.frequency.linearRampToValueAtTime(freq * (osc.type === "square" ? 0.5 : 1), now + 0.06);
+  e.filter.frequency.linearRampToValueAtTime(380 + revs * 420 + load * 900, now + 0.1);
+  e.gain.gain.linearRampToValueAtTime(0.035 + revs * 0.02 + load * 0.035, now + 0.1);
+  e.intakeGain.gain.linearRampToValueAtTime(load * 0.02 * revs, now + 0.1);
+}
+
+/** Tyres squealing on a hard stop. */
+export function playBrakeSqueal(): void {
+  if (muted) return;
+  noiseBurst(0.45, 0.06, 2600, "alerts", "bandpass");
+}
+
+/** The indicator's tick, while a lane change waits for a gap. */
+export function playIndicatorTick(): void {
+  if (muted) return;
+  tone(1650, 0, 0.018, 0.03, "square", "alerts");
+}
+
+// ---------------------------------------------------------------------------
+// Sound check: plays one of the game's sounds on demand, so the mix can be balanced by ear in the settings.
+// ---------------------------------------------------------------------------
+
+export const SOUND_CHECKS: { id: string; label: string; group: SoundGroup }[] = [
+  { id: "place", label: "Place a road", group: "effects" },
+  { id: "demolish", label: "Demolish", group: "effects" },
+  { id: "chime", label: "Goal met", group: "effects" },
+  { id: "fanfare", label: "Level won", group: "effects" },
+  { id: "combo", label: "Flow combo", group: "effects" },
+  { id: "traffic", label: "Traffic and engines", group: "ambience" },
+  { id: "rain", label: "Rain on the road", group: "ambience" },
+  { id: "concrete", label: "Concrete slabs", group: "ambience" },
+  { id: "horns", label: "Horns", group: "ambience" },
+  { id: "drive", label: "Your engine", group: "ambience" },
+  { id: "siren", label: "Alert siren", group: "alerts" },
+  { id: "ambulance", label: "Ambulance", group: "alerts" },
+  { id: "crossing", label: "Crossing beeps", group: "alerts" },
+  { id: "squeal", label: "Hard stop", group: "alerts" },
+];
+
+/** Plays a sound check; looping layers run for a few seconds and then stop. Returns how long it runs (ms). */
+export function playSoundCheck(id: string): number {
+  const stopAfter = (ms: number, stop: () => void) => {
+    setTimeout(stop, ms);
+    return ms;
+  };
+  switch (id) {
+    case "place":
+      playPlaceRoad();
+      return 400;
+    case "demolish":
+      playDemolish();
+      return 500;
+    case "chime":
+      playSuccessChime();
+      return 600;
+    case "fanfare":
+      playVictoryFanfare();
+      return 900;
+    case "combo":
+      playComboChime(3);
+      return 700;
+    case "traffic": {
+      updateAmbience(0.9);
+      updateEngineDynamics(45);
+      setRoadRoar(0.9, false);
+      return stopAfter(3200, () => {
+        updateAmbience(0);
+        updateEngineDynamics(0);
+        setRoadRoar(0, false);
+      });
+    }
+    case "rain":
+      setRainSound(true);
+      setRoadRoar(0.9, true);
+      return stopAfter(3200, () => {
+        setRainSound(false);
+        setRoadRoar(0, false);
+      });
+    case "concrete":
+      setConcreteRoad(true, 60);
+      setRoadRoar(0.9, false);
+      return stopAfter(3200, () => {
+        setConcreteRoad(false, 0);
+        setRoadRoar(0, false);
+      });
+    case "horns":
+      setHonkChorus(0.9);
+      return stopAfter(3400, () => setHonkChorus(0));
+    case "drive": {
+      let mph = 0;
+      const timer = setInterval(() => {
+        mph = Math.min(70, mph + 2.6);
+        setPlayerEngine(true, mph, 1);
+      }, 100);
+      return stopAfter(3000, () => {
+        clearInterval(timer);
+        setPlayerEngine(false);
+      });
+    }
+    case "siren":
+      playAlertSiren();
+      return 2000;
+    case "ambulance":
+      setSirenSound(true);
+      return stopAfter(2800, () => setSirenSound(false));
+    case "crossing":
+      playCrossingBeep();
+      return 400;
+    case "squeal":
+      playBrakeSqueal();
+      return 600;
+    default:
+      return 0;
+  }
 }

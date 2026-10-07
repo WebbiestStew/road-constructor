@@ -179,6 +179,50 @@ export interface TransitLine {
   hold?: boolean;
 }
 
+/** What the HUD shows while the player drives a vehicle. */
+export interface DriveView {
+  id: number;
+  kind: VehicleKind;
+  speedMph: number;
+  /** The speed the driver is asking for with the pedals. */
+  targetMph: number;
+  limitMph: number;
+  laneIndex: number;
+  lanes: number;
+  /** What the route does at the end of this road. */
+  nextMove: "left" | "straight" | "right" | "end";
+  toJunctionFt: number;
+  /** Whether the current lane can make that move, and which lanes can (null: any). */
+  laneOk: boolean;
+  laneAllowed: boolean[] | null;
+  /** Distance to a stop line (red light, crossing, bus stop, a yield) ahead, or null. */
+  stopAheadFt: number | null;
+  streetName: string;
+  elapsedS: number;
+  idealS: number;
+  hardBrakes: number;
+  speedingS: number;
+  /** A lane change was asked for and is waiting for a gap / was just refused. */
+  laneChangePending: boolean;
+  laneBlocked: boolean;
+  passengers: number;
+  /** -1 braking, 0 coasting, 1 on the throttle. */
+  thrusting: number;
+}
+
+/** How a drive ended. */
+export interface DriveResult {
+  arrived: boolean;
+  elapsedS: number;
+  idealS: number;
+  distanceFt: number;
+  hardBrakes: number;
+  speedingS: number;
+  laneChanges: number;
+  /** Out of 100: speeding and hard braking cost points. */
+  score: number;
+}
+
 /** How the run's bus service is going. Headways are sim-seconds between consecutive line buses boarding at the same stop. */
 export interface TransitStats {
   /** Stops served by a bus on one of the player's lines. */
@@ -432,6 +476,10 @@ export type WorkerInMessage =
   | { type: "setTransit"; lines: TransitLine[] }
   /** The weather the player picked. Scripted weather events override it while they last. */
   | { type: "setWeather"; weather: Weather }
+  /** The player takes the wheel of a vehicle (by id, from the snapshot) or lets go of it. */
+  | { type: "drive"; action: "take" | "release"; id: number }
+  /** Pedals and lane changes while driving: accel -1 brake, 0 coast, 1 throttle; lane -1 left, 1 right (a request, carried out when there is a gap). */
+  | { type: "driveInput"; accel?: -1 | 0 | 1; lane?: -1 | 0 | 1 }
   /** How dark it is (0 day, 0.5 dusk, 1 night). Drivers are more careful on unlit roads, and see people late. */
   | { type: "setDarkness"; level: number }
   /** Turns the 24-hour demand cycle on or off: demand follows rush hours and the clock starts at `startHour`, one day lasting `dayLengthS` sim-seconds. */
@@ -568,6 +616,9 @@ export type WorkerOutMessage =
       /** Car-seconds spent in toll express lanes since the run began (each pays a toll). */
       expressVehicleS: number;
       transit: TransitStats;
+      /** The vehicle the player is driving, if any, and how the last drive ended. */
+      drive: DriveView | null;
+      driveResult: DriveResult | null;
       /** Cumulative count of vehicles that actually completed their route (excludes gridlock-forced despawns) since the network was last (re)loaded. */
       completedTripsTotal: number;
       /** The heavy per-edge statistics. Only present on ticks where they were recomputed (about 5 per second); the main thread keeps the last set. */

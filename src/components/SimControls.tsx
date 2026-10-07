@@ -36,6 +36,9 @@ import SettingsMenu from "./hud/SettingsMenu";
 import KeyboardRoads from "./KeyboardRoads";
 import ConditionsChip from "./hud/ConditionsChip";
 import DayClock from "./hud/DayClock";
+import DriveHud from "./hud/DriveHud";
+import { useEditorStore } from "@/state/editorStore";
+import WindshieldFx from "./hud/WindshieldFx";
 import PhotoOverlay from "./hud/PhotoOverlay";
 import CinematicOverlay from "./hud/CinematicOverlay";
 import { useFlyover } from "@/lib/cinematic";
@@ -51,6 +54,8 @@ export default function SimControls({
 }) {
   const photo = usePhotoMode();
   const flyover = useFlyover();
+  // Behind the wheel the road tools and their hints step aside, so the driving HUD has the screen.
+  const driving = useEditorStore((s) => s.drivingId !== null);
   // Photo mode: a clean frame. Toasts stay (for "saved"); everything else steps aside.
   if (photo) {
     return (
@@ -69,12 +74,12 @@ export default function SimControls({
       <TopBar sim={sim} />
       <BudgetBar />
       <PlayButton sim={sim} />
-      <ManagerRail />
+      {!driving && <ManagerRail />}
       <PausedBanner sim={sim} />
-      <ToolDock />
-      <InfoPanel sim={sim} />
-      <OnboardingChecklist />
-      <HintBar />
+      {!driving && <ToolDock />}
+      {!driving && <InfoPanel sim={sim} />}
+      {!driving && <OnboardingChecklist />}
+      {!driving && <HintBar />}
       <BuildWarningToast />
       <Minimap />
       <Confetti sim={sim} />
@@ -88,10 +93,12 @@ export default function SimControls({
       <ScriptedEventAnnouncer runner={scenarioRunner} />
       <PanicBanner />
       <FlowComboBanner sim={sim} />
-      <CoachBar />
-      <GuidedTour sim={sim} />
+      {!driving && <CoachBar />}
+      {!driving && <GuidedTour sim={sim} />}
       <DayClock sim={sim} />
       <ConditionsChip sim={sim} />
+      <WindshieldFx sim={sim} />
+      <DriveHud sim={sim} />
       <PlaceCredit />
       <SettingsMenu />
       <KeyboardRoads />

@@ -139,7 +139,7 @@ export function WorldLabelLayer() {
     if (lastView) projectLabels(lastView.camera, lastView.width, lastView.height);
   });
   return (
-    <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+    <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 5 }}>
       {list.map((entry) => (
         <div
           key={entry.id}

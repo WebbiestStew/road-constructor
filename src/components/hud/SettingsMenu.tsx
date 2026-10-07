@@ -12,7 +12,7 @@ import {
   type Quality,
 } from "@/lib/quality";
 import { setPref, usePrefs } from "@/lib/prefs";
-import { isMuted, subscribeMuted, toggleMuted } from "@/lib/sound";
+import { SOUND_CHECKS, getMixLevels, isMuted, playSoundCheck, resetMix, setMixLevel, subscribeMix, subscribeMuted, toggleMuted, type MixLevels } from "@/lib/sound";
 import { setSettingsOpen, useSettingsOpen } from "@/lib/settingsMenu";
 
 const PRESETS: { id: Quality; name: string; blurb: string; emoji: string }[] = [
@@ -162,19 +162,69 @@ function GraphicsSection() {
   );
 }
 
+const MIX_CONTROLS: { key: keyof MixLevels; label: string; hint: string }[] = [
+  { key: "master", label: "Master", hint: "Everything, through a limiter so loud moments never distort." },
+  { key: "effects", label: "Interface and music cues", hint: "Placing and demolishing roads, goals, fanfares, combos." },
+  { key: "ambience", label: "Traffic and weather", hint: "Engines, tyre roar, rain, concrete, horns, your own engine. It dips when a siren sounds." },
+  { key: "alerts", label: "Sirens and warnings", hint: "Ambulances, warning banners, crossing beeps, tyre squeal." },
+];
+
 function SoundSection() {
   const [muted, setMuted] = useState(false);
+  const [mix, setMix] = useState<MixLevels>(() => getMixLevels());
+  const [playing, setPlaying] = useState<string | null>(null);
   useEffect(() => {
-    const raf = requestAnimationFrame(() => setMuted(isMuted()));
-    const off = subscribeMuted(setMuted);
+    const raf = requestAnimationFrame(() => {
+      setMuted(isMuted());
+      setMix(getMixLevels());
+    });
+    const offMute = subscribeMuted(setMuted);
+    const offMix = subscribeMix(() => setMix(getMixLevels()));
     return () => {
       cancelAnimationFrame(raf);
-      off();
+      offMute();
+      offMix();
     };
   }, []);
+  const check = (id: string) => {
+    const ms = playSoundCheck(id);
+    setPlaying(id);
+    window.setTimeout(() => setPlaying((p) => (p === id ? null : p)), ms);
+  };
   return (
     <Section title="Sound">
       <Toggle label="Sound on" hint="Traffic hum, engines, rain, sirens and the little chimes." on={!muted} onChange={() => toggleMuted()} />
+      <div className={`flex flex-col gap-2 rounded-2xl bg-black/[0.03] px-3 py-2.5 ${muted ? "opacity-50" : ""}`}>
+        {MIX_CONTROLS.map((c) => (
+          <label key={c.key} className="flex flex-col gap-0.5">
+            <span className="flex items-center justify-between text-[12px] font-bold text-[#241b3d]">
+              {c.label}
+              <span className="tabular-nums text-zinc-500">{Math.round(mix[c.key] * 100)}%</span>
+            </span>
+            <input type="range" min={0} max={1.5} step={0.05} value={mix[c.key]} onChange={(e) => setMixLevel(c.key, Number(e.target.value))} className="accent-violet-600" aria-label={`${c.label} volume`} />
+            <span className="text-[10.5px] font-semibold leading-snug text-zinc-500">{c.hint}</span>
+          </label>
+        ))}
+        <div className="flex flex-col gap-1.5 pt-1">
+          <span className="text-[10.5px] font-extrabold uppercase tracking-wide text-zinc-400">Sound check</span>
+          <div className="flex flex-wrap gap-1.5">
+            {SOUND_CHECKS.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                disabled={muted}
+                onClick={() => check(c.id)}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition active:scale-95 disabled:cursor-not-allowed ${playing === c.id ? "bg-violet-600 text-white" : "bg-white text-zinc-700 shadow-sm hover:bg-violet-50"}`}
+              >
+                {playing === c.id ? "🔊" : "▶"} {c.label}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={resetMix} className="self-start rounded-lg px-2 py-1 text-[11px] font-bold text-violet-700 hover:bg-violet-50">
+            Reset the mix
+          </button>
+        </div>
+      </div>
     </Section>
   );
 }

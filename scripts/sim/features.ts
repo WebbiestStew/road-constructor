@@ -180,6 +180,31 @@ async function transitCase(hold: boolean, lines: 1 | 2 = 1) {
   process.exit(0);
 }
 
+/** Takes the wheel of a car at 30 s, floors it, asks for lane changes, and reports how the drive went. */
+async function driveCase(mode: "flat" | "careful") {
+  const level = getScenarioById("harbor-drive")!;
+  const sim = await createSim();
+  sim.load(cloneNetwork(level.startingNetwork), 1337, HARNESS_SPEED);
+  const dbg = (globalThis as unknown as { __simDebug: { state: () => { vehicles: Map<number, { id: number; kind: string; routeEdgeIds: string[]; routeIndex: number; distanceAlongEdge: number; speed: number }> } } }).__simDebug;
+  await sim.runUntil(30);
+  const pick = [...dbg.state().vehicles.values()].filter((v) => v.kind === "car" && v.routeEdgeIds.length - v.routeIndex >= 3).sort((a, b) => b.routeEdgeIds.length - b.routeIndex - (a.routeEdgeIds.length - a.routeIndex))[0];
+  if (!pick) throw new Error("no car to drive");
+  sim.send({ type: "drive", action: "take", id: pick.id });
+  sim.send({ type: "driveInput", accel: mode === "flat" ? 1 : 0 });
+  const views: string[] = [];
+  let result: Record<string, unknown> | null = null;
+  for (let t = 32; t <= 260 && !result; t += 2) {
+    await sim.runUntil(t);
+    const last = g.__simLast as { drive?: Record<string, unknown> | null; driveResult?: Record<string, unknown> | null };
+    if (t % 10 === 0 && last.drive) views.push(`${t}:${Math.round(last.drive.speedMph as number)}/${last.drive.limitMph}mph lane${last.drive.laneIndex}/${last.drive.lanes} next=${last.drive.nextMove}`);
+    if (t === 40) sim.send({ type: "driveInput", lane: 1 });
+    if (t === 60) sim.send({ type: "driveInput", lane: -1 });
+    if (last.driveResult) result = last.driveResult;
+  }
+  console.log(JSON.stringify({ mode, car: pick.id, views: views.join(" | "), result }));
+  process.exit(0);
+}
+
 /** Left turns banned on every road that ends at a signal in Midtown: nobody turns left, and the city still works. */
 async function banCase(turn: "none" | "left") {
   const level = getScenarioById("midtown")!;
@@ -196,6 +221,7 @@ async function banCase(turn: "none" | "left") {
 }
 
 async function main() {
+  if (which.startsWith("drive:")) return driveCase(which.split(":")[1] as "flat" | "careful");
   if (which === "hov" || which === "express" || which === "lanes-none") return laneCase(which === "lanes-none" ? "none" : which);
   if (which.startsWith("transit:")) return transitCase(which.split(":")[1] === "hold", which.split(":")[2] === "2" ? 2 : 1);
   if (which === "ban:left" || which === "ban:none") return banCase(which.split(":")[1] as "left" | "none");
