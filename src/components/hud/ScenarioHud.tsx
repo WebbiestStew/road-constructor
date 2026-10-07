@@ -392,6 +392,7 @@ function ResultsModal({ runner }: { runner: UseScenarioRunnerReturn }) {
                   stars,
                   score: results.score,
                   summary: results.summaryLines[0] ?? "",
+                  highlights: results.highlights,
                   actions: results.recording ?? [],
                 });
                 setReplaySaved(true);

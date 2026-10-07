@@ -13,6 +13,14 @@ import type { EdgePatch, EdgeSpec, JunctionControl, LoggedAction, NetworkSnapsho
 export const MAX_REPLAYS = 12;
 const MAX_ACTIONS = 20000;
 
+/** A moment of a run worth jumping to: noted live, from what the stats showed. */
+export interface Highlight {
+  /** Sim time, seconds into the run. */
+  at: number;
+  kind: "combo" | "clear" | "ambulance" | "crash" | "jam";
+  label: string;
+}
+
 export interface ReplayMeta {
   id: string;
   name: string;
@@ -25,6 +33,8 @@ export interface ReplayMeta {
   score: number | null;
   summary: string;
   actionCount: number;
+  /** Moments to jump to, noted while the run was played. */
+  highlights?: Highlight[];
 }
 
 export interface ReplayRecord extends ReplayMeta {
@@ -150,9 +160,20 @@ export function validateReplay(raw: unknown): ReplayRecord | null {
     stars: Number.isFinite(m.stars) ? Math.min(3, Math.max(0, m.stars as number)) : 0,
     score: Number.isFinite(m.score) ? (m.score as number) : null,
     summary: String(m.summary ?? "").slice(0, 200),
+    highlights: validHighlights(m.highlights),
     actionCount: r.actions.length,
     actions: r.actions as LoggedAction[],
   };
+}
+
+function validHighlights(raw: unknown): Highlight[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const kinds = new Set(["combo", "clear", "ambulance", "crash", "jam"]);
+  const out: Highlight[] = [];
+  for (const h of raw.slice(0, 20) as Highlight[]) {
+    if (h && Number.isFinite(h.at) && h.at >= 0 && h.at < 7200 && kinds.has(h.kind) && typeof h.label === "string") out.push({ at: h.at, kind: h.kind, label: h.label.slice(0, 60) });
+  }
+  return out;
 }
 
 export async function parseReplayFile(file: File): Promise<ReplayRecord | null> {

@@ -5,6 +5,7 @@ import type { EdgeTrafficStats } from "./los";
 import { computeRoute } from "./network";
 import type { ServiceReport } from "@/lib/serviceReport";
 import type { RunPayout } from "@/lib/career";
+import type { Highlight } from "@/lib/replays";
 import { computeGradePercent, MAX_GRADE_PERCENT } from "./grade";
 
 /** A generous, JSON-safe stand-in for "infinite" budget in Sandbox Mode — plain `Infinity` doesn't survive JSON persistence. */
@@ -143,6 +144,8 @@ export interface ScenarioResult {
   payout?: RunPayout;
   /** The actions that shaped the run, for saving a replay of it. */
   recording?: LoggedAction[];
+  /** Moments of the run worth jumping to in its replay. */
+  highlights?: Highlight[];
 }
 
 function node(id: string, x: number, y: number, z: number): NodeSpec {

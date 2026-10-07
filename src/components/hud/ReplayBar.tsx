@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UseTrafficSimulationReturn } from "@/hooks/useTrafficSimulation";
 import { useEditorStore } from "@/state/editorStore";
 import { leaveReplay, restartReplay } from "@/lib/replayPlayer";
 import { startFlyover } from "@/lib/cinematic";
+import { recordClip } from "@/lib/photoMode";
+import { shareOrDownload } from "@/lib/shareCard";
+import { pushToast } from "@/lib/toast";
 
 const SPEEDS = [1, 2, 5, 10];
+const KIND_ICON: Record<string, string> = { combo: "🌊", clear: "🚧", ambulance: "🚑", crash: "💥", jam: "🚦" };
+/** How far ahead of a highlight the replay starts, so the lead-up is in the clip. */
+const LEAD_IN_S = 4;
+const CLIP_S = 8;
 
 function mmss(s: number): string {
   const t = Math.max(0, Math.round(s));
@@ -26,7 +33,40 @@ export default function ReplayBar({ sim }: { sim: UseTrafficSimulationReturn }) 
   const simTime = live ? sim.metrics.simTime : 0;
   const duration = replay?.meta.durationS ?? 0;
   const finished = !!replay && live && simTime >= duration - 0.2;
-  const { setRunning } = sim;
+  const { setRunning, setSpeedMultiplier } = sim;
+  // Jumping to a moment: play from the top (or on from here) at full speed until just before it, then at normal speed, and record if asked.
+  const [seek, setSeek] = useState<{ to: number; back: number; clip: boolean } | null>(null);
+  const clipping = useRef(false);
+  const handled = useRef<typeof seek>(null);
+
+  useEffect(() => {
+    if (!seek || !live || simTime < seek.to || handled.current === seek) return;
+    handled.current = seek;
+    const { back, clip } = seek;
+    requestAnimationFrame(() => setSeek(null));
+    setSpeedMultiplier(back);
+    if (clip && !clipping.current) {
+      clipping.current = true;
+      pushToast(`🎥 Recording ${CLIP_S} seconds…`, "info");
+      void recordClip(CLIP_S).then(async (result) => {
+        clipping.current = false;
+        if (!result) {
+          pushToast("This browser can't record clips. Try Chrome or Edge", "bad");
+          return;
+        }
+        const how = await shareOrDownload(result.blob, `road-constructor-highlight-${Date.now()}.${result.ext}`, "A moment from my run in Road Constructor");
+        pushToast(how === "shared" ? "🎥 Clip shared" : "🎥 Clip saved to your downloads", "good");
+      });
+    }
+  }, [seek, live, simTime, setSpeedMultiplier]);
+
+  const jump = (at: number, clip: boolean) => {
+    const to = Math.max(0, at - LEAD_IN_S);
+    if (!live || simTime > to) restartReplay(sim);
+    setSeek({ to, back: sim.speedMultiplier > 10 ? 1 : sim.speedMultiplier, clip });
+    setSpeedMultiplier(40);
+    setRunning(true);
+  };
 
   useEffect(() => {
     if (replay) advance(simTime);
@@ -95,11 +135,27 @@ export default function ReplayBar({ sim }: { sim: UseTrafficSimulationReturn }) 
           >
             🎬 Flyover
           </button>
+          {seek && <span className="text-[10.5px] font-bold text-violet-600">⏩ jumping…</span>}
           <span className="ml-auto text-[10.5px] font-semibold text-zinc-500">
             {meta.stars > 0 ? `${"★".repeat(meta.stars)}${"☆".repeat(3 - meta.stars)} · ` : ""}
             {meta.summary}
           </span>
         </div>
+        {meta.highlights && meta.highlights.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 border-t border-black/10 pt-1.5">
+            <span className="text-[10px] font-extrabold uppercase tracking-wide text-zinc-400">Highlights</span>
+            {meta.highlights.map((h) => (
+              <span key={`${h.at}-${h.kind}`} className="flex items-center overflow-hidden rounded-full bg-black/5 text-[11px] font-bold text-zinc-700">
+                <button type="button" onClick={() => jump(h.at, false)} title={`Jump to ${mmss(h.at)}`} className="px-2 py-0.5 hover:bg-black/10">
+                  {KIND_ICON[h.kind] ?? "⭐"} {mmss(h.at)} {h.label}
+                </button>
+                <button type="button" onClick={() => jump(h.at, true)} title={`Record an ${CLIP_S}-second clip of this`} aria-label="Record a clip" className="border-l border-black/10 px-1.5 py-0.5 hover:bg-black/10">
+                  🎥
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

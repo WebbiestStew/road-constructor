@@ -23,6 +23,7 @@ import { ftpsToMph } from "@/sim/types";
 import type { EdgeTrafficStats } from "@/sim/los";
 import { useEditorStore } from "@/state/editorStore";
 import { getScenarioById } from "@/sim/scenarios";
+import type { Highlight } from "@/lib/replays";
 import { useGraphics } from "@/lib/quality";
 
 export interface VehicleSnapshot {
@@ -155,6 +156,27 @@ const DEFAULT_SEED = 1337;
  * this hook watches that store's `mode` and pushes a full network resync to
  * the worker whenever Build -> Simulate is crossed.
  */
+/** Compares this tick's stats with the last and notes anything worth a replay's highlight reel. */
+function noteHighlights(h: { list: Highlight[]; prev: SimMetricsState | null; jam: { at: number; n: number } }, msg: Extract<WorkerOutMessage, { type: "tick" }>, problems: number) {
+  const prev = h.prev;
+  // a new run (the clock went back): start the reel again
+  if (prev && msg.simTime < prev.simTime) {
+    h.list = [];
+    h.jam = { at: 0, n: 0 };
+  }
+  const add = (kind: Highlight["kind"], label: string) => {
+    if (h.list.length >= 14 || h.list.some((x) => Math.abs(x.at - msg.simTime) < 6)) return;
+    h.list.push({ at: Math.round(msg.simTime * 10) / 10, kind, label });
+  };
+  if (prev && msg.simTime >= prev.simTime) {
+    if ((msg.combos ?? 0) > prev.combos) add("combo", `Flow combo #${msg.combos}`);
+    if (msg.crashes.cleared > prev.crashes.cleared) add("clear", `Crash cleared in ${Math.round(msg.crashes.lastClearS)}s`);
+    if (msg.emergency.completed > prev.emergency.completed && msg.emergency.lastIdealS > 0) add("ambulance", `Ambulance through at ×${(msg.emergency.lastResponseS / msg.emergency.lastIdealS).toFixed(1)}`);
+    if ((msg.riskCrashes ?? 0) > prev.riskCrashes) add("crash", "A driver's mistake");
+  }
+  if (problems > h.jam.n) h.jam = { at: msg.simTime, n: problems };
+}
+
 /** Hands the active level's scripted events (surges, breakdowns) to the worker, timed from the start of the run. */
 function postScenarioEvents(worker: Worker) {
   const id = useEditorStore.getState().activeScenarioId;
@@ -191,6 +213,8 @@ export function useTrafficSimulation() {
   const replayFloorRef = useRef(Infinity);
   /** The actions that have shaped the current run, for saving a replay of it (see worker: LOGGED_TYPES). */
   const recordingRef = useRef<{ runId: number; actions: LoggedAction[] }>({ runId: -1, actions: [] });
+  /** Moments of the current run worth jumping to, noted from the stats as they arrive, and what the last stats said. */
+  const highlightsRef = useRef<{ list: Highlight[]; prev: SimMetricsState | null; jam: { at: number; n: number } }>({ list: [], prev: null, jam: { at: 0, n: 0 } });
 
   const [metrics, setMetrics] = useState<SimMetricsState>(DEFAULT_METRICS);
   const [userPaused, setUserPaused] = useState(false);
@@ -279,6 +303,14 @@ export function useTrafficSimulation() {
         // paused), so a React state update happens exactly then — not on every 30 Hz snapshot.
         const stats = msg.stats;
         if (stats) {
+          noteHighlights(highlightsRef.current, msg, stats.problemEdgeIds.length);
+          highlightsRef.current.prev = {
+            simTime: msg.simTime,
+            combos: msg.combos ?? 0,
+            crashes: msg.crashes,
+            emergency: msg.emergency,
+            riskCrashes: msg.riskCrashes ?? 0,
+          } as SimMetricsState;
           setMetrics({
             activeCount: msg.activeCount,
             avgSpeedMph: ftpsToMph(msg.avgSpeedFtS),
@@ -549,6 +581,14 @@ export function useTrafficSimulation() {
 
   const clearDriveResult = useCallback(() => setDriveResult(null), []);
 
+  /** The moments of this run worth jumping to, in time order (with the worst jam added). */
+  const getHighlights = useCallback((): Highlight[] => {
+    const { list, jam } = highlightsRef.current;
+    const all = [...list];
+    if (jam.n >= 3) all.push({ at: Math.round(jam.at * 10) / 10, kind: "jam", label: `Worst jam: ${jam.n} roads at once` });
+    return all.sort((a, b) => a.at - b.at);
+  }, []);
+
   /** The actions that have shaped the current run so far: everything needed to play it back. */
   const getRecording = useCallback((): LoggedAction[] => recordingRef.current.actions.slice(), []);
 
@@ -606,6 +646,7 @@ export function useTrafficSimulation() {
     driveResult,
     clearDriveResult,
     getRecording,
+    getHighlights,
     playReplay,
     endReplay,
   };
